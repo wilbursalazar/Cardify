@@ -422,6 +422,7 @@ struct ContentView: View {
                         if cardMode == "habits" { savedHabitSnapshot = nil; setTracker(HabitTracker()); status = "New draft." }
                         else if cardMode == "todos" { savedTodoSnapshot = nil; setTodo(TodoList()); status = "New draft." }
                         else {
+                            editor.discardUndoHistory()
                             savedMarkdownSnapshot = nil
                             if let defaults = WorkflowPreference.defaults(for: newCardWorkflow) {
                                 storedIDMode = defaults.idMode.rawValue
@@ -542,6 +543,7 @@ struct ContentView: View {
                             }
                             let folderPath = notesFolder.isEmpty ? saveFolder : notesFolder
                             let folder = folderPath.isEmpty ? fileURL?.deletingLastPathComponent() : URL(fileURLWithPath: folderPath, isDirectory: true)
+                            editor.discardUndoHistory()
                             text = prepared; fileURL = nil; branchSaveFolder = folder; savedMarkdownSnapshot = nil; history.detach()
                             if idMode != .titleOnly && !ensureID() { return true }
                             status = info.role == .project ? "Enter the resolution in the title, then save." : "New debate card. Save it when ready."
@@ -816,6 +818,7 @@ struct ContentView: View {
             let newID: String?
             if idMode == .titleOnly { newID = nil }
             else { newID = CardIDs.newID(mode: idMode, existing: try BranchIDs.existing(in: scanRoots(for: parentURL))) }
+            editor.discardUndoHistory()
             text = CardMetadata.frontmatter(newID ?? "") + "# Idea\n\n\n\n## Related cards\n\n- [[\(link)]] — develops this card.\n"
             branchSaveFolder = parentURL.deletingLastPathComponent(); fileURL = nil; savedMarkdownSnapshot = nil; history.detach()
             status = "New idea created. Save it when ready."
@@ -841,6 +844,7 @@ struct ContentView: View {
             let link = root != nil && path.hasPrefix(root! + "/") ? String(path.dropFirst(root!.count + 1)) : parentURL.deletingPathExtension().lastPathComponent
             guard !link.contains(where: { "[]|#^\n\r".contains($0) }) else { status = "The parent filename cannot be used in an Obsidian link."; return }
             let relation = continuation ? "continues this card" : "branches from this card"
+            editor.discardUndoHistory()
             text = CardMetadata.frontmatter(childID) + "# \n\nRelated: [[\(link)]] — \(relation).\n"
             branchSaveFolder = parentURL.deletingLastPathComponent(); fileURL = nil; savedMarkdownSnapshot = nil; history.detach()
             status = "\(continuation ? "Continuation" : "Branch") \(childID) created. The parent is unchanged."
@@ -886,7 +890,7 @@ struct ContentView: View {
             }
         }
         if append { text += (text.isEmpty ? "" : "\n\n") + content }
-        else { text = content; fileURL = nil; branchSaveFolder = nil; savedMarkdownSnapshot = nil }
+        else { editor.discardUndoHistory(); text = content; fileURL = nil; branchSaveFolder = nil; savedMarkdownSnapshot = nil }
         if !append { history.detach() }
         else if changingMode { if let fileURL { history.visit(fileURL) } else { history.detach() } }
         status = "Research card ready."
@@ -937,7 +941,7 @@ struct ContentView: View {
                 setTracker(savedHabit); savedHabitSnapshot = savedHabit.markdown
             } else if let savedTodo {
                 setTodo(savedTodo); savedTodoSnapshot = savedTodo.markdown
-            } else { text = contents; savedMarkdownSnapshot = contents }
+            } else { editor.discardUndoHistory(); text = contents; savedMarkdownSnapshot = contents }
             fileURL = url; branchSaveFolder = nil; status = "Opened \(url.lastPathComponent)."
             if !traversingHistory { history.visit(url) }
             loaded = true

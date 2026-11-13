@@ -56,6 +56,10 @@ final class EditorState: ObservableObject {
         applyPendingSelection()
     }
     func clearPendingSelection() { pendingSelection = nil }
+    func discardUndoHistory() {
+        clearPendingSelection()
+        (view as? LinkCompletionTextView)?.discardEditorUndo()
+    }
     func editorTextDidChange(_ view: NSTextView) {
         guard let pending = pendingSelection else { return }
         if view.string == pending.text { applyPendingSelection() } else { pendingSelection = nil }
@@ -92,6 +96,34 @@ final class EditorState: ObservableObject {
 }
 
 final class LinkCompletionTextView: NSTextView {
+    private let textUndoManager = UndoManager()
+    override var undoManager: UndoManager? { textUndoManager }
+    @objc func undo(_ sender: Any?) { if textUndoManager.canUndo { textUndoManager.undo() } }
+    @objc func redo(_ sender: Any?) { if textUndoManager.canRedo { textUndoManager.redo() } }
+    override func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(undo(_:)) { return textUndoManager.canUndo }
+        if menuItem.action == #selector(redo(_:)) { return textUndoManager.canRedo }
+        return super.validateMenuItem(menuItem)
+    }
+    override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(undo(_:)) { return textUndoManager.canUndo }
+        if item.action == #selector(redo(_:)) { return textUndoManager.canRedo }
+        return super.validateUserInterfaceItem(item)
+    }
+
+    // Text supplied by a different draft or another control invalidates the
+    // ranges and targets captured by previous AppKit text undo operations.
+    func replaceEditorText(_ text: String) {
+        guard string != text else { return }
+        breakUndoCoalescing()
+        textUndoManager.removeAllActions()
+        string = text
+    }
+    func discardEditorUndo() {
+        breakUndoCoalescing()
+        textUndoManager.removeAllActions()
+    }
+
     var handleCompletionKey: ((NSEvent) -> Bool)?
     var followLink: ((CardLinkTarget) -> Void)?
     override func mouseDown(with event: NSEvent) {
@@ -283,10 +315,19 @@ private struct MarkdownTextView: NSViewRepresentable {
     }
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         context.coordinator.parent = self
-        guard let view = scroll.documentView as? NSTextView else { return }
-        if view.string != text { view.string = text; completion.close() }
+        guard let view = scroll.documentView as? LinkCompletionTextView else { return }
+        if view.string != text { view.replaceEditorText(text); completion.close() }
         editor.view = view; completion.view = view
         editor.applyPendingSelection()
+    }
+    static func dismantleNSView(_ scroll: NSScrollView, coordinator: Coordinator) {
+        guard let view = scroll.documentView as? LinkCompletionTextView else { return }
+        view.discardEditorUndo()
+        view.delegate = nil
+        view.handleCompletionKey = nil
+        view.followLink = nil
+        if coordinator.parent.editor.view === view { coordinator.parent.editor.view = nil }
+        if coordinator.parent.completion.view === view { coordinator.parent.completion.view = nil }
     }
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: MarkdownTextView

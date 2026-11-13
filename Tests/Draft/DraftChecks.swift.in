@@ -12,7 +12,12 @@ struct HabitTracker {
  init(markdown: String = "HABIT:empty") { self.markdown = markdown }
  static func fromMarkdown(_ text: String) -> HabitTracker? { text.hasPrefix("HABIT:") ? HabitTracker(markdown: text) : nil }
 }
+final class EditorHarness {
+ var discardCount = 0
+ func discardUndoHistory() { discardCount += 1 }
+}
 final class Harness {
+ let editor = EditorHarness()
  var cardMode = "markdown", text = "", tracker = HabitTracker(), todo = TodoList(), status = ""
  var markdownURL: URL?, habitURL: URL?, todoURL: URL?
  var markdownFolder: URL?, habitFolder: URL?, todoFolder: URL?
@@ -102,6 +107,20 @@ final class Harness {
   NSAlert.replies = [3]; precondition(!crossCancel.loadFile(todoFile))
   precondition(crossCancel.cardMode == "markdown" && crossCancel.markdownURL == a && crossCancel.habitURL == habit && crossCancel.todoURL == hiddenTodo)
   precondition(crossCancel.markdownFolder == temp && crossCancel.habitFolder == habit && crossCancel.todoFolder == hiddenTodo)
+  // Replacing a document must reset undo even if its contents are identical.
+  let identicalA = temp.appendingPathComponent("identical-a.md"), identicalB = temp.appendingPathComponent("identical-b.md")
+  try "Same contents".write(to: identicalA, atomically: true, encoding: .utf8)
+  try "Same contents".write(to: identicalB, atomically: true, encoding: .utf8)
+  let identical = Harness(); identical.text = "Same contents"; identical.savedMarkdownSnapshot = identical.text; identical.fileURL = identicalA
+  precondition(identical.loadFile(identicalB) && identical.editor.discardCount == 1 && identical.text == "Same contents")
+  let cancelledReset = Harness(); cancelledReset.text = "Uncommitted"; cancelledReset.fileURL = identicalA
+  NSAlert.replies = [3]; precondition(!cancelledReset.loadFile(identicalB) && cancelledReset.editor.discardCount == 0)
+  let clipReset = Harness(); clipReset.text = "Uncommitted"; clipReset.fileURL = identicalA
+  NSAlert.replies = [3]; precondition(!clipReset.useResearch("Replacement", append: false) && clipReset.editor.discardCount == 0)
+  precondition(clipReset.useResearch("Append", append: true) && clipReset.editor.discardCount == 0)
+  NSAlert.replies = [2]; precondition(clipReset.useResearch(clipReset.text, append: false) && clipReset.editor.discardCount == 1)
+  let savedReset = Harness(); savedReset.text = "Saved"; savedReset.fileURL = identicalA; savedReset.saveTargets = [identicalB]
+  precondition(savedReset.saveMarkdown() && savedReset.editor.discardCount == 0, "Save As is not a draft replacement")
   let newTodo = Harness(); newTodo.history.visit(a); newTodo.history.detach(); newTodo.cardMode = "todos"; newTodo.fileURL = nil
   newTodo.todo = TodoList(title: "New tasks", rows: [TodoItem(text: "Draft", done: false)])
   NSAlert.replies = [3]; newTodo.navigateHistory(back: true)

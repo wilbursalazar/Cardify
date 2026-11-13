@@ -31,7 +31,9 @@ struct HabitTracker {
     init(markdown: String = "HABIT:empty") { self.markdown = markdown }
     static func fromMarkdown(_ text: String) -> HabitTracker? { text.hasPrefix("HABIT:") ? HabitTracker(markdown: text) : nil }
 }
+final class EditorHarness { func discardUndoHistory() {} }
 final class Harness {
+    let editor = EditorHarness()
     var cardMode = "markdown", text = "", tracker = HabitTracker(), todo = TodoList(), status = ""
     var urls: [String: URL] = [:], folders: [String: URL] = [:]
     var fileURL: URL? { get { urls[cardMode] } set { urls[cardMode] = newValue } }
