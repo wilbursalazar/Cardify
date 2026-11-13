@@ -2,6 +2,14 @@
 
 Cardify is a free, open-source Mac app for writing Markdown notes and printing them on 3 × 5-inch index cards. It includes a research-card template, a weekly paper habit tracker, a Zotero source picker, and optional browser clippers.
 
+## Download for Mac
+
+[Download Cardify for macOS](https://github.com/wilbursalazar/Cardify/raw/refs/heads/main/Downloads/Cardify-Mac.zip). Unzip and open Cardify.app. The download supports Apple silicon and Intel Macs and targets macOS 13 or newer. It is ad-hoc signed and not notarized, so macOS may block it or require the user to approve opening it in Privacy & Security. Cross-device compatibility has not been comprehensively tested.
+
+## Link and format notes
+
+Choose **Link Note…** above the editor, select an Obsidian vault or Markdown folder, then search and insert a link. Cardify inserts a path-based `[[wiki link]]` and does not modify the linked file. Use the formatting buttons for headings, bold, italic, bullets and tasks. The card preview and print output render these styles, as well as Markdown and Obsidian link labels. This is a subset of Markdown, not a complete Markdown renderer.
+
 ## Build
 
 On macOS with the Apple Command Line Tools installed, run:
@@ -11,7 +19,7 @@ On macOS with the Apple Command Line Tools installed, run:
 open build/Cardify.app
 ```
 
-The app is ad-hoc signed, not notarized. macOS may require an explicit confirmation before opening it. This build script targets the Mac on which it is run; support for other macOS releases and hardware has not been comprehensively tested.
+The app is ad-hoc signed, not notarized. macOS may require an explicit confirmation before opening it. The build script produces a universal binary targeting macOS 13 and later; support for other macOS releases and hardware has not been comprehensively tested.
 
 ## Print
 

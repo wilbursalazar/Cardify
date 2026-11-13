@@ -9,28 +9,11 @@ struct CardDocument {
     var fontSize: Double
     var pageSize: CGSize { portrait ? CGSize(width: 216, height: 360) : CGSize(width: 360, height: 216) }
 
-    // Plain-text representation for paper; the saved Markdown remains unchanged.
-    var printable: String {
-        text.components(separatedBy: "\n").filter { !$0.hasPrefix("Zotero: [Open source](zotero://select/") }.map { line in
-            var s = line
-            if let r = s.range(of: #"^\s{0,3}#{1,6}\s+"#, options: .regularExpression) { s.removeSubrange(r) }
-            s = s.replacingOccurrences(of: "- [ ] ", with: "☐ ")
-                .replacingOccurrences(of: "- [x] ", with: "☑ ")
-                .replacingOccurrences(of: "- [X] ", with: "☑ ")
-            if let r = s.range(of: #"^\s*[-*]\s+"#, options: .regularExpression) { s.replaceSubrange(r, with: "• ") }
-            s = s.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "__", with: "")
-            return s
-        }.joined(separator: "\n")
-    }
-
     func pdf() -> Data? {
         let size = pageSize
         let inset: CGFloat = 27 // 3/8 inch, in PDF points
         let body = CGRect(x: inset, y: inset, width: size.width - 2 * inset, height: size.height - 2 * inset)
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineSpacing = 1.5
-        let content = printable.isEmpty ? " " : printable
-        let attributed = NSAttributedString(string: content, attributes: [.font: NSFont.systemFont(ofSize: fontSize), .foregroundColor: NSColor.black, .paragraphStyle: paragraph])
+        let attributed = MarkdownRendering.render(text, fontSize: CGFloat(fontSize))
         let framesetter = CTFramesetterCreateWithAttributedString(attributed)
         let data = NSMutableData()
         guard let consumer = CGDataConsumer(data: data as CFMutableData) else { return nil }
@@ -195,8 +178,10 @@ struct ContentView: View {
     @AppStorage("portrait") private var portrait = false
     @AppStorage("fontSize") private var fontSize = 9.0
     @AppStorage("saveFolder") private var saveFolder = ""
+    @StateObject private var editor = EditorState()
     @State private var fileURL: URL?
     @State private var showZotero = false
+    @State private var showNotes = false
     @State private var research: ResearchClip?
     @State private var status = "Draft saved on this Mac."
     var card: CardDocument { CardDocument(text: text, portrait: portrait, fontSize: fontSize) }
@@ -229,7 +214,17 @@ struct ContentView: View {
             HSplitView {
                 VStack(alignment: .leading) {
                     HStack { Text("Write").fontWeight(.semibold); Spacer(); Text("Markdown · use - [ ] for tasks").foregroundStyle(.secondary) }
-                    TextEditor(text: $text).font(.system(size: 13, design: .monospaced)).border(Color.secondary.opacity(0.2))
+                    HStack(spacing: 5) {
+                        Button("B") { editor.wrap("**") }.help("Bold")
+                        Button("I") { editor.wrap("*") }.help("Italic")
+                        Button("H1") { editor.prefix("# ") }.help("Heading")
+                        Button("H2") { editor.prefix("## ") }.help("Subheading")
+                        Button("• List") { editor.prefix("- ") }.help("Bullet list")
+                        Button("☐ Task") { editor.prefix("- [ ] ") }.help("Task")
+                        Spacer()
+                        Button("Link Note…") { showNotes = true }.help("Search your notes folder")
+                    }.buttonStyle(.bordered)
+                    MarkdownEditor(text: $text, editor: editor).border(Color.secondary.opacity(0.2))
                 }.frame(minWidth: 300)
                 VStack(alignment: .leading) {
                     HStack { Text("Preview").fontWeight(.semibold); Spacer(); Text("\(pageCount) \(pageCount == 1 ? "card" : "cards")").foregroundStyle(.secondary) }
@@ -250,6 +245,9 @@ struct ContentView: View {
                 else { text = content; fileURL = nil }
                 status = "Research card ready."
             }
+        }
+        .sheet(isPresented: $showNotes) {
+            NotePicker { link in editor.insert(link); status = "Note link inserted." }
         }
         .sheet(isPresented: $showZotero) {
             ZoteroPicker { source in

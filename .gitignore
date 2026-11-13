@@ -8,3 +8,5 @@ build/
 *.zip
 *.xcuserstate
 xcuserdata/
+!Downloads/
+!Downloads/Cardify-Mac.zip
