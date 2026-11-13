@@ -4,20 +4,19 @@ import PDFKit
 
 @main struct Check {
  static func main() {
-  var followed: [CardLinkTarget] = []
-  let previewView = PDFPreview(data: nil, onFollowLink: { followed.append($0) })
-  let coordinator = previewView.makeCoordinator()
-  precondition(coordinator.responds(to: NSSelectorFromString("PDFViewWillClickOnLink:withURL:")), "PDFKit delegate selector is unavailable")
+  _ = NSApplication.shared
   let previewContainer = StablePDFPreviewView(frame: NSRect(x: 0, y: 0, width: 500, height: 400))
-  coordinator.container = previewContainer
-  previewContainer.setDelegate(coordinator)
-  let initialData = CardDocument(text: "# Link test", portrait: false, fontSize: 9).pdf(includeLinks: true)!
+  let initialData = CardDocument(text: "# [[Books/Note|label]] [Visit](https://example.org)", portrait: false, fontSize: 9).pdf(includeLinks: true)!
+  previewContainer.layoutSubtreeIfNeeded()
   previewContainer.update(data: initialData, revision: nil)
-  let sender = previewContainer.visiblePDFView
-  coordinator.pdfViewWillClick(onLink: sender, with: CardPreviewLinks.action(for: .wiki("Books/Note|label"))!)
-  coordinator.pdfViewWillClick(onLink: sender, with: CardPreviewLinks.action(for: .url("https://example.org"))!)
-  coordinator.pdfViewWillClick(onLink: sender, with: URL(string: "https://example.org/not-an-internal-action")!)
-  precondition(followed == [.wiki("Books/Note|label"), .url("https://example.org")], "preview callback dispatch failed")
+  guard let page = previewContainer.pagesView.document?.page(at: 0), let rect = previewContainer.pagesView.pageRects.first else { fatalError("preview page unavailable") }
+  let bounds = page.bounds(for: .mediaBox)
+  let targets = page.annotations.compactMap { annotation -> CardLinkTarget? in
+   let point = NSPoint(x: rect.minX + (annotation.bounds.midX - bounds.minX) * rect.width / bounds.width,
+                       y: rect.maxY - (annotation.bounds.midY - bounds.minY) * rect.height / bounds.height)
+   return previewContainer.pagesView.link(at: point)
+  }
+  precondition(targets.contains(.wiki("Books/Note|label")) && targets.contains(.url("https://example.org")), "preview link hit testing failed")
   let longLabel = (0..<250).map { "Segment\($0)" }.joined(separator: " ")
   let source = CardMetadata.frontmatter("1a") + "# [[first|Identical]] [Identical](https://second.example/path)\n\nSource: https://clip.example/article\n\n**[[styled|bold target]]**\n\n[\(longLabel)](https://long.example/target)\n\n`[[not-a-link]]`\n```\n[hidden](https://hidden.example)\n```"
   for portrait in [false, true] {
