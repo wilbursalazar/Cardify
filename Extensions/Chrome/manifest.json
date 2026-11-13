@@ -1,0 +1,1 @@
+{"manifest_version":3,"name":"Cardify Research Clipper","version":"1.0.0","description":"Send the selected text and page source to Cardify.","permissions":["activeTab","scripting"],"action":{"default_title":"Clip to Cardify","default_popup":"popup.html"}}
