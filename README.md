@@ -2,9 +2,9 @@
 
 **Write a note once. Keep it as Markdown, print it on 3 × 5-inch index cards, or do both.**
 
-Cardify is a free, open-source Mac app for research, reading, studying, and keeping a paper-and-digital slip box. Write in Markdown, connect your notes, add Zotero sources, and see how your cards will print as you work. You can use Cardify with an Obsidian vault, a folder of Markdown files, a physical card box, or any combination of the three.
+Cardify is a free, open-source Mac app for research, reading, studying, and keeping a paper-and-digital slip box. Write in Markdown, connect your notes, explore them in a graph, add Zotero sources, and see how your cards will print as you work. You can use Cardify with an Obsidian vault, a folder of Markdown files, a physical card box, or any combination of the three.
 
-[Download Cardify for Mac](https://github.com/wilbursalazar/Cardify/raw/refs/heads/main/Downloads/Cardify-Mac.zip) · [Get started](#your-first-card) · [Use the library](#find-and-connect-cards) · [Choose a note-taking approach](#three-approaches-one-flexible-workflow) · [Printing help](#printing)
+[Download Cardify for Mac](https://github.com/wilbursalazar/Cardify/raw/refs/heads/main/Downloads/Cardify-Mac.zip) · [Get started](#your-first-card) · [Use the library](#find-and-connect-cards) · [Explore the graph](#explore-the-graph) · [Choose a note-taking approach](#three-approaches-one-flexible-workflow) · [Printing help](#printing)
 
 ## Download and open
 
@@ -47,6 +47,14 @@ To include an existing Markdown note, open it and choose **Templates → Mark Cu
 ### Turn a reading into an idea
 
 Open a reading card and choose **Templates → New Idea from This Card…**. If needed, Cardify asks you to save the current card first, then creates a new unsaved Idea Card with a link back to it. Write and save the idea when you are ready. This also works with other Markdown cards; it does not alter the saved source card.
+
+## Explore the graph
+
+Click **Graph…** beside Library to open a separate, read-only window for the selected notes folder. When your current saved card is in that folder, the graph starts with its nearby connections; otherwise it opens the whole-vault view. Search the list, select a node to inspect it, and use **Open Card** or double-click a node to open it in the editor. Opening a card follows the usual unsaved-draft protection.
+
+Solid lines show actual links to other Markdown cards. Dotted lines, controlled by **Possible branches**, are *possible* relationships inferred from card IDs; an ID alone does not establish why notes are related. A node’s number, color, and size show its count of distinct neighbors connected by actual links, not importance. Links that cannot be resolved safely are counted in the status but not guessed.
+
+Use the local depth control to show one or two steps, or choose **Whole vault**. Drag to pan, use the zoom control, and select **Center here** to explore another card’s neighborhood. The graph draws at most 180 nodes at a time and reports when more are available; search or center a card to narrow the view. Select **Refresh** after outside edits. The graph reads your files but does not rename, edit, or upload them.
 
 ## Set your starting workflow
 
@@ -184,7 +192,7 @@ On macOS, install the Apple Command Line Tools, then run:
 open build/Cardify.app
 ```
 
-The script builds a universal app targeting macOS 13 and later and signs it ad hoc. The result is not notarized. Run `./scripts/test.sh` for library, index, workflow, appearance, to-do, history, and draft-protection checks, `./scripts/test-printed-id.sh` for PDF layout checks, `./scripts/test-preview-links.sh` for clickable-preview checks, and `./scripts/test-todo-pdf.sh` for to-do printing.
+The script builds a universal app targeting macOS 13 and later and signs it ad hoc. The result is not notarized. Run `./scripts/test.sh` for library, graph, index, workflow, appearance, to-do, history, and draft-protection checks, `./scripts/test-printed-id.sh` for PDF layout checks, `./scripts/test-preview-links.sh` for clickable-preview checks, `./scripts/test-todo-pdf.sh` for to-do printing, `./scripts/test-graph-layout.sh` for graph layout, and `./scripts/test-graph-open.sh` for graph-opening safeguards.
 
 ## Further reading
 

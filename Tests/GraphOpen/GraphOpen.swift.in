@@ -1,0 +1,121 @@
+import Foundation
+
+extension Int { static let alertFirstButtonReturn = 1, alertSecondButtonReturn = 2 }
+final class NSAlert {
+    static var replies: [Int] = []
+    static var messages: [String] = []
+    var messageText = "", informativeText = ""
+    func addButton(withTitle: String) {}
+    @discardableResult func runModal() -> Int {
+        if messageText == "Can't open card" { Self.messages.append(informativeText); return 0 }
+        precondition(!Self.replies.isEmpty, "Unexpected draft prompt")
+        return Self.replies.removeFirst()
+    }
+}
+final class NSWindow {
+    var frontCount = 0
+    func makeKeyAndOrderFront(_ sender: Any?) { frontCount += 1 }
+}
+final class NSApplication {
+    static let shared = NSApplication()
+    var keyWindow: NSWindow?
+}
+final class GraphWindowManager {
+    var initialURL: URL?
+    var onOpen: ((URL) -> Void)?
+    func show(currentURL: URL?, onOpen: @escaping (URL) -> Void) { initialURL = currentURL; self.onOpen = onOpen }
+    func click(_ url: URL) { onOpen?(url) }
+}
+struct HabitTracker {
+    var markdown: String
+    init(markdown: String = "HABIT:empty") { self.markdown = markdown }
+    static func fromMarkdown(_ text: String) -> HabitTracker? { text.hasPrefix("HABIT:") ? HabitTracker(markdown: text) : nil }
+}
+final class Harness {
+    var cardMode = "markdown", text = "", tracker = HabitTracker(), todo = TodoList(), status = ""
+    var urls: [String: URL] = [:], folders: [String: URL] = [:]
+    var fileURL: URL? { get { urls[cardMode] } set { urls[cardMode] = newValue } }
+    var branchSaveFolder: URL? { get { folders[cardMode] } set { folders[cardMode] = newValue } }
+    var savedMarkdownSnapshot: String?, savedHabitSnapshot: String?, savedTodoSnapshot: String?
+    var history = CardHistory(), traversingHistory = false, suppressHistorySave = false
+    var saveTargets: [URL] = []
+    var notesFolder = "", saveFolder = ""
+    var research: String?
+    var showNotes = false, showLibrary = false, showSettings = false, showZotero = false
+    let graphWindow = GraphWindowManager()
+    func setTracker(_ value: HabitTracker) { tracker = value }
+    func setTodo(_ value: TodoList) { todo = value }
+    func saveMarkdown() -> Bool {
+        guard !saveTargets.isEmpty else { return false }
+        let target = saveTargets.removeFirst()
+        let contents = cardMode == "habits" ? tracker.markdown : cardMode == "todos" ? todo.markdown : text
+        do { try contents.write(to: target, atomically: true, encoding: .utf8) } catch { return false }
+        fileURL = target
+        if cardMode == "habits" { savedHabitSnapshot = contents }
+        else if cardMode == "todos" { savedTodoSnapshot = contents }
+        else { savedMarkdownSnapshot = contents }
+        if !suppressHistorySave { history.saveCurrent(target) }
+        return true
+    }
+    // GRAPH_AND_DRAFT_METHODS
+}
+
+@main struct Check {
+    static func main() throws {
+        let manager = FileManager.default
+        let root = manager.temporaryDirectory.appendingPathComponent("cardify-graph-open-" + UUID().uuidString).resolvingSymlinksInPath()
+        try manager.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? manager.removeItem(at: root) }
+        let source = root.appendingPathComponent("source.md"), target = root.appendingPathComponent("target.md")
+        try "# Original".write(to: source, atomically: true, encoding: .utf8)
+        try "# Destination".write(to: target, atomically: true, encoding: .utf8)
+
+        let editorWindow = NSWindow(); NSApplication.shared.keyWindow = editorWindow
+        let app = Harness(); app.notesFolder = root.path; app.fileURL = source
+        app.text = "# Modified"; app.savedMarkdownSnapshot = "# Original"; app.history.visit(source)
+        app.showGraph()
+        precondition(app.graphWindow.initialURL == source, "Graph should center on the originating card")
+
+        // No graph action should change the underlying draft while a sheet is active.
+        app.showNotes = true; app.graphWindow.click(target); app.showNotes = false
+        app.showLibrary = true; app.graphWindow.click(target); app.showLibrary = false
+        app.showSettings = true; app.graphWindow.click(target); app.showSettings = false
+        app.showZotero = true; app.graphWindow.click(target); app.showZotero = false
+        app.research = "clip"; app.graphWindow.click(target); app.research = nil
+        precondition(NSAlert.messages.count == 5 && app.fileURL == source && app.text == "# Modified" && editorWindow.frontCount == 0, "Open sheets must block graph navigation")
+
+        // Stale, out-of-vault and symlink targets must fail before draft handling.
+        let missing = root.appendingPathComponent("missing.md")
+        let outside = root.deletingLastPathComponent().appendingPathComponent("outside-" + UUID().uuidString + ".md")
+        try "# Outside".write(to: outside, atomically: true, encoding: .utf8)
+        defer { try? manager.removeItem(at: outside) }
+        let alias = root.appendingPathComponent("alias.md")
+        try manager.createSymbolicLink(at: alias, withDestinationURL: outside)
+        app.graphWindow.click(missing); app.graphWindow.click(outside); app.graphWindow.click(alias)
+        precondition(NSAlert.messages.count == 8 && app.fileURL == source && app.text == "# Modified" && editorWindow.frontCount == 0, "Invalid graph targets must not open")
+        let changedFolder = root.appendingPathComponent("different-vault", isDirectory: true)
+        try manager.createDirectory(at: changedFolder, withIntermediateDirectories: true)
+        app.notesFolder = changedFolder.path; app.graphWindow.click(target); app.notesFolder = root.path
+        precondition(NSAlert.messages.count == 9 && app.fileURL == source && app.text == "# Modified", "A graph from an earlier folder must not open stale nodes")
+
+        // Cancel leaves both the draft and its window untouched.
+        NSAlert.replies = [3]; app.graphWindow.click(target)
+        precondition(NSAlert.replies.isEmpty && app.fileURL == source && app.text == "# Modified" && app.history.current == source && editorWindow.frontCount == 0, "Cancel must preserve current draft and graph position")
+
+        // A successful save must use the real guarded loader and open the target.
+        app.saveTargets = [source]; NSAlert.replies = [1]; app.graphWindow.click(target)
+        precondition(NSAlert.replies.isEmpty && app.fileURL == target && app.text == "# Destination", "Saved draft should open target")
+        precondition((try? String(contentsOf: source, encoding: .utf8)) == "# Modified", "Save must preserve the departing edit")
+        precondition(app.history.current == target && app.history.backTarget == source && editorWindow.frontCount == 1, "Successful navigation updates history and focuses editor")
+
+        // A graph belonging to a closed editor cannot call into stale editor state.
+        let orphan = Harness(); orphan.notesFolder = root.path
+        do {
+            let temporary = NSWindow(); NSApplication.shared.keyWindow = temporary; orphan.showGraph()
+            NSApplication.shared.keyWindow = nil
+        }
+        orphan.graphWindow.click(target)
+        precondition(orphan.fileURL == nil && orphan.text.isEmpty, "Closed editor must not receive graph navigation")
+        print("Graph open guards, stale targets, save/cancel, history, focus, and closed editor passed")
+    }
+}

@@ -15,6 +15,8 @@ swiftc "${SWIFT_FLAGS[@]}" "$ROOT/Sources/TodoList.swift" "$ROOT/Tests/TodoList/
 "$TEMP_DIR/todo"
 swiftc "${SWIFT_FLAGS[@]}" "$ROOT/Sources/AppearanceSettings.swift" "$ROOT/Tests/Appearance/main.swift" -o "$TEMP_DIR/appearance"
 "$TEMP_DIR/appearance"
+swiftc "${SWIFT_FLAGS[@]}" "${COMMON[@]}" "$ROOT/Sources/CardLinks.swift" "$ROOT/Sources/LinkNavigation.swift" "$ROOT/Sources/CardGraph.swift" "$ROOT/Tests/Graph/main.swift" -o "$TEMP_DIR/graph"
+"$TEMP_DIR/graph"
 swiftc "${SWIFT_FLAGS[@]}" "$ROOT/Sources/LinkNavigation.swift" "$ROOT/Sources/CardLinks.swift" "$ROOT/Tests/LinkParser/main.swift" -o "$TEMP_DIR/link-parser"
 "$TEMP_DIR/link-parser"
 swiftc "${SWIFT_FLAGS[@]}" "$ROOT/Sources/LinkNavigation.swift" "$ROOT/Tests/LinkNavigation/main.swift" -o "$TEMP_DIR/link-navigation"

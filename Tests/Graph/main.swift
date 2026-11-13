@@ -1,0 +1,76 @@
+import Foundation
+
+func check(_ condition: @autoclosure () -> Bool, _ message: String) {
+    if !condition() { fputs("FAIL: \(message)\n", stderr); exit(1) }
+}
+let manager = FileManager.default
+let base = manager.temporaryDirectory.appendingPathComponent("cardify-graph-tests-" + UUID().uuidString, isDirectory: true)
+let root = base.appendingPathComponent("vault", isDirectory: true)
+let outside = base.appendingPathComponent("outside", isDirectory: true)
+try manager.createDirectory(at: root.appendingPathComponent("folder"), withIntermediateDirectories: true)
+try manager.createDirectory(at: root.appendingPathComponent("elsewhere"), withIntermediateDirectories: true)
+try manager.createDirectory(at: outside, withIntermediateDirectories: true)
+defer { try? manager.removeItem(at: base) }
+func write(_ path: String, _ text: String) throws {
+    try text.write(to: root.appendingPathComponent(path), atomically: true, encoding: .utf8)
+}
+try write("One.md", "---\ncard_id: 1\n---\n# One\n[[folder/Child|alias]] [[folder/Child]] [child](folder/Child.md#Heading) [[Duplicate]] [[Missing]] [[alias]] `[[Code]]` \\[[Escaped]] ![[Image]]\n```\n[[Fenced]]\n```\nhttps://example.com")
+try write("folder/Child.md", "---\ncard_id: 1a\n---\n# Child\n[[One]] [Other](../Other.md)")
+try write("Nested.md", "---\ncard_id: 1a1\n---\n# Nested")
+try write("Other.md", "# Other")
+try write("folder/Duplicate.md", "---\ncard_id: 1b\n---\n# Duplicate 1")
+try write("elsewhere/Duplicate.md", "---\ncard_id: 1b\n---\n# Duplicate 2")
+try write("Timestamp.md", "---\ncard_id: 202611122145\n---\n# Timestamp")
+try write("TimestampBranch.md", "---\ncard_id: 202611122145a\n---\n# Timestamp branch")
+try "private".write(to: outside.appendingPathComponent("secret.md"), atomically: true, encoding: .utf8)
+try manager.createSymbolicLink(at: root.appendingPathComponent("alias.md"), withDestinationURL: outside.appendingPathComponent("secret.md"))
+let graph = try CardGraph.load(folder: root)
+check(graph.nodes.count == 8, "loads only real Markdown notes")
+let explicit = graph.edges.filter { $0.kind == .link }
+let branches = graph.edges.filter { $0.kind == .possibleBranch }
+check(explicit.count == 3, "deduplicate repeated links and omit ambiguous, code, escaped, embed and external links")
+check(explicit.contains(GraphEdge(source: "One", target: "folder/Child", kind: .link)), "wiki path, alias and markdown target")
+check(explicit.contains(GraphEdge(source: "folder/Child", target: "One", kind: .link)), "reverse explicit link")
+check(explicit.contains(GraphEdge(source: "folder/Child", target: "Other", kind: .link)), "relative markdown parent path")
+check(branches.contains(GraphEdge(source: "One", target: "folder/Child", kind: .possibleBranch)), "branch remains separately marked when an explicit link exists")
+check(branches.contains(GraphEdge(source: "folder/Child", target: "Nested", kind: .possibleBranch)), "nested possible branch")
+check(!branches.contains { $0.target.contains("Duplicate") || $0.source.contains("Timestamp") || $0.target.contains("Timestamp") }, "duplicate and timestamp IDs do not create inferred branches")
+check(graph.nodes.first { $0.path == "One" }?.degree == 1, "reciprocal and repeated links count a distinct neighbor once")
+check(graph.nodes.first { $0.path == "folder/Child" }?.degree == 2, "degree includes incoming and outgoing neighbors")
+check(graph.unresolvedCount == 3, "ambiguous, missing and symlink links counted as unresolved")
+check(graph.neighborhood(of: "One", depth: 1, includeBranches: false) == Set(["One", "folder/Child"]), "one-hop explicit neighborhood")
+check(graph.neighborhood(of: "One", depth: 2, includeBranches: false) == Set(["One", "folder/Child", "Other"]), "two-hop neighborhood")
+check(graph.neighborhood(of: "One", depth: 2, includeBranches: true).contains("Nested"), "branch neighborhood is optional")
+check(graph.neighborhood(of: "not-found", depth: 1, includeBranches: true).isEmpty, "missing focus")
+let original = try String(contentsOf: root.appendingPathComponent("One.md"), encoding: .utf8)
+check(original.contains("[[folder/Child|alias]]"), "graph does not change source")
+print("Graph scan, explicit links, safe resolution, unique density, inferred branches, and neighborhoods passed")
+check(CardGraph.canOpen(root.appendingPathComponent("One.md"), in: root), "current regular card opens")
+check(!CardGraph.canOpen(outside.appendingPathComponent("secret.md"), in: root), "outside folder refused")
+check(!CardGraph.canOpen(root.appendingPathComponent("alias.md"), in: root), "symlink file refused")
+check(!CardGraph.canOpen(root.appendingPathComponent("deleted.md"), in: root), "missing file refused")
+try write("Mask.md", "# Mask\n<!-- emoji 😀 [[One]] -->\n%% [[One]] %%\n<!--\n[[One]]\n-->\n%%\n[[One]]\n%%\n`<!--` [[Other]]\n```\n<!--\n```\n[[Other]]")
+let commented = try CardGraph.load(folder: root)
+check(!commented.edges.contains(GraphEdge(source: "Mask", target: "One", kind: .link)), "HTML and Obsidian comments do not create graph edges")
+check(commented.edges.contains(GraphEdge(source: "Mask", target: "Other", kind: .link)), "comment delimiters in inline and fenced code do not hide real links")
+print("Graph skips commented links without confusing code delimiters")
+let replaced = root.appendingPathComponent("Other.md")
+try manager.removeItem(at: replaced)
+try manager.createSymbolicLink(at: replaced, withDestinationURL: outside.appendingPathComponent("secret.md"))
+check(!CardGraph.canOpen(replaced, in: root), "node replaced by symlink refused")
+let staleDirectory = root.appendingPathComponent("stale", isDirectory: true)
+try manager.createSymbolicLink(at: staleDirectory, withDestinationURL: outside)
+check(!CardGraph.canOpen(staleDirectory.appendingPathComponent("secret.md"), in: root), "symlink ancestor refused")
+print("Stale graph-node safety checks passed")
+let unreadable = root.appendingPathComponent("Blocked.md")
+try "# Blocked".write(to: unreadable, atomically: true, encoding: .utf8)
+try manager.setAttributes([.posixPermissions: 0], ofItemAtPath: unreadable.path)
+defer { try? manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: unreadable.path) }
+if !manager.isReadableFile(atPath: unreadable.path) {
+    let partial = try CardGraph.load(folder: root)
+    check(partial.unreadableCount > 0, "incomplete scan is reported")
+    check(!partial.edges.contains { $0.kind == .possibleBranch }, "inferred branches omitted when ID uniqueness cannot be checked")
+    check(!partial.edges.contains(GraphEdge(source: "folder/Child", target: "One", kind: .link)), "ambiguous basename omitted on incomplete scan")
+    check(partial.edges.contains(GraphEdge(source: "One", target: "folder/Child", kind: .link)), "explicit readable path remains available")
+    print("Incomplete scans avoid false unqualified links")
+}

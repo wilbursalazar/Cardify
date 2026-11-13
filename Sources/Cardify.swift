@@ -206,6 +206,7 @@ struct ContentView: View {
     @AppStorage("newCardWorkflow") private var newCardWorkflow = WorkflowPreference.configured.rawValue
     @AppStorage("cardifyAppearance") private var storedAppearance = AppearancePreference.system.rawValue
     @StateObject private var editor = EditorState()
+    @StateObject private var graphWindow = GraphWindowManager()
     @State private var fileURLs: [String: URL] = [:]
     @State private var savedMarkdownSnapshot: String?
     @State private var savedHabitSnapshot: String?
@@ -296,6 +297,7 @@ struct ContentView: View {
                 Button { navigateHistory(back: false) } label: { Image(systemName: "chevron.right") }
                     .help("Forward to the next visited card").keyboardShortcut("]", modifiers: .command).disabled(history.forwardTarget == nil)
                 Button("Library…") { showLibrary = true }
+                Button("Graph…") { showGraph() }.help("Explore card connections in a separate window")
                 Divider().frame(height: 16)
                 Text(currentCardTitle).lineLimit(1).truncationMode(.middle)
                 if cardMode == "markdown", let id = CardMetadata.parse(text).id {
@@ -410,6 +412,7 @@ struct ContentView: View {
             if let data = habitDraft.data(using: .utf8), let saved = try? JSONDecoder().decode(HabitTracker.self, from: data) { tracker = saved }
             if let data = todoDraft.data(using: .utf8), let saved = try? JSONDecoder().decode(TodoList.self, from: data) { todo = saved }
         }
+        .onDisappear { graphWindow.close() }
         .onOpenURL { url in
             if let clip = ResearchClip.from(url) { research = clip }
             else { status = "Could not open that clip." }
@@ -437,6 +440,26 @@ struct ContentView: View {
     func chooseNotesFolder() {
         let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true
         if panel.runModal() == .OK, let url = panel.url { notesFolder = url.path; status = "ID and notes folder: \(url.path)" }
+    }
+    func showGraph() {
+        let editorWindow = NSApplication.shared.keyWindow
+        graphWindow.show(currentURL: fileURL) { [weak editorWindow] url in
+            guard let editorWindow else { return }
+            guard research == nil && !showNotes && !showLibrary && !showSettings && !showZotero else {
+                graphError("Finish the open dialog before opening a card from the graph.")
+                return
+            }
+            let folderPath = notesFolder.isEmpty ? saveFolder : notesFolder
+            guard !folderPath.isEmpty, CardGraph.canOpen(url, in: URL(fileURLWithPath: folderPath, isDirectory: true)) else {
+                graphError("This card is no longer available in the selected notes folder. Refresh the graph.")
+                return
+            }
+            if loadFile(url) { editorWindow.makeKeyAndOrderFront(nil) }
+        }
+    }
+    func graphError(_ message: String) {
+        status = message
+        let alert = NSAlert(); alert.messageText = "Can't open card"; alert.informativeText = message; alert.addButton(withTitle: "OK"); alert.runModal()
     }
     func followLink(_ target: CardLinkTarget) {
         let folderPath = notesFolder.isEmpty ? saveFolder : notesFolder
