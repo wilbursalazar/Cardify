@@ -54,7 +54,7 @@ Click **Graph…** beside Library to open a separate, read-only window for the s
 
 Solid lines show actual links to other Markdown cards. Dotted lines, controlled by **Possible branches**, are *possible* relationships inferred from card IDs; an ID alone does not establish why notes are related. A node’s number, color, and size show its count of distinct neighbors connected by actual links, not importance. Links that cannot be resolved safely are counted in the status but not guessed.
 
-Use the local depth control to show one or two steps, or choose **Whole vault**. Drag to pan, use the zoom control, and select **Center here** to explore another card’s neighborhood. The graph draws at most 180 nodes at a time and reports when more are available; search or center a card to narrow the view. Select **Refresh** after outside edits. The graph reads your files but does not rename, edit, or upload them.
+Use the local depth control to show one or two steps, or choose **Whole vault**. Drag the background to pan, drag a card to move it, use the zoom control, and select **Center here** to explore another card’s neighborhood. The graph gently settles into place and respects the macOS Reduce Motion setting. The graph draws at most 180 nodes at a time and reports when more are available; search or center a card to narrow the view. Select **Refresh** after outside edits. The graph reads your files but does not rename, edit, or upload them.
 
 ## Set your starting workflow
 
@@ -192,7 +192,7 @@ On macOS, install the Apple Command Line Tools, then run:
 open build/Cardify.app
 ```
 
-The script builds a universal app targeting macOS 13 and later and signs it ad hoc. The result is not notarized. Run `./scripts/test.sh` for library, graph, index, workflow, appearance, to-do, history, and draft-protection checks, `./scripts/test-printed-id.sh` for PDF layout checks, `./scripts/test-preview-links.sh` for clickable-preview checks, `./scripts/test-todo-pdf.sh` for to-do printing, `./scripts/test-graph-layout.sh` for graph layout, and `./scripts/test-graph-open.sh` for graph-opening safeguards.
+The script builds a universal app targeting macOS 13 and later and signs it ad hoc. The result is not notarized. Run `./scripts/test.sh` for library, graph physics, index, workflow, appearance, to-do, history, and draft-protection checks, `./scripts/test-printed-id.sh` for PDF layout checks, `./scripts/test-preview-links.sh` for clickable-preview checks, `./scripts/test-preview-stability.sh` for preview updates, `./scripts/test-todo-pdf.sh` for to-do printing, `./scripts/test-graph-layout.sh` for graph layout, and `./scripts/test-graph-open.sh` for graph-opening safeguards.
 
 ## Further reading
 

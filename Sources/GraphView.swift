@@ -47,6 +47,8 @@ enum GraphLayout {
 struct GraphView: View {
     let currentURL: URL?
     let onOpen: (URL) -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @StateObject private var motion = GraphMotionController()
     @AppStorage("notesFolder") private var notesFolder = ""
     @AppStorage("saveFolder") private var saveFolder = ""
     @AppStorage("cardifyAppearance") private var appearance = AppearancePreference.system.rawValue
@@ -60,6 +62,8 @@ struct GraphView: View {
     @State private var zoom = 1.0
     @State private var pan = CGSize.zero
     @GestureState private var drag = CGSize.zero
+    @State private var draggedNode: String?
+    @State private var nodeDragOrigin = CGPoint.zero
     @State private var message = "Choose a notes folder to begin."
     @State private var loading = false
     @State private var loadID = UUID()
@@ -142,7 +146,7 @@ struct GraphView: View {
                         Slider(value: $zoom, in: 0.5...2.5).frame(maxWidth: 200)
                         Text("\(Int(zoom * 100))%").font(.caption).monospacedDigit()
                         Spacer()
-                        Text("Drag to pan · click to inspect").font(.caption).foregroundStyle(.secondary)
+                        Text("Drag background to pan · drag a card to move").font(.caption).foregroundStyle(.secondary)
                     }
                     HStack(spacing: 14) {
                         Text("━  Link").font(.caption)
@@ -163,6 +167,8 @@ struct GraphView: View {
         .onChange(of: depth) { _ in rebuildGraph() }
         .onChange(of: showBranches) { _ in rebuildGraph() }
         .onChange(of: query) { _ in rebuildGraph() }
+        .onChange(of: reduceMotion) { _ in rebuildGraph() }
+        .onDisappear { motion.stop() }
     }
 
     @ViewBuilder private var graphCanvas: some View {
@@ -180,12 +186,14 @@ struct GraphView: View {
             GeometryReader { geometry in
                 let nodes = visibleNodes
                 let edges = visibleEdges
-                let points = GraphLayout.positions(nodes: nodes, edges: edges, focus: scope == "local" ? focus : nil, includeBranches: showBranches)
+                let points = motion.points
                 let maximum = maximumDegree
                 let scale = min(geometry.size.width, geometry.size.height) * 0.40 * zoom
                 let center = CGPoint(x: geometry.size.width / 2 + pan.width + drag.width, y: geometry.size.height / 2 + pan.height + drag.height)
                 ZStack(alignment: .topLeading) {
                     RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .controlBackgroundColor))
+                        .contentShape(Rectangle())
+                        .gesture(DragGesture(minimumDistance: 3).updating($drag) { value, state, _ in state = value.translation }.onEnded { value in pan.width += value.translation.width; pan.height += value.translation.height })
                     Canvas { context, _ in
                         let pairs = Set(edges.filter { $0.kind == .link }.map { pair($0.source, $0.target) })
                         for edge in edges {
@@ -200,7 +208,7 @@ struct GraphView: View {
                             var line = Path(); line.move(to: start); line.addLine(to: end)
                             context.stroke(line, with: .color(edge.kind == .link ? .secondary.opacity(0.65) : .orange.opacity(0.8)), style: edge.kind == .link ? StrokeStyle(lineWidth: 1.2) : StrokeStyle(lineWidth: 1.5, lineCap: .round, dash: [1, 4]))
                         }
-                    }
+                    }.allowsHitTesting(false)
                     ForEach(nodes) { node in
                         if let point = points[node.path] {
                             let diameter = CGFloat(24 + 14 * sqrt(Double(node.degree) / Double(maximum)))
@@ -219,12 +227,22 @@ struct GraphView: View {
                             }.buttonStyle(.plain).help("\(node.title) · \(node.degree) linked cards")
                                 .accessibilityLabel("\(node.title), \(node.degree) linked cards")
                                 .onHover { inside in hovered = inside ? node.path : nil }
+                                .simultaneousGesture(DragGesture(minimumDistance: 3)
+                                    .onChanged { value in
+                                        if draggedNode != node.path {
+                                            draggedNode = node.path
+                                            nodeDragOrigin = motion.points[node.path] ?? point
+                                            motion.beginDrag(node.path)
+                                        }
+                                        let divisor = max(1, scale)
+                                        motion.drag(node.path, to: CGPoint(x: nodeDragOrigin.x + value.translation.width / divisor, y: nodeDragOrigin.y + value.translation.height / divisor))
+                                    }
+                                    .onEnded { _ in draggedNode = nil; motion.endDrag() })
                                 .simultaneousGesture(TapGesture(count: 2).onEnded { onOpen(node.url) })
                                 .position(x: center.x + point.x * scale, y: center.y + point.y * scale)
                         }
                     }
-                }.clipped().contentShape(Rectangle())
-                    .gesture(DragGesture(minimumDistance: 3).updating($drag) { value, state, _ in state = value.translation }.onEnded { value in pan.width += value.translation.width; pan.height += value.translation.height })
+                }.clipped()
             }
         }
     }
@@ -236,7 +254,7 @@ struct GraphView: View {
     }
     private func select(_ path: String) { selected = path }
     private func rebuildGraph() {
-        guard let graph else { matches = []; visibleNodes = []; visibleEdges = []; totalVisibleCandidates = 0; maximumDegree = 1; return }
+        guard let graph else { matches = []; visibleNodes = []; visibleEdges = []; totalVisibleCandidates = 0; maximumDegree = 1; motion.reset(); return }
         let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
         matches = term.isEmpty ? graph.nodes : graph.nodes.filter { $0.title.localizedCaseInsensitiveContains(term) || $0.path.localizedCaseInsensitiveContains(term) || ($0.cardID?.localizedCaseInsensitiveContains(term) ?? false) }
         maximumDegree = max(1, graph.nodes.map(\.degree).max() ?? 1)
@@ -251,6 +269,11 @@ struct GraphView: View {
         }
         let paths = Set(visibleNodes.map(\.path))
         visibleEdges = graph.edges.filter { paths.contains($0.source) && paths.contains($0.target) && (showBranches || $0.kind == .link) }
+        if let draggedNode, !paths.contains(draggedNode) { self.draggedNode = nil }
+        let anchor = scope == "local" ? focus : nil
+        let seeds = GraphLayout.positions(nodes: visibleNodes, edges: visibleEdges, focus: anchor, includeBranches: showBranches)
+        let links = visibleEdges.map { GraphPhysics.Link($0.source, $0.target) }
+        motion.configure(paths: visibleNodes.map(\.path), links: links, seeds: seeds, anchor: anchor, reduceMotion: reduceMotion)
     }
     private func chooseFolder() {
         let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = false

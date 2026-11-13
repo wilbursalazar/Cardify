@@ -8,7 +8,12 @@ import PDFKit
   let previewView = PDFPreview(data: nil, onFollowLink: { followed.append($0) })
   let coordinator = previewView.makeCoordinator()
   precondition(coordinator.responds(to: NSSelectorFromString("PDFViewWillClickOnLink:withURL:")), "PDFKit delegate selector is unavailable")
-  let sender = PDFView(frame: .zero)
+  let previewContainer = StablePDFPreviewView(frame: NSRect(x: 0, y: 0, width: 500, height: 400))
+  coordinator.container = previewContainer
+  previewContainer.setDelegate(coordinator)
+  let initialData = CardDocument(text: "# Link test", portrait: false, fontSize: 9).pdf(includeLinks: true)!
+  previewContainer.update(data: initialData, revision: nil)
+  let sender = previewContainer.visiblePDFView
   coordinator.pdfViewWillClick(onLink: sender, with: CardPreviewLinks.action(for: .wiki("Books/Note|label"))!)
   coordinator.pdfViewWillClick(onLink: sender, with: CardPreviewLinks.action(for: .url("https://example.org"))!)
   coordinator.pdfViewWillClick(onLink: sender, with: URL(string: "https://example.org/not-an-internal-action")!)

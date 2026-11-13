@@ -105,16 +105,162 @@ struct CardDocument {
     }
 }
 
+struct PDFPreviewRevision: Equatable {
+    let mode: String
+    let content: String
+    let portrait: Bool
+    let fontSize: Double
+    let dotGrid: Bool
+    let filePath: String?
+}
+
+// Keep a short-lived image of the last drawn card over PDFKit while it lays
+// out a replacement. Only one PDFView is used, avoiding simultaneous tile renderers.
+final class StablePDFPreviewView: NSView {
+    private let pdfView = PDFView()
+    private let snapshot = NSImageView()
+    private var displayedRevision: PDFPreviewRevision?
+    private var displayedData: Data?
+    private var requestedRevision: PDFPreviewRevision?
+    private var requestedData: Data?
+    private var pending: (data: Data, revision: PDFPreviewRevision?)?
+    private var scheduled: DispatchWorkItem?
+    private var reveal: DispatchWorkItem?
+    private var transitioning = false
+    private var isCurrent = false
+    var visiblePDFView: PDFView { pdfView }
+    func canFollowLinks(from view: PDFView) -> Bool { isCurrent && view === pdfView }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        pdfView.autoScales = true
+        pdfView.displayMode = .singlePageContinuous
+        pdfView.backgroundColor = NSColor.windowBackgroundColor
+        pdfView.autoresizingMask = [.width, .height]
+        snapshot.autoresizingMask = [.width, .height]
+        snapshot.imageScaling = .scaleAxesIndependently
+        snapshot.isHidden = true
+        addSubview(pdfView)
+        addSubview(snapshot)
+    }
+    required init?(coder: NSCoder) { nil }
+    override func layout() {
+        super.layout()
+        pdfView.frame = bounds; snapshot.frame = bounds
+    }
+    func setDelegate(_ delegate: PDFViewDelegate) { pdfView.delegate = delegate }
+    private func matchesDisplayed(_ data: Data, revision: PDFPreviewRevision?) -> Bool {
+        guard let displayedData else { return false }
+        if let revision { return revision == displayedRevision }
+        return displayedRevision == nil && data == displayedData
+    }
+    private func updateCurrentFlag() {
+        guard let requestedData else { isCurrent = false; return }
+        isCurrent = !transitioning && matchesDisplayed(requestedData, revision: requestedRevision)
+    }
+    func update(data: Data?, revision: PDFPreviewRevision?) {
+        requestedData = data; requestedRevision = revision
+        guard let data else {
+            scheduled?.cancel(); scheduled = nil; pending = nil; isCurrent = false
+            return
+        }
+        if matchesDisplayed(data, revision: revision) {
+            scheduled?.cancel(); scheduled = nil; pending = nil; updateCurrentFlag()
+            return
+        }
+        if let pending, pending.revision == revision, (revision != nil || pending.data == data) { return }
+        isCurrent = false
+        pending = (data, revision)
+        let identityChanged = displayedRevision?.mode != revision?.mode || displayedRevision?.filePath != revision?.filePath
+        if displayedData == nil || identityChanged {
+            scheduled?.cancel(); scheduled = nil
+            reveal?.cancel(); reveal = nil; transitioning = false
+            snapshot.isHidden = true; snapshot.image = nil
+            applyPending()
+        } else { schedulePending() }
+    }
+    func cancelPending() {
+        scheduled?.cancel(); scheduled = nil; reveal?.cancel(); reveal = nil
+        pending = nil; requestedData = nil; transitioning = false; isCurrent = false
+        snapshot.isHidden = true; snapshot.image = nil
+    }
+    private func schedulePending() {
+        guard !transitioning, scheduled == nil, pending != nil else { return }
+        // Throttle to a short interval rather than waiting for typing to stop.
+        let work = DispatchWorkItem { [weak self] in self?.scheduled = nil; self?.applyPending() }
+        scheduled = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: work)
+    }
+    private func captureVisiblePreview() -> NSImage? {
+        guard let window, window.isVisible, !window.isMiniaturized,
+              pdfView.bounds.width > 0, pdfView.bounds.height > 0,
+              let bitmap = pdfView.bitmapImageRepForCachingDisplay(in: pdfView.bounds) else { return nil }
+        pdfView.cacheDisplay(in: pdfView.bounds, to: bitmap)
+        let image = NSImage(size: pdfView.bounds.size)
+        image.addRepresentation(bitmap)
+        return image
+    }
+    private func applyPending() {
+        guard let pending else { return }
+        self.pending = nil
+        guard let document = PDFDocument(data: pending.data) else { updateCurrentFlag(); return }
+        let sameCard = displayedData != nil && displayedRevision?.mode == pending.revision?.mode && displayedRevision?.filePath == pending.revision?.filePath
+        let oldScroll = sameCard ? pdfView.documentView?.enclosingScrollView?.contentView.bounds.origin : nil
+        let wasAutoScaled = pdfView.autoScales
+        let oldScale = pdfView.scaleFactor
+        if sameCard, let image = captureVisiblePreview() {
+            snapshot.image = image; snapshot.isHidden = false; transitioning = true
+        }
+        pdfView.frame = bounds
+        pdfView.document = document
+        pdfView.autoScales = wasAutoScaled
+        if !wasAutoScaled { pdfView.scaleFactor = oldScale }
+        pdfView.layoutSubtreeIfNeeded()
+        if let oldScroll, let scroll = pdfView.documentView?.enclosingScrollView {
+            let clip = scroll.contentView
+            let proposed = NSRect(origin: oldScroll, size: clip.bounds.size)
+            clip.scroll(to: clip.constrainBoundsRect(proposed).origin)
+            scroll.reflectScrolledClipView(clip)
+        }
+        displayedData = pending.data; displayedRevision = pending.revision
+        if transitioning {
+            let work = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                self.reveal = nil; self.transitioning = false
+                self.snapshot.isHidden = true; self.snapshot.image = nil
+                self.updateCurrentFlag(); self.schedulePending()
+            }
+            reveal = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: work)
+        } else { updateCurrentFlag(); schedulePending() }
+    }
+}
+
 struct PDFPreview: NSViewRepresentable {
     let data: Data?
+    let revision: PDFPreviewRevision?
     let onFollowLink: (CardLinkTarget) -> Void
+    init(data: Data?, revision: PDFPreviewRevision? = nil, onFollowLink: @escaping (CardLinkTarget) -> Void) {
+        self.data = data; self.revision = revision; self.onFollowLink = onFollowLink
+    }
     func makeCoordinator() -> Coordinator { Coordinator(self) }
-    func makeNSView(context: Context) -> PDFView { let view = PDFView(); view.autoScales = true; view.displayMode = .singlePageContinuous; view.backgroundColor = NSColor.windowBackgroundColor; view.delegate = context.coordinator; return view }
-    func updateNSView(_ view: PDFView, context: Context) { context.coordinator.parent = self; if let data { view.document = PDFDocument(data: data) } }
+    func makeNSView(context: Context) -> StablePDFPreviewView {
+        let view = StablePDFPreviewView()
+        view.setDelegate(context.coordinator)
+        context.coordinator.container = view
+        return view
+    }
+    func updateNSView(_ view: StablePDFPreviewView, context: Context) {
+        context.coordinator.parent = self
+        view.update(data: data, revision: revision)
+    }
+    static func dismantleNSView(_ view: StablePDFPreviewView, coordinator: Coordinator) { view.cancelPending() }
     final class Coordinator: NSObject, PDFViewDelegate {
         var parent: PDFPreview
+        weak var container: StablePDFPreviewView?
         init(_ parent: PDFPreview) { self.parent = parent }
         func pdfViewWillClick(onLink sender: PDFView, with url: URL) {
+            guard container?.canFollowLinks(from: sender) == true else { return }
             guard let target = CardPreviewLinks.target(from: url) else { return }
             parent.onFollowLink(target)
         }
@@ -238,6 +384,9 @@ struct ContentView: View {
         return card.pdf()
     }
     var previewPDF: Data? { cardMode == "markdown" ? card.pdf(includeLinks: true) : activePDF }
+    var previewRevision: PDFPreviewRevision {
+        PDFPreviewRevision(mode: cardMode, content: cardMode == "habits" ? tracker.markdown : cardMode == "todos" ? todo.printMarkdown : text, portrait: portrait, fontSize: fontSize, dotGrid: dotGrid, filePath: fileURL?.standardizedFileURL.path)
+    }
     var currentCardTitle: String {
         let title = cardMode == "habits" ? tracker.title : cardMode == "todos" ? todo.title : NoteEditing.title(in: text)
         return title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? (fileURL?.deletingPathExtension().lastPathComponent ?? "Untitled card") : title
@@ -379,7 +528,8 @@ struct ContentView: View {
                     HStack {
                         Text("Preview").fontWeight(.semibold)
                         Spacer()
-                        Text("\(pageCount) \(pageCount == 1 ? "card" : "cards")").font(.caption).foregroundStyle(.secondary)
+                        let count = pageCount
+                        Text("\(count) \(count == 1 ? "card" : "cards")").font(.caption).foregroundStyle(.secondary)
                     }
                     HStack(spacing: 8) {
                         Picker("Orientation", selection: $portrait) {
@@ -394,12 +544,17 @@ struct ContentView: View {
                         Slider(value: $fontSize, in: 7...18, step: 1).help("Text size")
                         Text("\(Int(fontSize)) pt").font(.caption).monospacedDigit().frame(width: 38, alignment: .trailing)
                     }
-                    if let data = previewPDF {
-                        PDFPreview(data: data, onFollowLink: followLink).border(Color.secondary.opacity(0.2)).help("Click an underlined link to open it.")
-                    } else {
-                        Text(cardMode == "habits" ? "The heading is too long to fit. Shorten it to preview and print." : "Could not create the preview.")
-                            .foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
+                    let previewData = previewPDF
+                    PDFPreview(data: previewData, revision: previewRevision, onFollowLink: followLink)
+                        .border(Color.secondary.opacity(0.2)).help("Click an underlined link to open it.")
+                        .allowsHitTesting(previewData != nil)
+                        .overlay(alignment: .top) {
+                            if previewData == nil {
+                                Text("Preview unavailable; the last valid card may be shown. Check the card before printing.")
+                                    .font(.caption).padding(8).frame(maxWidth: .infinity)
+                                    .background(.regularMaterial).allowsHitTesting(false)
+                            }
+                        }
                     Text("3 × 5 in · ⅜ in inset · Print at 100% scale")
                         .font(.caption).foregroundStyle(.secondary)
                 }.padding(.leading, 12).frame(minWidth: 332)
