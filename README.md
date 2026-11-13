@@ -175,7 +175,8 @@ For a light background, choose **Design → Dot grid** beside the preview. It ap
 The optional browser clipper sends selected webpage text, the page title, and URL to Cardify for review. Open Cardify once before using it so macOS can register the app's link handler.
 
 - **Chrome:** load [Extensions/Chrome](Extensions/Chrome) with **Load unpacked** at `chrome://extensions`, after enabling Developer mode.
-- **LibreWolf / Firefox:** load [Extensions/LibreWolf](Extensions/LibreWolf) through `about:debugging` → **This Firefox** → **Load Temporary Add-on**, selecting `manifest.json`. This is a **temporary** installation and is removed when the browser restarts; a permanently signed add-on is not currently provided.
+- **LibreWolf:** [Download the clipper XPI](Downloads/Cardify-Clipper-LibreWolf.xpi). In `about:addons`, use the gear menu → **Install Add-on From File…**. This package is unsigned. LibreWolf must support unsigned extensions and have signature verification disabled before it can install it; that setting affects all extensions in the profile. Once installed, it persists across restarts. This package does not currently update itself.
+- **Firefox:** the XPI is not Mozilla-signed and cannot be permanently installed in ordinary Firefox release builds. For testing, load [Extensions/LibreWolf](Extensions/LibreWolf) from `about:debugging` → **This Firefox** → **Load Temporary Add-on**. A Mozilla-signed release is not yet available.
 
 Select text on a supported webpage, open the extension, and choose **Open in Cardify**. Review the header, note, and source before appending to or replacing your draft. Some browser pages, embedded frames, and PDF viewers restrict access; images and video are not extracted, and very long selections are rejected. Browser-to-app handoff has not been tested across every browser and macOS version.
 
