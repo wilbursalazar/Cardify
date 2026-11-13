@@ -48,6 +48,8 @@ struct WorkflowSettings: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Settings").font(.title2.bold())
+            Text("Appearance").font(.headline)
+            AppearanceSettings()
             Text("New Markdown cards").font(.headline)
             Picker("Starting workflow", selection: Binding(get: { preference }, set: { storedWorkflow = $0.rawValue })) {
                 ForEach(WorkflowPreference.allCases) { choice in Text(choice.name).tag(choice) }
@@ -57,6 +59,6 @@ struct WorkflowSettings: View {
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Spacer()
             HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
-        }.padding(24).frame(width: 500, height: 260)
+        }.padding(24).frame(width: 500, height: 330)
     }
 }

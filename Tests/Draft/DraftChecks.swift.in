@@ -13,16 +13,31 @@ struct HabitTracker {
  static func fromMarkdown(_ text: String) -> HabitTracker? { text.hasPrefix("HABIT:") ? HabitTracker(markdown: text) : nil }
 }
 final class Harness {
- var cardMode = "markdown", text = "", tracker = HabitTracker(), status = "", fileURL: URL?, branchSaveFolder: URL?
- var savedMarkdownSnapshot: String?, savedHabitSnapshot: String?, saveTargets: [URL] = []
+ var cardMode = "markdown", text = "", tracker = HabitTracker(), todo = TodoList(), status = ""
+ var markdownURL: URL?, habitURL: URL?, todoURL: URL?
+ var markdownFolder: URL?, habitFolder: URL?, todoFolder: URL?
+ var fileURL: URL? {
+  get { cardMode == "habits" ? habitURL : cardMode == "todos" ? todoURL : markdownURL }
+  set { if cardMode == "habits" { habitURL = newValue } else if cardMode == "todos" { todoURL = newValue } else { markdownURL = newValue } }
+ }
+ var branchSaveFolder: URL? {
+  get { cardMode == "habits" ? habitFolder : cardMode == "todos" ? todoFolder : markdownFolder }
+  set { if cardMode == "habits" { habitFolder = newValue } else if cardMode == "todos" { todoFolder = newValue } else { markdownFolder = newValue } }
+ }
+ var savedMarkdownSnapshot: String?, savedHabitSnapshot: String?, savedTodoSnapshot: String?, saveTargets: [URL] = []
+ var presentedURLs: [URL?] = []
+ var history = CardHistory(), suppressHistorySave = false, traversingHistory = false
  func setTracker(_ tracker: HabitTracker) { self.tracker = tracker }
+ func setTodo(_ todo: TodoList) { self.todo = todo }
  func saveMarkdown() -> Bool {
   guard !saveTargets.isEmpty else { return false }
+  presentedURLs.append(fileURL)
   let target = saveTargets.removeFirst()
-  let content = cardMode == "habits" ? tracker.markdown : text
+  let content = cardMode == "habits" ? tracker.markdown : cardMode == "todos" ? todo.markdown : text
   do { try content.write(to: target, atomically: true, encoding: .utf8) } catch { return false }
   fileURL = target
-  if cardMode == "habits" { savedHabitSnapshot = content } else { savedMarkdownSnapshot = content }
+  if cardMode == "habits" { savedHabitSnapshot = content } else if cardMode == "todos" { savedTodoSnapshot = content } else { savedMarkdownSnapshot = content }
+  if !suppressHistorySave { history.saveCurrent(target) }
   return true
  }
     // DRAFT_METHODS
@@ -55,6 +70,68 @@ final class Harness {
   let researchSave = Harness(); researchSave.cardMode = "habits"; researchSave.tracker = HabitTracker(markdown: "HABIT:new"); researchSave.text = "hidden text"; researchSave.saveTargets = [hidden]; NSAlert.replies = [2, 1]
   precondition(researchSave.useResearch("clip", append: false)); precondition(researchSave.cardMode == "markdown" && researchSave.text == "clip")
   precondition((try? String(contentsOf: hidden, encoding: .utf8)) == "hidden text")
+  let a = temp.appendingPathComponent("a.md"), b = temp.appendingPathComponent("b.md"), c = temp.appendingPathComponent("saved-as.md")
+  try "# A".write(to: a, atomically: true, encoding: .utf8)
+  try "# B".write(to: b, atomically: true, encoding: .utf8)
+  let navigation = Harness(); navigation.text = "# B edited"; navigation.savedMarkdownSnapshot = "# B"; navigation.fileURL = b
+  navigation.history.visit(a); navigation.history.visit(b)
+  NSAlert.replies = [3]; navigation.navigateHistory(back: true)
+  precondition(navigation.fileURL == b && navigation.text == "# B edited" && navigation.history.current == b && navigation.history.backTarget == a)
+  navigation.saveTargets = [c]; NSAlert.replies = [1]; navigation.navigateHistory(back: true)
+  precondition(navigation.fileURL == a && navigation.history.current == a && navigation.history.forwardTarget == c)
+  precondition((try? String(contentsOf: c, encoding: .utf8)) == "# B edited")
+  navigation.navigateHistory(back: false)
+  precondition(navigation.fileURL == c && navigation.text == "# B edited" && navigation.history.current == c)
+  let todoFile = temp.appendingPathComponent("todo.md"), hiddenTodo = temp.appendingPathComponent("hidden-todo.md")
+  let savedList = TodoList(title: "Saved tasks", rows: [TodoItem(text: "Read", done: true)])
+  try savedList.markdown.write(to: todoFile, atomically: true, encoding: .utf8)
+  let crossMode = Harness(); crossMode.text = "# A"; crossMode.savedMarkdownSnapshot = "# A"; crossMode.fileURL = a; crossMode.history.visit(a)
+  crossMode.todoURL = hiddenTodo
+  crossMode.todo = TodoList(title: "Unsaved tasks", rows: [TodoItem(text: "Write", done: false)])
+  crossMode.saveTargets = [hiddenTodo]; NSAlert.replies = [1]
+  precondition(crossMode.loadFile(todoFile))
+  precondition(crossMode.presentedURLs.last! == hiddenTodo, "hidden to-do save must retain its own file association")
+  precondition(crossMode.todo.markdown == savedList.markdown && crossMode.history.current == todoFile && crossMode.history.backTarget == a)
+  precondition((try? String(contentsOf: hiddenTodo, encoding: .utf8))?.contains("Unsaved tasks") == true)
+  crossMode.navigateHistory(back: true)
+  precondition(crossMode.fileURL == a && crossMode.history.current == a && crossMode.history.forwardTarget == todoFile)
+  let crossCancel = Harness(); crossCancel.text = "# A"; crossCancel.savedMarkdownSnapshot = "# A"
+  crossCancel.markdownURL = a; crossCancel.habitURL = habit; crossCancel.todoURL = hiddenTodo
+  crossCancel.markdownFolder = temp; crossCancel.habitFolder = habit; crossCancel.todoFolder = hiddenTodo
+  crossCancel.todo = TodoList(title: "Unsaved hidden tasks", rows: [TodoItem(text: "Write", done: false)])
+  NSAlert.replies = [3]; precondition(!crossCancel.loadFile(todoFile))
+  precondition(crossCancel.cardMode == "markdown" && crossCancel.markdownURL == a && crossCancel.habitURL == habit && crossCancel.todoURL == hiddenTodo)
+  precondition(crossCancel.markdownFolder == temp && crossCancel.habitFolder == habit && crossCancel.todoFolder == hiddenTodo)
+  let newTodo = Harness(); newTodo.history.visit(a); newTodo.history.detach(); newTodo.cardMode = "todos"; newTodo.fileURL = nil
+  newTodo.todo = TodoList(title: "New tasks", rows: [TodoItem(text: "Draft", done: false)])
+  NSAlert.replies = [3]; newTodo.navigateHistory(back: true)
+  precondition(newTodo.cardMode == "todos" && newTodo.fileURL == nil && newTodo.history.detached && newTodo.history.backTarget == a)
+  let newTodoFile = temp.appendingPathComponent("new-todo.md")
+  newTodo.saveTargets = [newTodoFile]; NSAlert.replies = [1]; newTodo.navigateHistory(back: true)
+  precondition(newTodo.cardMode == "markdown" && newTodo.fileURL == a && newTodo.history.current == a && newTodo.history.forwardTarget == newTodoFile)
+  precondition((try? String(contentsOf: newTodoFile, encoding: .utf8))?.contains("New tasks") == true)
+  let discardTodo = Harness(); discardTodo.history.visit(a); discardTodo.history.detach(); discardTodo.cardMode = "todos"
+  discardTodo.todo = TodoList(title: "Discardable", rows: [TodoItem(text: "Draft", done: false)])
+  NSAlert.replies = [2]; discardTodo.navigateHistory(back: true)
+  precondition(discardTodo.fileURL == a && discardTodo.history.current == a && !discardTodo.history.detached && discardTodo.history.forwardTarget == nil)
+  let missing = temp.appendingPathComponent("missing.md")
+  let failed = Harness(); failed.text = "# Unchanged"; failed.fileURL = b; failed.history.visit(missing); failed.history.visit(b)
+  failed.navigateHistory(back: true)
+  precondition(failed.fileURL == b && failed.text == "# Unchanged" && failed.history.current == b && failed.history.backTarget == missing)
+  let tabs = Harness(); tabs.text = "# A"; tabs.fileURL = a; tabs.branchSaveFolder = temp; tabs.history.visit(a)
+  tabs.switchMode(to: "habits"); precondition(tabs.fileURL == nil && tabs.history.detached)
+  tabs.tracker = HabitTracker(markdown: "HABIT:first"); tabs.saveTargets = [habit]; precondition(tabs.saveMarkdown())
+  tabs.branchSaveFolder = habit
+  tabs.switchMode(to: "todos"); precondition(tabs.fileURL == nil && tabs.history.detached)
+  tabs.todo = TodoList(title: "Three tabs", rows: [TodoItem(text: "Read", done: false)])
+  tabs.saveTargets = [todoFile]; precondition(tabs.saveMarkdown()); tabs.branchSaveFolder = todoFile
+  tabs.switchMode(to: "markdown"); precondition(tabs.fileURL == a && tabs.branchSaveFolder == temp)
+  tabs.saveTargets = [a]; precondition(tabs.saveMarkdown()); precondition(tabs.presentedURLs.last! == a)
+  tabs.switchMode(to: "habits"); precondition(tabs.fileURL == habit && tabs.branchSaveFolder == habit)
+  tabs.saveTargets = [habit]; precondition(tabs.saveMarkdown()); precondition(tabs.presentedURLs.last! == habit)
+  tabs.switchMode(to: "todos"); precondition(tabs.fileURL == todoFile && tabs.branchSaveFolder == todoFile)
+  tabs.saveTargets = [todoFile]; precondition(tabs.saveMarkdown()); precondition(tabs.presentedURLs.last! == todoFile)
   print("Open and clip guards preserve both drafts, current file association, cancellation and newly saved same-file contents")
+  print("History guards preserve cancelled and saved drafts, Save As, per-mode associations, and cross-mode to-do navigation")
  }
 }

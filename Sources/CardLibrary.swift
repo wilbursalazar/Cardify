@@ -196,7 +196,7 @@ struct CardLibrary: View {
                                 if allowInsert {
                                     TextField("Why is this card related? (optional)", text: $explanation)
                                 } else {
-                                    Text("Switch to Markdown to insert a link into a draft.").font(.caption).foregroundStyle(.secondary)
+                                    Text("Switch to Research to insert a link into a draft.").font(.caption).foregroundStyle(.secondary)
                                 }
                                 Divider()
                                 connectionSection("Links to", paths: snapshot.outgoing[note.path] ?? [])

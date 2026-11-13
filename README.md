@@ -16,7 +16,7 @@ Cardify requires **macOS 13 or later** and includes code for both Apple silicon 
 
 ## Your first card
 
-1. Open Cardify. Choose **Markdown** to write a note, or **Habits** for a weekly tracker.
+1. Open Cardify. Choose **Research** to write a Markdown note, **Habit** for a weekly tracker, or **To Do** for a checklist.
 2. Optional: choose **File → Choose Save Folder…** to set the folder offered when you save a new note or export a PDF. To work with an Obsidian vault, you can choose a folder inside your vault.
 3. Optional: choose **File → Choose Notes Folder…** and select your vault or notes folder. For Obsidian, select the vault root so inserted paths are relative to the vault. Cardify searches this folder for notes to link and for existing card IDs. It can be the same folder as your save folder.
 4. Enter a title and write, or choose **Templates → Idea Card**, **Reading Card**, or **Index Card**. Templates insert editable Markdown at the cursor; they do not replace your draft.
@@ -25,6 +25,12 @@ Cardify requires **macOS 13 or later** and includes code for both Apple silicon 
 Before New Card, opening a different card, or replacing a research clip overwrites an unsaved draft, Cardify offers **Save**, **Discard**, or **Cancel**. **Save** opens a dialog to save a `.md` file. **Print** opens the printer dialog. **Save & Print** saves first and starts printing only if the save succeeds. **File → Export PDF…** saves a PDF for review or printing later. Longer notes can continue onto more than one card.
 
 > Save folder and notes folder have different jobs: the first is a default destination; the second is the collection Cardify searches. If no notes folder is selected, note suggestions fall back to the save folder. Saving still lets you choose a destination.
+
+## Navigate between cards
+
+Use the **back** and **forward** arrows beside **Library** to revisit cards you have opened during the current session. The buttons follow your browsing history, not the card-number sequence; the current title and optional ID appear beside them. You can also use **⌘[** and **⌘]**. Opening a different card after going back starts a new path through your history.
+
+Cardify asks about unsaved changes before replacing a draft. If you save a new draft before going back, you can return to the saved card with Forward. A discarded unsaved draft cannot be recovered through history. Research, Habit, and To Do each retain their own current draft and file association while you switch between them.
 
 ## Find and connect cards
 
@@ -44,7 +50,7 @@ Open a reading card and choose **Templates → New Idea from This Card…**. If 
 
 ## Set your starting workflow
 
-Choose **File → Settings…** to select defaults for new Markdown cards. **As configured** keeps your current behavior. **Luhmann-inspired** starts an Idea Card with a Luhmann-style ID; **Eco-inspired** starts a Reading Card with a title-only filename; **Obsidian-style** starts a blank Markdown card with a title-only filename. Choose a different ID style or template whenever you want.
+Choose **File → Settings…** for **System, Light, or Dark** appearance and to select defaults for new Research cards. **As configured** keeps your current behavior. **Luhmann-inspired** starts an Idea Card with a Luhmann-style ID; **Eco-inspired** starts a Reading Card with a title-only filename; **Obsidian-style** starts a blank Markdown card with a title-only filename. Choose a different ID style or template whenever you want.
 
 The setting takes effect when you create a new Markdown card. It does not change the open draft, existing files, IDs, or folder locations. Every workflow keeps the same tools for links, Zotero, the library, and printing. These are optional starting points, not rules you must follow.
 
@@ -135,9 +141,15 @@ You can choose your personal library or an available group, search more fields, 
 
 ## Weekly habit cards
 
-Choose **Habits** or **Templates → Weekly Habit Tracker**. Edit the heading, add a row for each habit, and click the weekday boxes to add or remove an X. You can also leave the boxes empty and mark the printed card by hand.
+Choose **Habit** or **Templates → Weekly Habit Tracker**. Edit the heading, add a row for each habit, and click the weekday boxes to add or remove an X. You can also leave the boxes empty and mark the printed card by hand.
 
 Use the preview's **Text size** control to change the tracker font. Seven standard rows fit on a landscape card at the default size; larger text, long habit names, or more rows can continue onto additional cards. Saving produces a Markdown table. Opening a table saved by Cardify restores it in the habit editor.
+
+## To-do cards
+
+Choose **To Do** to write a heading and add tasks. Click each checkbox to mark or clear it, and use **Add task** or the minus button to change the list. Adjust text size and orientation beside the preview, then save, print, or both.
+
+The saved file uses ordinary Markdown task checkboxes and a `<!-- cardify:todo -->` marker. The marker is hidden on the printed card and lets Cardify reopen the list in the structured editor. If a marked file contains additional content the editor cannot safely represent, Cardify opens it as a Research note instead of discarding that content.
 
 ## Printing
 
@@ -172,7 +184,7 @@ On macOS, install the Apple Command Line Tools, then run:
 open build/Cardify.app
 ```
 
-The script builds a universal app targeting macOS 13 and later and signs it ad hoc. The result is not notarized. Run `./scripts/test.sh` for library, index, workflow, and draft-protection checks, `./scripts/test-printed-id.sh` for PDF layout checks, and `./scripts/test-preview-links.sh` for clickable-preview checks.
+The script builds a universal app targeting macOS 13 and later and signs it ad hoc. The result is not notarized. Run `./scripts/test.sh` for library, index, workflow, appearance, to-do, history, and draft-protection checks, `./scripts/test-printed-id.sh` for PDF layout checks, `./scripts/test-preview-links.sh` for clickable-preview checks, and `./scripts/test-todo-pdf.sh` for to-do printing.
 
 ## Further reading
 
