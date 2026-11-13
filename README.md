@@ -21,11 +21,15 @@ open build/Cardify.app
 
 The app is ad-hoc signed, not notarized. macOS may require an explicit confirmation before opening it. The build script produces a universal binary targeting macOS 13 and later; support for other macOS releases and hardware has not been comprehensively tested.
 
-## Zettelkasten templates
+## Zettelkasten writing
 
-Choose **Templates → Idea Card, Reading Card, or Index Card**. Each offers an optional suggested ID, editable by you, plus related-card links and explanations. Reading cards can attach a Zotero source and page. ID-bearing notes store `card_id` in Markdown frontmatter; the ID prints in small type in the card's safe area. Choosing a template replaces the Markdown draft only after confirmation.
+Choose **Templates → Idea Card, Reading Card, or Index Card** to insert a plain Markdown scaffold into the regular editor without replacing the current draft. Use **Link Note…** to search the notes folder and insert a real Obsidian file link; add context to explain the connection. Reading notes can attach a Zotero source and page through **Add Source…**.
 
-Choose **Templates → Choose ID / Notes Folder** to search a vault for existing IDs. Before saving an ID-bearing note, Cardify checks the selected notes folder and, when outside that folder, the destination folder and their subfolders for duplicate `card_id` metadata. Saving back to the same file is allowed. If a folder cannot be read or contains unparseable card ID metadata, verification stops rather than assuming the ID is unique. These checks cover only the searched folders and cannot prevent simultaneous edits by other apps. Existing files are not automatically renamed or renumbered.
+Turn on **Timestamp ID** to add a timestamp ID such as `202611122145` to a note's `card_id` metadata and suggest `202611122145 Title.md` when saving a new note. Timestamps use the Mac's local time; collisions get a suffix. Existing IDs are retained, and turning the checkbox off does not remove an existing ID. The ID prints in small type inside the safe area.
+
+**Branch from Card…** saves the current card first if needed, then creates a linked draft with an alternating branch marker, for example `1 → 1a → 1a1`. The branch references the actual parent filename. The parent is not modified by branch creation after its changes have been saved.
+
+Choose **Templates → Choose ID / Notes Folder** to search a vault for existing IDs. Before saving an ID-bearing note, Cardify checks the selected notes folder and, when outside that folder, the destination folder and their subfolders for duplicate `card_id` metadata and timestamp-prefixed filenames. Saving back to the same file is allowed. If a folder cannot be read or contains unparseable card ID metadata, verification stops rather than assuming the ID is unique. These checks cover only the searched folders and cannot prevent simultaneous edits by other apps. Existing files are never automatically renamed or renumbered.
 
 ## Weekly habit cards and design
 

@@ -156,13 +156,14 @@ struct ContentView: View {
     @State private var tracker = HabitTracker()
     @AppStorage("saveFolder") private var saveFolder = ""
     @AppStorage("notesFolder") private var notesFolder = ""
+    @AppStorage("autoTimestampID") private var autoTimestampID = false
     @StateObject private var editor = EditorState()
     @State private var fileURL: URL?
+    @State private var savedMarkdownSnapshot: String?
+    @State private var branchSaveFolder: URL?
     @State private var showZotero = false
     @State private var showNotes = false
     @State private var research: ResearchClip?
-    @State private var zettelKind: ZettelEditor.Kind?
-    @State private var suggestedID = ""
     @State private var status = "Draft saved on this Mac."
     var card: CardDocument { CardDocument(text: text, portrait: portrait, fontSize: fontSize, dotGrid: dotGrid) }
     var activePDF: Data? { cardMode == "habits" ? tracker.pdf(portrait: portrait, dotGrid: dotGrid, fontSize: fontSize) : card.pdf() }
@@ -190,9 +191,9 @@ struct ContentView: View {
                 Spacer()
                 Menu("Design") { Toggle("Dot grid", isOn: $dotGrid) }
                 Menu("Templates") {
-                    Button("Idea Card…") { startZettel(.idea) }
-                    Button("Reading Card…") { startZettel(.reading) }
-                    Button("Index Card…") { startZettel(.index) }
+                    Button("Idea Card") { insertTemplate(.idea) }
+                    Button("Reading Card") { insertTemplate(.reading) }
+                    Button("Index Card") { insertTemplate(.index) }
                     Divider()
                     Button("Choose ID / Notes Folder…", action: chooseNotesFolder)
                     Divider()
@@ -201,7 +202,11 @@ struct ContentView: View {
                 }
                 Button("Add Source…") { showZotero = true }.disabled(cardMode == "habits")
                 Button("Save Folder…", action: chooseFolder)
-                Button("New Card") { if cardMode == "habits" { setTracker(HabitTracker()) } else { text = "" }; fileURL = nil; status = "New draft." }
+                Button("New Card") {
+                    fileURL = nil; savedMarkdownSnapshot = nil; branchSaveFolder = nil
+                    if cardMode == "habits" { setTracker(HabitTracker()); status = "New draft." }
+                    else { text = ""; if autoTimestampID { _ = ensureTimestamp() } else { status = "New draft." } }
+                }
             }
             HSplitView {
                 VStack(alignment: .leading) {
@@ -211,7 +216,19 @@ struct ContentView: View {
                     if cardMode == "habits" {
                         HabitTrackerEditor(tracker: Binding(get: { tracker }, set: { setTracker($0) }))
                     } else {
-                    HStack { Text("Write").fontWeight(.semibold); Spacer(); Text("Markdown · use - [ ] for tasks").foregroundStyle(.secondary) }
+                    HStack {
+                        TextField("Title", text: Binding(get: { NoteEditing.title(in: text) }, set: { text = NoteEditing.setTitle($0, in: text) }))
+                        Toggle("Timestamp ID", isOn: Binding(get: { autoTimestampID }, set: { enabled in
+                            if enabled { if ensureTimestamp() { autoTimestampID = true } }
+                            else { autoTimestampID = false }
+                        })).toggleStyle(.checkbox).help("Automatically add a timestamp ID to new notes. Existing IDs are kept.")
+                    }
+                    HStack {
+                        Text("Write").fontWeight(.semibold)
+                        if let id = CardMetadata.parse(text).id { Text(id).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
+                        Spacer()
+                        Button("Branch from Card…", action: branchFromCurrent).help("Create a linked card branching from the saved current card")
+                    }
                     HStack(spacing: 5) {
                         Button("B") { editor.wrap("**") }.help("Bold")
                         Button("I") { editor.wrap("*") }.help("Italic")
@@ -246,11 +263,6 @@ struct ContentView: View {
             if let clip = ResearchClip.from(url) { research = clip }
             else { status = "Could not open that clip." }
         }
-        .sheet(item: $zettelKind) { kind in
-            ZettelEditor(kind: kind, hasDraft: !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, onUse: { content in
-                text = content; cardMode = "markdown"; fileURL = nil; status = "\(kind.rawValue) card ready."
-            }, cardID: suggestedID)
-        }
         .sheet(item: $research) { clip in
             ResearchEditor(clip: clip) { content, append in
                 if cardMode != "markdown" { fileURL = nil }
@@ -275,10 +287,63 @@ struct ContentView: View {
         let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true
         if panel.runModal() == .OK, let url = panel.url { notesFolder = url.path; status = "ID and notes folder: \(url.path)" }
     }
-    func startZettel(_ kind: ZettelEditor.Kind) {
-        let folder = !notesFolder.isEmpty ? notesFolder : saveFolder
-        suggestedID = CardIDIndex.suggest(in: folder.isEmpty ? nil : URL(fileURLWithPath: folder, isDirectory: true))
-        zettelKind = kind
+    func scanRoots(for file: URL? = nil) -> [URL] {
+        var roots: [URL] = []
+        if !notesFolder.isEmpty { roots.append(URL(fileURLWithPath: notesFolder, isDirectory: true).standardizedFileURL) }
+        let fallback = file?.deletingLastPathComponent() ?? (!saveFolder.isEmpty ? URL(fileURLWithPath: saveFolder, isDirectory: true) : nil)
+        if let folder = fallback?.standardizedFileURL,
+           !roots.contains(where: { folder.path == $0.path || folder.path.hasPrefix($0.path + "/") }) { roots.append(folder) }
+        return roots
+    }
+    @discardableResult func ensureTimestamp() -> Bool {
+        if CardMetadata.parse(text).id != nil { return true }
+        if CardMetadata.hasNonemptyID(text) { status = "Fix existing card_id metadata before adding an ID."; return false }
+        if let file = fileURL, let existingID = BranchIDs.filenameID(for: file) {
+            guard let updated = NoteEditing.addID(existingID, to: text) else { status = "Could not add ID to the existing metadata."; return false }
+            text = updated; status = "Kept the existing filename ID: \(existingID)."; return true
+        }
+        do {
+            let existing = try BranchIDs.existing(in: scanRoots(for: fileURL))
+            let id = BranchIDs.timestamp(existing: existing)
+            guard let updated = NoteEditing.addID(id, to: text) else { status = "Could not add ID to the existing metadata."; return false }
+            text = updated; status = "Timestamp ID added: \(id)."; return true
+        } catch { status = "Could not check existing IDs: \(error.localizedDescription)"; return false }
+    }
+    func insertTemplate(_ template: InlineTemplate) {
+        cardMode = "markdown"
+        if autoTimestampID && !ensureTimestamp() { return }
+        let offset = editor.view?.selectedRange().location ?? (text as NSString).length
+        let result = template.inserting(in: text, at: offset)
+        text = result.text; status = "\(template.rawValue) template inserted."
+        DispatchQueue.main.async {
+            guard let view = editor.view else { return }
+            view.setSelectedRange(NSRange(location: min(result.cursor, (view.string as NSString).length), length: 0))
+            view.window?.makeFirstResponder(view)
+        }
+    }
+    func branchFromCurrent() {
+        if CardMetadata.parse(text).id == nil && autoTimestampID && !ensureTimestamp() { return }
+        guard let parentID = CardMetadata.parse(text).id ?? fileURL.flatMap({ BranchIDs.filenameID(for: $0) }) else {
+            status = "Add a card ID before branching."; return
+        }
+        if fileURL == nil || savedMarkdownSnapshot != text || !(fileURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false) {
+            let alert = NSAlert(); alert.messageText = "Save this card before branching?"
+            alert.informativeText = "The new card links to the saved parent, so save your current changes first."
+            alert.addButton(withTitle: "Save…"); alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn, saveMarkdown() else { return }
+        }
+        guard let parentURL = fileURL else { return }
+        do {
+            let existing = try BranchIDs.existing(in: scanRoots(for: parentURL))
+            let childID = try BranchIDs.branch(from: parentID, existing: existing)
+            let root = notesFolder.isEmpty ? nil : URL(fileURLWithPath: notesFolder, isDirectory: true).standardizedFileURL.path
+            let path = parentURL.deletingPathExtension().standardizedFileURL.path
+            let link = root != nil && path.hasPrefix(root! + "/") ? String(path.dropFirst(root!.count + 1)) : parentURL.deletingPathExtension().lastPathComponent
+            guard !link.contains(where: { "[]|#^\n\r".contains($0) }) else { status = "The parent filename cannot be used in an Obsidian link."; return }
+            text = CardMetadata.frontmatter(childID) + "# \n\nRelated: [[\(link)]] — branches from this card.\n"
+            branchSaveFolder = parentURL.deletingLastPathComponent(); fileURL = nil; savedMarkdownSnapshot = nil
+            status = "Branch \(childID) created. The parent is unchanged."
+        } catch { status = "Could not create branch: \(error.localizedDescription)" }
     }
     var pageCount: Int { activePDF.flatMap { PDFDocument(data: $0)?.pageCount } ?? 0 }
     func openFile() {
@@ -288,7 +353,7 @@ struct ContentView: View {
                 let contents = try String(contentsOf: url, encoding: .utf8)
                 if let saved = HabitTracker.fromMarkdown(contents) { setTracker(saved); cardMode = "habits" }
                 else { text = contents; cardMode = "markdown" }
-                fileURL = url; status = "Opened \(url.lastPathComponent)."
+                fileURL = url; branchSaveFolder = nil; savedMarkdownSnapshot = cardMode == "markdown" ? contents : nil; status = "Opened \(url.lastPathComponent)."
             }
             catch { status = "Could not open file: \(error.localizedDescription)" }
         }
@@ -298,7 +363,12 @@ struct ContentView: View {
         if panel.runModal() == .OK, let url = panel.url { saveFolder = url.path; status = "Default save folder: \(url.path)" }
     }
     func saveMarkdown() -> Bool {
-        let panel = NSSavePanel(); if !saveFolder.isEmpty { panel.directoryURL = URL(fileURLWithPath: saveFolder, isDirectory: true) }; panel.allowedContentTypes = [.init(filenameExtension: "md")!]; panel.nameFieldStringValue = fileURL?.lastPathComponent ?? "Index Card.md"
+        if cardMode == "markdown" && autoTimestampID && !ensureTimestamp() { return false }
+        let panel = NSSavePanel()
+        if let folder = branchSaveFolder { panel.directoryURL = folder }
+        else if !saveFolder.isEmpty { panel.directoryURL = URL(fileURLWithPath: saveFolder, isDirectory: true) }
+        panel.allowedContentTypes = [.init(filenameExtension: "md")!]
+        panel.nameFieldStringValue = fileURL?.lastPathComponent ?? (cardMode == "markdown" ? NoteEditing.filename(id: CardMetadata.parse(text).id, title: NoteEditing.title(in: text)) : "Weekly Habits.md")
         if panel.runModal() == .OK, let url = panel.url {
             let content = cardMode == "habits" ? tracker.markdown : text
             if CardMetadata.parse(content).id == nil && CardMetadata.hasNonemptyID(content) {
@@ -321,7 +391,7 @@ struct ContentView: View {
                     }
                 } catch { status = "Could not verify card IDs: \(error.localizedDescription)"; return false }
             }
-            do { try content.write(to: url, atomically: true, encoding: .utf8); fileURL = url; status = "Saved \(url.lastPathComponent)."; return true }
+            do { try content.write(to: url, atomically: true, encoding: .utf8); fileURL = url; savedMarkdownSnapshot = cardMode == "markdown" ? content : nil; branchSaveFolder = nil; status = "Saved \(url.lastPathComponent)."; return true }
             catch { status = "Could not save: \(error.localizedDescription)" }
         }
         return false
