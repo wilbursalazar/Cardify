@@ -66,22 +66,29 @@ struct HabitTracker: Codable {
         return HabitTracker(title: title, rows: rows)
     }
 
-    func pdf(portrait: Bool, dotGrid: Bool = false) -> Data? {
+    func pdf(portrait: Bool, dotGrid: Bool = false, fontSize: Double = 9) -> Data? {
         let size = portrait ? CGSize(width: 216, height: 360) : CGSize(width: 360, height: 216)
         let inset: CGFloat = 27
         let body = CGRect(x: inset, y: inset, width: size.width - 2 * inset, height: size.height - 2 * inset)
         let cellWidth = min(24, max(14, floor(body.width * 0.48 / 7)))
         let gridX = body.maxX - 7 * cellWidth
         let nameWidth = gridX - body.minX
-        let headerHeight: CGFloat = 16
+        let bodyFontSize = CGFloat(fontSize)
+        // Keep the weekday abbreviations within their narrow cells on portrait cards.
+        var dayFontSize = max(6.5, bodyFontSize * 0.72)
+        while dayFontSize > 5 && Self.days.map({ ($0 as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: dayFontSize, weight: .medium)]).width }).max()! > cellWidth - 2 {
+            dayFontSize -= 0.25
+        }
+        let dayFont = NSFont.systemFont(ofSize: dayFontSize, weight: .medium)
+        let headerHeight = max(16, ceil(dayFont.ascender - dayFont.descender) + 4)
         let heading = title.replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
-        let titleText = NSAttributedString(string: heading.isEmpty ? "Weekly habits" : heading, attributes: [.font: NSFont.boldSystemFont(ofSize: 10), .foregroundColor: NSColor.black])
+        let titleText = NSAttributedString(string: heading.isEmpty ? "Weekly habits" : heading, attributes: [.font: NSFont.boldSystemFont(ofSize: bodyFontSize + 1), .foregroundColor: NSColor.black])
         let titleSetter = CTFramesetterCreateWithAttributedString(titleText)
         let titleHeight = ceil(CTFramesetterSuggestFrameSizeWithConstraints(titleSetter, CFRange(location: 0, length: 0), nil, CGSize(width: body.width, height: .greatestFiniteMagnitude), nil).height) + 2
         let topHeight = max(24, titleHeight + 10)
         let maximumRowHeight = body.height - topHeight - headerHeight
         guard maximumRowHeight >= 17 else { return nil }
-        let textFont = NSFont.systemFont(ofSize: 8)
+        let textFont = NSFont.systemFont(ofSize: bodyFontSize)
         let attrs: [NSAttributedString.Key: Any] = [.font: textFont, .foregroundColor: NSColor.black]
         let data = NSMutableData()
         guard let consumer = CGDataConsumer(data: data as CFMutableData) else { return nil }
@@ -115,9 +122,8 @@ struct HabitTracker: Codable {
                 let rect = CGRect(x: gridX + CGFloat(i) * cellWidth, y: top - headerHeight, width: cellWidth, height: headerHeight)
                 context.stroke(rect)
                 let day = Self.days[i]
-                let dayFont = NSFont.systemFont(ofSize: 6.5, weight: .medium)
                 let w = (day as NSString).size(withAttributes: [.font: dayFont]).width
-                line(day, x: rect.midX - w / 2, y: rect.midY - 2.3, font: dayFont)
+                line(day, x: rect.midX - w / 2, y: rect.midY - (dayFont.ascender + dayFont.descender) / 2, font: dayFont)
             }
             return top - headerHeight
         }

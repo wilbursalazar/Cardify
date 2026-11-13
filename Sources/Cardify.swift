@@ -141,7 +141,7 @@ struct ContentView: View {
     @State private var research: ResearchClip?
     @State private var status = "Draft saved on this Mac."
     var card: CardDocument { CardDocument(text: text, portrait: portrait, fontSize: fontSize, dotGrid: dotGrid) }
-    var activePDF: Data? { cardMode == "habits" ? tracker.pdf(portrait: portrait, dotGrid: dotGrid) : card.pdf() }
+    var activePDF: Data? { cardMode == "habits" ? tracker.pdf(portrait: portrait, dotGrid: dotGrid, fontSize: fontSize) : card.pdf() }
     func setTracker(_ value: HabitTracker) {
         tracker = value
         if let data = try? JSONEncoder().encode(value), let encoded = String(data: data, encoding: .utf8) { habitDraft = encoded }
@@ -161,7 +161,7 @@ struct ContentView: View {
             HStack {
                 Picker("Layout", selection: $portrait) { Text("Landscape (5 × 3)").tag(false); Text("Portrait (3 × 5)").tag(true) }.frame(width: 240)
                 Text("Text size")
-                Slider(value: $fontSize, in: 7...18, step: 1).frame(width: 120).disabled(cardMode == "habits").help(cardMode == "habits" ? "Habit grid text uses a fixed size to fit the card." : "Text size")
+                Slider(value: $fontSize, in: 7...18, step: 1).frame(width: 120).help("Text size")
                 Text("\(Int(fontSize)) pt").monospacedDigit().frame(width: 45)
                 Spacer()
                 Menu("Design") { Toggle("Dot grid", isOn: $dotGrid) }
