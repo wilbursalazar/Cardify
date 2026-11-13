@@ -19,7 +19,7 @@ struct DebatePanel: View {
     @Binding var showBrowser: Bool
     let currentURL: URL?
     let onOpen: (URL) -> Bool
-    let onNew: (String) -> Bool
+    let onNew: (String, DebateParentReference?) -> Bool
     let onFollowLink: (CardLinkTarget) -> Void
     @State private var message = ""
 
@@ -98,8 +98,8 @@ struct DebatePanel: View {
         }
     }
     private func newRole(_ role: DebateRole) {
-        guard let draft = DebateNotes.setRole(role, in: "# \n\n") else { message = "Could not create a debate draft."; return }
-        if onNew(draft) { message = "New \(role == .project ? "resolution" : "parent") draft. Save it when ready." }
+        guard let draft = DebateNotes.setRole(role, in: DebateTemplates.body(for: role)) else { message = "Could not create a debate draft."; return }
+        if onNew(draft, nil) { message = "New \(role == .project ? "resolution" : "parent") draft. Save it when ready." }
     }
     private func mark(_ role: DebateRole) {
         guard let updated = DebateNotes.setRole(role, in: text) else { message = "Could not mark this draft. Check its debate metadata."; return }
@@ -128,7 +128,7 @@ private struct DebateBrowser: View {
     @Binding var text: String
     let currentURL: URL?
     let onOpen: (URL) -> Bool
-    let onNew: (String) -> Bool
+    let onNew: (String, DebateParentReference?) -> Bool
     @State private var query = ""
     @State private var selected: String?
     @State private var projectPath: String?
@@ -293,27 +293,40 @@ private struct DebateBrowser: View {
         if onOpen(card.url) { dismiss() }
     }
     private func newResolution() {
-        guard let draft = DebateNotes.setRole(.project, in: "# \n\n") else { message = "Could not create a resolution."; return }
-        if onNew(draft) { dismiss() }
+        guard let draft = DebateNotes.setRole(.project, in: DebateTemplates.body(for: .project)) else { message = "Could not create a resolution."; return }
+        if onNew(draft, nil) { dismiss() }
     }
     private func newChild(_ parent: LibraryCard, role: DebateRole?) {
-        guard safe(parent, requireRole: true) else { return }
-        let template: String
-        switch role {
-        case .objection: template = "# \n\n## Objection\n\n## Response\n\n## Source\n"
-        case .evidence: template = "# \n\n## Evidence\n\n## Source\n"
-        case .reply: template = "# \n\n## Reply\n\n## Source\n"
-        default: template = "# \n\n"
+        guard safe(parent, requireRole: true),
+              let latest = try? String(contentsOf: parent.url, encoding: .utf8) else { return }
+        let latestInfo = DebateNotes.parse(latest)
+        guard latestInfo.valid, latestInfo.role == DebateNotes.parse(parent.content).role else {
+            message = "This parent changed. Refresh and try again."; return
         }
+        let parentID = DebateIDs.parentID(in: latest, at: parent.url)
+        if parentID == nil {
+            guard !CardMetadata.hasNonemptyID(latest) else { message = "Fix the parent's card ID before creating a linked card."; return }
+            let alert = NSAlert()
+            alert.messageText = "This parent has no card ID"
+            alert.informativeText = "Add an ID to the parent first for an inherited label, or create this card without a parent-based ID."
+            alert.addButton(withTitle: "Continue without parent ID")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+        let template = DebateTemplates.body(for: role)
         let marked = role.flatMap { DebateNotes.setRole($0, in: template) } ?? template
         guard let draft = DebateNotes.setPrimary(parent.path, explanation: "", in: marked) else { message = "Could not create a linked card."; return }
-        if onNew(draft) { dismiss() }
+        let reference = DebateParentReference(url: parent.url, root: URL(fileURLWithPath: folder, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL,
+                                              path: parent.path, expectedID: parentID, expectedRole: latestInfo.role)
+        if onNew(draft, reference) { dismiss() }
     }
     private func newParent(_ role: DebateRole, project: LibraryCard) {
         guard safe(project, requireRole: true) else { return }
-        guard let marked = DebateNotes.setRole(role, in: "# \n\n## Main point\n\n## Supporting reasons\n\n## Sources\n"),
+        guard let marked = DebateNotes.setRole(role, in: DebateTemplates.body(for: role)),
               let draft = DebateNotes.addProject(project.path, in: marked) else { message = "Could not create a parent in this resolution."; return }
-        if onNew(draft) { dismiss() }
+        let reference = DebateParentReference(url: project.url, root: URL(fileURLWithPath: folder, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL,
+                                              path: project.path, expectedID: DebateIDs.parentID(in: project.content, at: project.url), expectedRole: .project)
+        if onNew(draft, reference) { dismiss() }
     }
     private func setPrimary(_ parent: LibraryCard) {
         guard safe(parent, requireRole: true) else { return }

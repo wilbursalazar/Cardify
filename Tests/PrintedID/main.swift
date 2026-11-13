@@ -12,7 +12,7 @@ import Foundation
   guard let proseData = CardDocument(text: prose, portrait: false, fontSize: 9).pdf(),
         let proseOutput = PDFDocument(data: proseData)?.page(at: 0)?.string else { fatalError("Prose PDF missing") }
   precondition(proseOutput.contains("Ordinary prose survives"), "Markdown between horizontal rules must not disappear")
-  for debateID in ["AFF-01", "DEF-01"] {
+  for debateID in ["AFF-01", "DEF-01", "AFF-01-OB-01", "AFF-01-OB-01-RE-01"] {
    for portrait in [false, true] {
     let draft = CardMetadata.frontmatter(debateID) + "# A major debate point\n\nSupporting argument."
     guard let data = CardDocument(text: draft, portrait: portrait, fontSize: 9).pdf(),

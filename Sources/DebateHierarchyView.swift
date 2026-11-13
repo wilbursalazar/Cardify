@@ -186,7 +186,7 @@ private struct DebateGraphNode: View {
                 HStack(spacing: 6) {
                     Text(kind).font(.system(size: 10, weight: .semibold)).foregroundStyle(tint)
                     Spacer(minLength: 0)
-                    if (kind == "AFF" || kind == "DEF"), let cardID = card.cardID, !cardID.isEmpty {
+                    if let cardID = card.cardID, !cardID.isEmpty {
                         Text(cardID).font(.system(size: 10)).foregroundStyle(.secondary)
                             .lineLimit(1).truncationMode(.middle).frame(maxWidth: 85, alignment: .trailing)
                     }

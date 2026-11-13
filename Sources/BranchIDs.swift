@@ -72,7 +72,7 @@ enum BranchIDs {
     static func debateFilenameID(for file: URL) -> String? {
         guard file.pathExtension.lowercased() == "md" else { return nil }
         let name = file.deletingPathExtension().lastPathComponent
-        let pattern = try! NSRegularExpression(pattern: #"^((?:AFF|DEF)-[0-9]+(?:[A-Za-z]+[0-9]*)*)(?=$|[ _-])"#, options: [.caseInsensitive])
+        let pattern = try! NSRegularExpression(pattern: #"^((?:AFF|DEF)-[0-9]+(?:[A-Za-z]+[0-9]*)*(?:-(?:OB|EV|AR|RE|NT)-[0-9]+(?:[A-Za-z]+[0-9]*)*)*)(?=$|[ _-])"#, options: [.caseInsensitive])
         guard let match = pattern.firstMatch(in: name, range: NSRange(name.startIndex..., in: name)), let range = Range(match.range(at: 1), in: name) else { return nil }
         return String(name[range])
     }

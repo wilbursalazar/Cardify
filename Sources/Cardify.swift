@@ -381,6 +381,19 @@ struct ContentView: View {
         let title = cardMode == "habits" ? tracker.title : cardMode == "todos" ? todo.title : NoteEditing.title(in: text)
         return title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? (fileURL?.deletingPathExtension().lastPathComponent ?? "Untitled card") : title
     }
+    var titlePlaceholder: String {
+        guard showDebate else { return "Title" }
+        switch DebateNotes.parse(text).role {
+        case .project: return "Resolution question"
+        case .aff: return "AFF point title"
+        case .def: return "DEF point title"
+        case .evidence: return "Evidence title"
+        case .objection: return "Objection title"
+        case .argument: return "Argument title"
+        case .reply: return "Reply title"
+        case nil: return "Title"
+        }
+    }
     func setTracker(_ value: HabitTracker) {
         tracker = value
         if let data = try? JSONEncoder().encode(value), let encoded = String(data: data, encoding: .utf8) { habitDraft = encoded }
@@ -456,25 +469,65 @@ struct ContentView: View {
                         }.pickerStyle(.segmented).labelsHidden().frame(minWidth: 240, maxWidth: 250)
                         Spacer(minLength: 4)
                         Menu("Templates") {
-                            Button("Idea Card") { insertTemplate(.idea) }
-                            Button("Reading Card") { insertTemplate(.reading) }
-                            Button("Index Card") { insertTemplate(.index) }
-                            Button("Mark Current Card as Index") { markIndexCard() }.disabled(cardMode != "markdown")
-                            Divider()
-                            Button("New Idea from This Card…") { ideaFromCurrent() }.disabled(cardMode != "markdown")
-                            Divider()
-                            Button("Research Card…") { research = ResearchClip() }
-                            Button("Weekly Habit Tracker") { switchMode(to: "habits") }
+                            if showDebate && cardMode == "markdown" {
+                                Button("AFF prompts") { editor.insert(DebateTemplates.body(for: .aff)) }
+                                Button("DEF prompts") { editor.insert(DebateTemplates.body(for: .def)) }
+                                Button("Evidence prompts") { editor.insert(DebateTemplates.body(for: .evidence)) }
+                                Button("Objection prompts") { editor.insert(DebateTemplates.body(for: .objection)) }
+                                Button("Argument prompts") { editor.insert(DebateTemplates.body(for: .argument)) }
+                                Button("Reply prompts") { editor.insert(DebateTemplates.body(for: .reply)) }
+                            } else {
+                                Button("Idea Card") { insertTemplate(.idea) }
+                                Button("Reading Card") { insertTemplate(.reading) }
+                                Button("Index Card") { insertTemplate(.index) }
+                                Button("Mark Current Card as Index") { markIndexCard() }.disabled(cardMode != "markdown")
+                                Divider()
+                                Button("New Idea from This Card…") { ideaFromCurrent() }.disabled(cardMode != "markdown")
+                                Divider()
+                                Button("Research Card…") { research = ResearchClip() }
+                                Button("Weekly Habit Tracker") { switchMode(to: "habits") }
+                            }
                         }
                     }
                     if cardMode == "markdown" && showDebate {
-                        DebatePanel(text: $text, showBrowser: $showDebateBrowser, currentURL: fileURL, onOpen: { url in loadFile(url) }, onNew: { draft in
+                        DebatePanel(text: $text, showBrowser: $showDebateBrowser, currentURL: fileURL, onOpen: { url in loadFile(url) }, onNew: { draft, parent in
                             guard confirmReplaceDraft() else { return false }
                             let info = DebateNotes.parse(draft)
                             var prepared = draft
+                            if let parent = parent {
+                                guard CardGraph.canOpen(parent.url, in: parent.root),
+                                      let latest = try? String(contentsOf: parent.url, encoding: .utf8),
+                                      DebateNotes.parse(latest).valid,
+                                      DebateNotes.parse(latest).role == parent.expectedRole,
+                                      (!CardMetadata.hasNonemptyID(latest) || CardMetadata.parse(latest).id != nil),
+                                      DebateIDs.parentID(in: latest, at: parent.url) == parent.expectedID else {
+                                    status = "This parent changed. Refresh the argument map and try again."
+                                    let alert = NSAlert(); alert.messageText = "Can't create this card"; alert.informativeText = status; alert.runModal()
+                                    return false
+                                }
+                                if info.role != .aff && info.role != .def, let parentID = parent.expectedID {
+                                    do {
+                                        var roots = scanRoots(for: fileURL)
+                                        if !roots.contains(where: { $0.resolvingSymlinksInPath().standardizedFileURL == parent.root }) { roots.append(parent.root) }
+                                        let existing = try DebateIDs.existing(in: roots)
+                                        guard let result = DebateIDs.prepareChild(draft, parentID: parentID, existing: existing) else {
+                                            status = "Could not prepare the connected card's ID. Check its metadata."
+                                            let alert = NSAlert(); alert.messageText = "Can't create this card"; alert.informativeText = status; alert.runModal()
+                                            return false
+                                        }
+                                        prepared = result
+                                    } catch {
+                                        status = "Could not check debate IDs: \(error.localizedDescription)"
+                                        let alert = NSAlert(); alert.messageText = "Can't create this card"; alert.informativeText = status; alert.runModal()
+                                        return false
+                                    }
+                                }
+                            }
                             if info.role == .aff || info.role == .def {
                                 do {
-                                    let existing = try DebateIDs.existing(in: scanRoots(for: fileURL))
+                                    var roots = scanRoots(for: fileURL)
+                                    if let root = parent?.root, !roots.contains(where: { $0.resolvingSymlinksInPath().standardizedFileURL == root }) { roots.append(root) }
+                                    let existing = try DebateIDs.existing(in: roots)
                                     guard let result = DebateIDs.prepare(draft, existing: existing) else {
                                         status = "Could not prepare an AFF/DEF ID. Check the card metadata."
                                         let alert = NSAlert(); alert.messageText = "Can't create this point"; alert.informativeText = status; alert.runModal()
@@ -501,17 +554,17 @@ struct ContentView: View {
                         TodoListEditor(list: Binding(get: { todo }, set: { setTodo($0) }))
                     } else {
                     HStack {
-                        TextField(showDebate && DebateNotes.parse(text).role == .project ? "Resolution question" : "Title", text: Binding(get: { NoteEditing.title(in: text) }, set: { text = NoteEditing.setTitle($0, in: text) }))
+                        TextField(titlePlaceholder, text: Binding(get: { NoteEditing.title(in: text) }, set: { text = NoteEditing.setTitle($0, in: text) }))
                         Picker("ID style", selection: Binding(get: { idMode }, set: { mode in
                             storedIDMode = mode.rawValue
                             if mode != .titleOnly && CardMetadata.parse(text).id == nil { _ = ensureID() }
                         })) {
                             ForEach(IDMode.allCases) { mode in Text(mode.rawValue).tag(mode) }
-                        }.frame(width: 190).help(showDebate ? "AFF and DEF points use their own IDs. Other new notes follow this setting; existing IDs are kept." : "Choose how IDs are suggested for new notes. Existing IDs are kept.")
+                        }.frame(width: 190).help(showDebate ? "AFF and DEF points use their own IDs; connected cards inherit their parent’s ID. Existing IDs are kept." : "Choose how IDs are suggested for new notes. Existing IDs are kept.")
                     }
                     HStack {
                         Text("Write").fontWeight(.semibold)
-                        if idMode != .titleOnly || CardMetadata.parse(text).id != nil {
+                        if showDebate || idMode != .titleOnly || CardMetadata.parse(text).id != nil {
                             TextField("Card ID", text: Binding(get: { CardMetadata.parse(text).id ?? "" }, set: { id in
                                 if let updated = NoteEditing.setID(id, in: text) { text = updated }
                                 else { status = "Could not edit card ID in the existing metadata." }
@@ -528,21 +581,33 @@ struct ContentView: View {
                             Button("Branch from card…") { relatedFromCurrent(continuation: false) }.help("Create a linked branch from the current card")
                         }
                     }
-                    HStack(spacing: 5) {
-                        Button("B") { editor.wrap("**") }.help("Bold")
-                        Button("I") { editor.wrap("*") }.help("Italic")
-                        Button("H1") { editor.prefix("# ") }.help("Heading")
-                        Button("H2") { editor.prefix("## ") }.help("Subheading")
-                        Button("• List") { editor.prefix("- ") }.help("Bullet list")
-                        Button("☐ Task") { editor.prefix("- [ ] ") }.help("Task")
-                        Spacer(minLength: 0)
-                    }.buttonStyle(.bordered)
-                    HStack(spacing: 8) {
-                        Button("Link Note…") { showNotes = true }.help("Search your notes folder")
-                        Button("Add Zotero Source…") { showZotero = true }.help("Find a source in Zotero")
-                        Spacer(minLength: 0)
+                    VStack(spacing: 0) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 5) {
+                                Button("B") { editor.wrap("**") }.help("Bold")
+                                Button("I") { editor.wrap("*") }.help("Italic")
+                                Button("H1") { editor.prefix("# ") }.help("Heading")
+                                Button("H2") { editor.prefix("## ") }.help("Subheading")
+                                Button("• List") { editor.prefix("- ") }.help("Bullet list")
+                                Button("☐ Task") { editor.prefix("- [ ] ") }.help("Task")
+                                Spacer(minLength: 0)
+                            }
+                            HStack(spacing: 8) {
+                                Button("Link Note…") { showNotes = true }.help("Search your notes folder")
+                                Button("Add Zotero Source…") { showZotero = true }.help("Find a source in Zotero")
+                                Spacer(minLength: 0)
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .padding(6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Color(nsColor: .controlBackgroundColor))
+                        Divider()
+                        MarkdownEditor(text: $text, editor: editor, onFollowLink: followLink)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
-                    MarkdownEditor(text: $text, editor: editor, onFollowLink: followLink).border(Color.secondary.opacity(0.2))
+                    .overlay(Rectangle().stroke(Color.secondary.opacity(0.2)))
                     }
                 }.frame(minWidth: 340)
                 VStack(alignment: .leading) {
@@ -889,8 +954,8 @@ struct ContentView: View {
         if let folder = branchSaveFolder { panel.directoryURL = folder }
         else if !saveFolder.isEmpty { panel.directoryURL = URL(fileURLWithPath: saveFolder, isDirectory: true) }
         panel.allowedContentTypes = [.init(filenameExtension: "md")!]
-        let role = cardMode == "markdown" ? DebateNotes.parse(text).role : nil
-        let useIDInFilename = idMode != .titleOnly || role == .aff || role == .def
+        let debate = cardMode == "markdown" ? DebateNotes.parse(text) : nil
+        let useIDInFilename = idMode != .titleOnly || debate?.role == .aff || debate?.role == .def || debate?.primary != nil
         panel.nameFieldStringValue = fileURL?.lastPathComponent ?? (cardMode == "markdown" ? NoteEditing.filename(id: useIDInFilename ? CardMetadata.parse(text).id : nil, title: NoteEditing.title(in: text)) : cardMode == "todos" ? NoteEditing.filename(id: nil, title: todo.title) : "Weekly Habits.md")
         if panel.runModal() == .OK, let url = panel.url {
             let content = cardMode == "habits" ? tracker.markdown : cardMode == "todos" ? todo.markdown : text
