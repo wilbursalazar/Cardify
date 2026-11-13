@@ -41,6 +41,7 @@ struct NotePicker: View {
     let onInsert: (String) -> Void
     @State private var query = ""
     @State private var selected: String?
+    @State private var explanation = ""
     @State private var notes: [CardifyNote] = []
     @State private var message = "Choose your Obsidian vault or notes folder."
     @State private var scanID = UUID()
@@ -66,13 +67,15 @@ struct NotePicker: View {
                     Text(note.path).font(.caption).foregroundStyle(.secondary)
                     if !note.canLink { Text("This filename contains characters that cannot form a wiki link.").font(.caption).foregroundStyle(.secondary) }
                 }.tag(note.path)
-            }.frame(minHeight: 240)
+            }.frame(minHeight: 200)
+            TextField("Connection (optional)", text: $explanation)
             HStack {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Insert Link") {
                     if let note = notes.first(where: { $0.path == selected && $0.canLink }) {
-                        onInsert(note.wikiLink)
+                        let context = explanation.components(separatedBy: .newlines).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+                        onInsert(note.wikiLink + (context.isEmpty ? "" : " — " + context))
                         dismiss()
                     }
                 }.disabled(!notes.contains { $0.path == selected && $0.canLink }).keyboardShortcut(.defaultAction)

@@ -15,7 +15,6 @@ struct CardDocument {
         let inset: CGFloat = 27 // 3/8 inch, in PDF points
         let body = CGRect(x: inset, y: inset, width: size.width - 2 * inset, height: size.height - 2 * inset)
         let metadata = CardMetadata.parse(text)
-        var textBody = body
         var idLine: CTLine?
         var idWidth: CGFloat = 0
         if let id = metadata.id {
@@ -29,9 +28,11 @@ struct CardDocument {
                 size -= 0.5
             } while size >= 5
             guard idWidth <= body.width else { return nil }
-            textBody.size.height -= 12
         }
-        let attributed = MarkdownRendering.render(metadata.body, fontSize: CGFloat(fontSize))
+        // Frontmatter is normally followed by a separator newline. Start the
+        // visible card at its first line so its title can share the ID row.
+        let visibleBody = metadata.id == nil ? metadata.body : String(metadata.body.drop(while: { $0 == "\n" || $0 == "\r" }))
+        let attributed = MarkdownRendering.render(visibleBody, fontSize: CGFloat(fontSize))
         let framesetter = CTFramesetterCreateWithAttributedString(attributed)
         let data = NSMutableData()
         guard let consumer = CGDataConsumer(data: data as CFMutableData) else { return nil }
@@ -58,14 +59,40 @@ struct CardDocument {
                 context.textPosition = CGPoint(x: body.maxX - idWidth, y: body.maxY - 7)
                 CTLineDraw(idLine, context)
             }
-            let path = CGPath(rect: textBody, transform: nil)
-            let frame = CTFramesetterCreateFrame(framesetter, CFRange(location: location, length: 0), path, nil)
-            CTFrameDraw(frame, context)
-            let visible = CTFrameGetVisibleStringRange(frame)
+            // Draw the first line beside the ID, then use the full width below it.
+            var consumed = 0
+            var textBody = body
+            if idLine != nil {
+                let availableWidth = body.width - idWidth - 5
+                if availableWidth >= 24 {
+                    let typesetter = CTTypesetterCreateWithAttributedString(attributed)
+                    let count = CTTypesetterSuggestLineBreak(typesetter, location, Double(availableWidth))
+                    if count > 0 {
+                        let line = CTTypesetterCreateLine(typesetter, CFRange(location: location, length: count))
+                        var ascent: CGFloat = 0, descent: CGFloat = 0, leading: CGFloat = 0
+                        CTLineGetTypographicBounds(line, &ascent, &descent, &leading)
+                        context.textPosition = CGPoint(x: body.minX, y: body.maxY - ascent)
+                        CTLineDraw(line, context)
+                        consumed = count
+                        textBody.size.height -= max(9, ceil(ascent + descent + leading + 1.5))
+                    } else {
+                        textBody.size.height -= 12
+                    }
+                } else {
+                    // Very long IDs can occupy the full width; keep their own row.
+                    textBody.size.height -= 12
+                }
+            }
+            if location + consumed < attributed.length {
+                let path = CGPath(rect: textBody, transform: nil)
+                let frame = CTFramesetterCreateFrame(framesetter, CFRange(location: location + consumed, length: 0), path, nil)
+                CTFrameDraw(frame, context)
+                consumed += CTFrameGetVisibleStringRange(frame).length
+            }
             context.restoreGState()
             context.endPDFPage()
-            guard visible.length > 0 else { context.closePDF(); return nil }
-            location += visible.length
+            guard consumed > 0 else { context.closePDF(); return nil }
+            location += consumed
         } while location < attributed.length
         context.closePDF()
         return data as Data
@@ -127,7 +154,7 @@ struct ResearchClip: Identifiable {
 struct ResearchEditor: View {
     @Environment(\.dismiss) private var dismiss
     @State var clip: ResearchClip
-    let onUse: (String, Bool) -> Void
+    let onUse: (String, Bool) -> Bool
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Research card").font(.title2.bold())
@@ -139,8 +166,8 @@ struct ResearchEditor: View {
             HStack {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Spacer()
-                Button("Append to Draft") { onUse(clip.markdown, true); dismiss() }
-                Button("Replace Draft") { onUse(clip.markdown, false); dismiss() }.buttonStyle(.borderedProminent)
+                Button("Append to Draft") { if onUse(clip.markdown, true) { dismiss() } }
+                Button("Replace Draft") { if onUse(clip.markdown, false) { dismiss() } }.buttonStyle(.borderedProminent)
             }
         }.padding(22).frame(width: 560, height: 390)
     }
@@ -158,12 +185,16 @@ struct ContentView: View {
     @AppStorage("notesFolder") private var notesFolder = ""
     @AppStorage("autoTimestampID") private var autoTimestampID = false
     @AppStorage("idMode") private var storedIDMode = ""
+    @AppStorage("newCardWorkflow") private var newCardWorkflow = WorkflowPreference.configured.rawValue
     @StateObject private var editor = EditorState()
     @State private var fileURL: URL?
     @State private var savedMarkdownSnapshot: String?
+    @State private var savedHabitSnapshot: String?
     @State private var branchSaveFolder: URL?
     @State private var showZotero = false
     @State private var showNotes = false
+    @State private var showLibrary = false
+    @State private var showSettings = false
     @State private var research: ResearchClip?
     @State private var status = "Draft saved on this Mac."
     var card: CardDocument { CardDocument(text: text, portrait: portrait, fontSize: fontSize, dotGrid: dotGrid) }
@@ -183,9 +214,17 @@ struct ContentView: View {
                 Spacer(minLength: 12)
                 Menu("File") {
                     Button("New Card") {
-                        fileURL = nil; savedMarkdownSnapshot = nil; branchSaveFolder = nil
-                        if cardMode == "habits" { setTracker(HabitTracker()); status = "New draft." }
-                        else { text = ""; if idMode != .titleOnly { _ = ensureID() } else { status = "New draft." } }
+                        guard confirmReplaceDraft() else { return }
+                        fileURL = nil; branchSaveFolder = nil
+                        if cardMode == "habits" { savedHabitSnapshot = nil; setTracker(HabitTracker()); status = "New draft." }
+                        else {
+                            savedMarkdownSnapshot = nil
+                            if let defaults = WorkflowPreference.defaults(for: newCardWorkflow) {
+                                storedIDMode = defaults.idMode.rawValue
+                                text = defaults.template?.markdown ?? ""
+                            } else { text = "" }
+                            if idMode != .titleOnly { _ = ensureID() } else { status = "New draft." }
+                        }
                     }
                     Button("Open Markdown…", action: openFile)
                     Divider()
@@ -193,7 +232,10 @@ struct ContentView: View {
                     Divider()
                     Button("Choose Save Folder…", action: chooseFolder)
                     Button("Choose Notes Folder…", action: chooseNotesFolder)
+                    Divider()
+                    Button("Settings…") { showSettings = true }
                 }
+                Button("Library…") { showLibrary = true }
                 Button("Save…") { _ = saveMarkdown() }.keyboardShortcut("s")
                 Button("Print…", action: printCards).keyboardShortcut("p")
                 Button("Save & Print…") { if saveMarkdown() { printCards() } }.buttonStyle(.borderedProminent)
@@ -210,6 +252,9 @@ struct ContentView: View {
                             Button("Idea Card") { insertTemplate(.idea) }
                             Button("Reading Card") { insertTemplate(.reading) }
                             Button("Index Card") { insertTemplate(.index) }
+                            Button("Mark Current Card as Index") { markIndexCard() }.disabled(cardMode != "markdown")
+                            Divider()
+                            Button("New Idea from This Card…") { ideaFromCurrent() }.disabled(cardMode != "markdown")
                             Divider()
                             Button("Research Card…") { research = ResearchClip() }
                             Button("Weekly Habit Tracker") { fileURL = nil; cardMode = "habits" }
@@ -303,16 +348,16 @@ struct ContentView: View {
         }
         .sheet(item: $research) { clip in
             ResearchEditor(clip: clip) { content, append in
-                if cardMode != "markdown" { fileURL = nil }
-                cardMode = "markdown"
-                if append { text += (text.isEmpty ? "" : "\n\n") + content }
-                else { text = content; fileURL = nil }
-                status = "Research card ready."
+                useResearch(content, append: append)
             }
         }
         .sheet(isPresented: $showNotes) {
             NotePicker { link in editor.insert(link); status = "Note link inserted." }
         }
+        .sheet(isPresented: $showLibrary) {
+            CardLibrary(currentURL: fileURL, allowInsert: cardMode == "markdown", onOpen: { url in loadFile(url) }, onInsert: { link in editor.insert(link); status = "Note link inserted." })
+        }
+        .sheet(isPresented: $showSettings) { WorkflowSettings() }
         .sheet(isPresented: $showZotero) {
             ZoteroPicker { source in
                 let separator = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : "\n\n"
@@ -349,9 +394,16 @@ struct ContentView: View {
         } catch { status = "Could not check existing IDs: \(error.localizedDescription)"; return false }
     }
     func insertTemplate(_ template: InlineTemplate) {
+        if cardMode != "markdown" { fileURL = nil; branchSaveFolder = nil }
         cardMode = "markdown"
+        let originalLength = (text as NSString).length
+        let originalOffset = editor.view?.selectedRange().location ?? originalLength
+        if template == .index {
+            guard let marked = IndexCardMetadata.marking(text) else { status = "Could not mark this card as an index. Check its frontmatter."; return }
+            text = marked
+        }
         if idMode != .titleOnly && !ensureID() { return }
-        let offset = editor.view?.selectedRange().location ?? (text as NSString).length
+        let offset = max(0, originalOffset + (text as NSString).length - originalLength)
         let result = template.inserting(in: text, at: offset)
         text = result.text; status = "\(template.rawValue) template inserted."
         DispatchQueue.main.async {
@@ -359,6 +411,32 @@ struct ContentView: View {
             view.setSelectedRange(NSRange(location: min(result.cursor, (view.string as NSString).length), length: 0))
             view.window?.makeFirstResponder(view)
         }
+    }
+    func markIndexCard() {
+        guard let marked = IndexCardMetadata.marking(text) else { status = "Could not mark this card as an index. Check its frontmatter."; return }
+        text = marked
+        status = "Marked as an index card. Save to update the library."
+    }
+    func ideaFromCurrent() {
+        if fileURL == nil || savedMarkdownSnapshot != text || !(fileURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false) {
+            let alert = NSAlert(); alert.messageText = "Save this card before creating an idea?"
+            alert.informativeText = "The new idea links to the saved card."
+            alert.addButton(withTitle: "Save…"); alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn, saveMarkdown() else { return }
+        }
+        guard let parentURL = fileURL else { return }
+        let root = notesFolder.isEmpty ? nil : URL(fileURLWithPath: notesFolder, isDirectory: true).standardizedFileURL.path
+        let path = parentURL.deletingPathExtension().standardizedFileURL.path
+        let link = root != nil && path.hasPrefix(root! + "/") ? String(path.dropFirst(root!.count + 1)) : parentURL.deletingPathExtension().lastPathComponent
+        guard CardifyNote(path: link).canLink else { status = "The saved card's filename cannot be used in an Obsidian link."; return }
+        do {
+            let newID: String?
+            if idMode == .titleOnly { newID = nil }
+            else { newID = CardIDs.newID(mode: idMode, existing: try BranchIDs.existing(in: scanRoots(for: parentURL))) }
+            text = CardMetadata.frontmatter(newID ?? "") + "# Idea\n\n\n\n## Related cards\n\n- [[\(link)]] — develops this card.\n"
+            branchSaveFolder = parentURL.deletingLastPathComponent(); fileURL = nil; savedMarkdownSnapshot = nil
+            status = "New idea created. Save it when ready."
+        } catch { status = "Could not create an idea: \(error.localizedDescription)" }
     }
     func relatedFromCurrent(continuation: Bool) {
         if CardMetadata.parse(text).id == nil && idMode != .titleOnly && !ensureID() { return }
@@ -386,17 +464,75 @@ struct ContentView: View {
         } catch { status = "Could not create branch: \(error.localizedDescription)" }
     }
     var pageCount: Int { activePDF.flatMap { PDFDocument(data: $0)?.pageCount } ?? 0 }
+    // Check the active draft before any action that replaces it.
+    func confirmReplaceDraft(hidden: Bool = false) -> Bool {
+        let current = cardMode == "habits" ? tracker.markdown : text
+        let snapshot = cardMode == "habits" ? savedHabitSnapshot : savedMarkdownSnapshot
+        let initial = cardMode == "habits" ? HabitTracker().markdown : ""
+        guard current != (snapshot ?? initial) else { return true }
+        let kind = cardMode == "habits" ? "habit" : "Markdown"
+        let alert = NSAlert()
+        alert.messageText = "Save changes to your \(kind) draft?"
+        alert.informativeText = hidden ? "The existing \(kind) draft will be replaced." : "Your current draft will be replaced or left behind."
+        alert.addButton(withTitle: "Save…")
+        alert.addButton(withTitle: "Discard")
+        alert.addButton(withTitle: "Cancel")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: return saveMarkdown()
+        case .alertSecondButtonReturn: return true
+        default: return false
+        }
+    }
+    func useResearch(_ content: String, append: Bool) -> Bool {
+        if cardMode == "markdown" {
+            if !append && !confirmReplaceDraft() { return false }
+        } else {
+            guard confirmReplaceDraft() else { return false }
+            let previousMode = cardMode, previousURL = fileURL, previousBranch = branchSaveFolder
+            cardMode = "markdown"; fileURL = nil; branchSaveFolder = nil
+            if !append && !confirmReplaceDraft(hidden: true) {
+                cardMode = previousMode; fileURL = previousURL; branchSaveFolder = previousBranch
+                return false
+            }
+        }
+        if append { text += (text.isEmpty ? "" : "\n\n") + content }
+        else { text = content; fileURL = nil; branchSaveFolder = nil; savedMarkdownSnapshot = nil }
+        status = "Research card ready."
+        return true
+    }
     func openFile() {
         let panel = NSOpenPanel(); panel.allowedContentTypes = [.plainText]; panel.allowsMultipleSelection = false
-        if panel.runModal() == .OK, let url = panel.url {
-            do {
-                let contents = try String(contentsOf: url, encoding: .utf8)
-                if let saved = HabitTracker.fromMarkdown(contents) { setTracker(saved); cardMode = "habits" }
-                else { text = contents; cardMode = "markdown" }
-                fileURL = url; branchSaveFolder = nil; savedMarkdownSnapshot = cardMode == "markdown" ? contents : nil; status = "Opened \(url.lastPathComponent)."
-            }
-            catch { status = "Could not open file: \(error.localizedDescription)" }
+        if panel.runModal() == .OK, let url = panel.url { loadFile(url) }
+    }
+    func loadFile(_ url: URL) {
+        var previousMode = cardMode, previousURL = fileURL, previousBranch = branchSaveFolder
+        var loaded = false
+        defer {
+            if !loaded { cardMode = previousMode; fileURL = previousURL; branchSaveFolder = previousBranch }
         }
+        do {
+            // Check readability before prompting. Read again after each save so the
+            // selected file cannot be replaced with stale pre-save contents.
+            _ = try String(contentsOf: url, encoding: .utf8)
+            guard confirmReplaceDraft() else { return }
+            previousMode = cardMode; previousURL = fileURL; previousBranch = branchSaveFolder
+            var contents = try String(contentsOf: url, encoding: .utf8)
+            var savedHabit = HabitTracker.fromMarkdown(contents)
+            let targetMode = savedHabit == nil ? "markdown" : "habits"
+            if targetMode != previousMode {
+                cardMode = targetMode; fileURL = nil; branchSaveFolder = nil
+                guard confirmReplaceDraft(hidden: true) else { return }
+                cardMode = previousMode; fileURL = previousURL; branchSaveFolder = previousBranch
+                contents = try String(contentsOf: url, encoding: .utf8)
+                savedHabit = HabitTracker.fromMarkdown(contents)
+            }
+            cardMode = savedHabit == nil ? "markdown" : "habits"
+            if let savedHabit {
+                setTracker(savedHabit); savedHabitSnapshot = savedHabit.markdown
+            } else { text = contents; savedMarkdownSnapshot = contents }
+            fileURL = url; branchSaveFolder = nil; status = "Opened \(url.lastPathComponent)."
+            loaded = true
+        } catch { status = "Could not open file: \(error.localizedDescription)" }
     }
     func chooseFolder() {
         let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true
@@ -431,7 +567,7 @@ struct ContentView: View {
                     }
                 } catch { status = "Could not verify card IDs: \(error.localizedDescription)"; return false }
             }
-            do { try content.write(to: url, atomically: true, encoding: .utf8); fileURL = url; savedMarkdownSnapshot = cardMode == "markdown" ? content : nil; branchSaveFolder = nil; status = "Saved \(url.lastPathComponent)."; return true }
+            do { try content.write(to: url, atomically: true, encoding: .utf8); fileURL = url; if cardMode == "habits" { savedHabitSnapshot = content } else { savedMarkdownSnapshot = content }; branchSaveFolder = nil; status = "Saved \(url.lastPathComponent)."; return true }
             catch { status = "Could not save: \(error.localizedDescription)" }
         }
         return false

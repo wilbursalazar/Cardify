@@ -1,0 +1,60 @@
+import Foundation
+extension Int { static let alertFirstButtonReturn = 1, alertSecondButtonReturn = 2 }
+final class NSAlert {
+ static let alertFirstButtonReturn = 1, alertSecondButtonReturn = 2
+ static var replies: [Int] = []
+ var messageText = "", informativeText = ""
+ func addButton(withTitle: String) {}
+ func runModal() -> Int { precondition(!Self.replies.isEmpty); return Self.replies.removeFirst() }
+}
+struct HabitTracker {
+ var markdown: String
+ init(markdown: String = "HABIT:empty") { self.markdown = markdown }
+ static func fromMarkdown(_ text: String) -> HabitTracker? { text.hasPrefix("HABIT:") ? HabitTracker(markdown: text) : nil }
+}
+final class Harness {
+ var cardMode = "markdown", text = "", tracker = HabitTracker(), status = "", fileURL: URL?, branchSaveFolder: URL?
+ var savedMarkdownSnapshot: String?, savedHabitSnapshot: String?, saveTargets: [URL] = []
+ func setTracker(_ tracker: HabitTracker) { self.tracker = tracker }
+ func saveMarkdown() -> Bool {
+  guard !saveTargets.isEmpty else { return false }
+  let target = saveTargets.removeFirst()
+  let content = cardMode == "habits" ? tracker.markdown : text
+  do { try content.write(to: target, atomically: true, encoding: .utf8) } catch { return false }
+  fileURL = target
+  if cardMode == "habits" { savedHabitSnapshot = content } else { savedMarkdownSnapshot = content }
+  return true
+ }
+    // DRAFT_METHODS
+
+}
+@main struct Check {
+ static func main() throws {
+  let temp = FileManager.default.temporaryDirectory.appendingPathComponent("cardify-draft-" + UUID().uuidString, isDirectory: true)
+  try? FileManager.default.removeItem(at: temp)
+  try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: temp) }
+  let file = temp.appendingPathComponent("note.md"), habit = temp.appendingPathComponent("habit.md"), hidden = temp.appendingPathComponent("hidden.md")
+  try "old note".write(to: file, atomically: true, encoding: .utf8)
+  let same = Harness(); same.text = "new saved text"; same.savedMarkdownSnapshot = "old note"; same.fileURL = file; same.saveTargets = [file]
+  NSAlert.replies = [1]; same.loadFile(file)
+  precondition(same.text == "new saved text" && same.savedMarkdownSnapshot == "new saved text")
+  precondition((try? String(contentsOf: file, encoding: .utf8)) == "new saved text")
+  let cancel = Harness(); cancel.cardMode = "habits"; cancel.tracker = HabitTracker(markdown: "HABIT:unsaved"); cancel.fileURL = habit; cancel.text = "hidden unsaved"; NSAlert.replies = [3]
+  cancel.loadFile(file)
+  precondition(cancel.cardMode == "habits" && cancel.fileURL == habit && cancel.tracker.markdown == "HABIT:unsaved" && cancel.text == "hidden unsaved")
+  let secondCancel = Harness(); secondCancel.cardMode = "habits"; secondCancel.tracker = HabitTracker(markdown: "HABIT:saved"); secondCancel.text = "hidden unsaved"; secondCancel.saveTargets = [habit]; NSAlert.replies = [1, 3]
+  secondCancel.loadFile(file)
+  precondition(secondCancel.cardMode == "habits" && secondCancel.fileURL == habit && secondCancel.text == "hidden unsaved")
+  precondition((try? String(contentsOf: habit, encoding: .utf8)) == "HABIT:saved")
+  let replaced = Harness(); replaced.cardMode = "habits"; replaced.tracker = HabitTracker(markdown: "HABIT:unsaved"); replaced.text = "saved hidden text"; replaced.saveTargets = [file]; NSAlert.replies = [2, 1]
+  replaced.loadFile(file)
+  precondition(replaced.cardMode == "markdown" && replaced.text == "saved hidden text" && replaced.fileURL == file)
+  let research = Harness(); research.cardMode = "habits"; research.tracker = HabitTracker(markdown: "HABIT:new"); research.text = "hidden text"; research.saveTargets = [habit]; NSAlert.replies = [1, 3]
+  precondition(!research.useResearch("clip", append: false)); precondition(research.cardMode == "habits" && research.fileURL == habit && research.text == "hidden text")
+  let researchSave = Harness(); researchSave.cardMode = "habits"; researchSave.tracker = HabitTracker(markdown: "HABIT:new"); researchSave.text = "hidden text"; researchSave.saveTargets = [hidden]; NSAlert.replies = [2, 1]
+  precondition(researchSave.useResearch("clip", append: false)); precondition(researchSave.cardMode == "markdown" && researchSave.text == "clip")
+  precondition((try? String(contentsOf: hidden, encoding: .utf8)) == "hidden text")
+  print("Open and clip guards preserve both drafts, current file association, cancellation and newly saved same-file contents")
+ }
+}

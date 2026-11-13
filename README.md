@@ -4,7 +4,7 @@
 
 Cardify is a free, open-source Mac app for research, reading, studying, and keeping a paper-and-digital slip box. Write in Markdown, connect your notes, add Zotero sources, and see how your cards will print as you work. You can use Cardify with an Obsidian vault, a folder of Markdown files, a physical card box, or any combination of the three.
 
-[Download Cardify for Mac](https://github.com/wilbursalazar/Cardify/raw/refs/heads/main/Downloads/Cardify-Mac.zip) · [Get started](#your-first-card) · [Choose a note-taking approach](#three-approaches-one-flexible-workflow) · [Printing help](#printing)
+[Download Cardify for Mac](https://github.com/wilbursalazar/Cardify/raw/refs/heads/main/Downloads/Cardify-Mac.zip) · [Get started](#your-first-card) · [Use the library](#find-and-connect-cards) · [Choose a note-taking approach](#three-approaches-one-flexible-workflow) · [Printing help](#printing)
 
 ## Download and open
 
@@ -22,9 +22,31 @@ Cardify requires **macOS 13 or later** and includes code for both Apple silicon 
 4. Enter a title and write, or choose **Templates → Idea Card**, **Reading Card**, or **Index Card**. Templates insert editable Markdown at the cursor; they do not replace your draft.
 5. Check the preview. Use the controls beside it to change orientation, text size, or the dot grid. Then choose **Save…**, **Print…**, or **Save & Print…**.
 
-**Save** opens a dialog to save a `.md` file. **Print** opens the printer dialog. **Save & Print** saves first and starts printing only if the save succeeds. **File → Export PDF…** saves a PDF for review or printing later. Longer notes can continue onto more than one card.
+Before New Card, opening a different card, or replacing a research clip overwrites an unsaved draft, Cardify offers **Save**, **Discard**, or **Cancel**. **Save** opens a dialog to save a `.md` file. **Print** opens the printer dialog. **Save & Print** saves first and starts printing only if the save succeeds. **File → Export PDF…** saves a PDF for review or printing later. Longer notes can continue onto more than one card.
 
 > Save folder and notes folder have different jobs: the first is a default destination; the second is the collection Cardify searches. If no notes folder is selected, note suggestions fall back to the save folder. Saving still lets you choose a destination.
+
+## Find and connect cards
+
+Click **Library…** to browse the Markdown files in your notes folder, or in your save folder if no notes folder is set. Search by title, filename, card ID, or note text. Select a card to see its text, outgoing links, and notes that link to it. Click a connection to inspect it, then **Open Card** to edit it. The library reads files; browsing does not rename or rewrite them. Use **Refresh** after changes outside Cardify.
+
+In the Cards view, **Insert Link** adds a link to the selected card in the current Markdown draft. You can include an optional explanation, such as “supports this argument.” You can do the same from **Link Note…** above the editor. Links to ambiguous or unrecognized targets may not appear in the library’s connections; the Markdown itself remains unchanged. Nearby IDs are hints inferred from address shapes, not proof that cards are related.
+
+### Create a keyword index
+
+Choose **Templates → Index Card**, give it a subject such as “Memory,” and add a few links that are good starting points. Save it in the notes folder. In **Library → Index**, select that index card to explore its links. Index cards are ordinary Markdown files with `cardify_index: true` in their frontmatter, which makes them discoverable in the Index view. The marker is not printed on the card.
+
+To include an existing Markdown note, open it and choose **Templates → Mark Current Card as Index**, then save it. This changes your draft only until you choose to save. You choose the entry points and the words explaining them; Cardify does not require every related note to appear in an index.
+
+### Turn a reading into an idea
+
+Open a reading card and choose **Templates → New Idea from This Card…**. If needed, Cardify asks you to save the current card first, then creates a new unsaved Idea Card with a link back to it. Write and save the idea when you are ready. This also works with other Markdown cards; it does not alter the saved source card.
+
+## Set your starting workflow
+
+Choose **File → Settings…** to select defaults for new Markdown cards. **As configured** keeps your current behavior. **Luhmann-inspired** starts an Idea Card with a Luhmann-style ID; **Eco-inspired** starts a Reading Card with a title-only filename; **Obsidian-style** starts a blank Markdown card with a title-only filename. Choose a different ID style or template whenever you want.
+
+The setting takes effect when you create a new Markdown card. It does not change the open draft, existing files, IDs, or folder locations. Every workflow keeps the same tools for links, Zotero, the library, and printing. These are optional starting points, not rules you must follow.
 
 ## Three approaches, one flexible workflow
 
@@ -75,7 +97,7 @@ The original card keeps its ID and filename. Cardify does not automatically add 
 
 ## Choose an ID style
 
-The **ID style** selector sits above the writing area. IDs are optional and editable; when present, they appear in small type on the printed card and as `card_id` in the Markdown frontmatter.
+The **ID style** selector sits above the writing area. IDs are optional and editable; when present, they appear in small type on the top line of the printed card and as `card_id` in the Markdown frontmatter. The first line wraps before it reaches the ID; an unusually long ID uses its own line.
 
 | Style | What Cardify suggests | Useful when |
 | --- | --- | --- |
@@ -146,7 +168,7 @@ On macOS, install the Apple Command Line Tools, then run:
 open build/Cardify.app
 ```
 
-The script builds a universal app targeting macOS 13 and later and signs it ad hoc. The result is not notarized.
+The script builds a universal app targeting macOS 13 and later and signs it ad hoc. The result is not notarized. Run `./scripts/test.sh` for library, index, workflow, and draft-protection checks, and `./scripts/test-printed-id.sh` for PDF layout checks.
 
 ## Further reading
 

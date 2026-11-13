@@ -23,7 +23,7 @@ enum CardMetadata {
             guard !id.isEmpty else { return (nil, text) }
             return (id, lines.dropFirst(end + 1).joined(separator: "\n"))
         }
-        return (nil, text)
+        return (nil, IndexCardMetadata.isIndex(text) ? lines.dropFirst(end + 1).joined(separator: "\n") : text)
     }
     static func hasNonemptyID(_ text: String) -> Bool {
         let lines = text.components(separatedBy: "\n")
