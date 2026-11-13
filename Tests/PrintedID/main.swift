@@ -12,6 +12,17 @@ import Foundation
   guard let proseData = CardDocument(text: prose, portrait: false, fontSize: 9).pdf(),
         let proseOutput = PDFDocument(data: proseData)?.page(at: 0)?.string else { fatalError("Prose PDF missing") }
   precondition(proseOutput.contains("Ordinary prose survives"), "Markdown between horizontal rules must not disappear")
+  for debateID in ["AFF-01", "DEF-01"] {
+   for portrait in [false, true] {
+    let draft = CardMetadata.frontmatter(debateID) + "# A major debate point\n\nSupporting argument."
+    guard let data = CardDocument(text: draft, portrait: portrait, fontSize: 9).pdf(),
+          let page = PDFDocument(data: data)?.page(at: 0), let text = page.string else { fatalError("Debate ID PDF missing") }
+    let range = (text as NSString).range(of: debateID)
+    guard range.location != NSNotFound, let selection = page.selection(for: range) else { fatalError("Debate ID missing") }
+    let bounds = selection.bounds(for: page), paper = page.bounds(for: .mediaBox)
+    precondition(bounds.midX > paper.midX && bounds.midY > paper.midY, "Debate ID must appear in the upper right")
+   }
+  }
   let id = "IDCHECK987"
   for portrait in [false,true] {
    for size in [7.0, 9.0, 14.0, 18.0] {

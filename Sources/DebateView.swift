@@ -26,25 +26,34 @@ struct DebatePanel: View {
     private var info: DebateInfo { DebateNotes.parse(text) }
     private var kind: String {
         switch info.role {
-        case .project: return "Project"
+        case .project: return "Resolution"
         case .aff: return "AFF"
         case .def: return "DEF"
+        case .evidence: return "Evidence"
+        case .objection: return "Objection"
+        case .argument: return "Argument"
+        case .reply: return "Reply"
         case nil: return info.primary == nil ? "Card" : "Connected card"
         }
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
-                Button("Browse Debate…") { showBrowser = true }
+                Button("Argument map…") { showBrowser = true }
                 Menu("New") {
-                    Button("Debate Project") { newRole(.project) }
+                    Button("Resolution") { newRole(.project) }
                     Button("AFF Parent") { newRole(.aff) }
                     Button("DEF Parent") { newRole(.def) }
                 }
                 Menu("Mark as") {
-                    Button("Debate Project") { mark(.project) }
+                    Button("Resolution") { mark(.project) }
                     Button("AFF Parent") { mark(.aff) }
                     Button("DEF Parent") { mark(.def) }
+                    Divider()
+                    Button("Evidence") { mark(.evidence) }
+                    Button("Objection") { mark(.objection) }
+                    Button("Argument") { mark(.argument) }
+                    Button("Reply") { mark(.reply) }
                 }.help("Mark the current draft without renaming the file")
                 Spacer(minLength: 0)
                 Text(kind).font(.caption).foregroundStyle(.secondary)
@@ -74,8 +83,8 @@ struct DebatePanel: View {
                             Button("Remove related: \(relation.path)") { removeRelated(relation.path) }
                         }
                         ForEach(info.projects, id: \.path) { relation in
-                            Button("Open project: \(relation.path)") { onFollowLink(.wiki(relation.path)) }
-                            Button("Remove project: \(relation.path)") { removeProject(relation.path) }
+                            Button("Open resolution: \(relation.path)") { onFollowLink(.wiki(relation.path)) }
+                            Button("Remove resolution: \(relation.path)") { removeProject(relation.path) }
                         }
                     }
                 }
@@ -89,10 +98,8 @@ struct DebatePanel: View {
         }
     }
     private func newRole(_ role: DebateRole) {
-        let title: String
-        switch role { case .project: title = "# \n\nResolution: \n"; case .aff, .def: title = "# \n\n" }
-        guard let draft = DebateNotes.setRole(role, in: title) else { message = "Could not create a debate draft."; return }
-        if onNew(draft) { message = "New \(role == .project ? "project" : "parent") draft. Save it when ready." }
+        guard let draft = DebateNotes.setRole(role, in: "# \n\n") else { message = "Could not create a debate draft."; return }
+        if onNew(draft) { message = "New \(role == .project ? "resolution" : "parent") draft. Save it when ready." }
     }
     private func mark(_ role: DebateRole) {
         guard let updated = DebateNotes.setRole(role, in: text) else { message = "Could not mark this draft. Check its debate metadata."; return }
@@ -109,8 +116,8 @@ struct DebatePanel: View {
         text = updated; message = "Related parent removed from the draft. Save to keep it."
     }
     private func removeProject(_ path: String) {
-        guard let updated = DebateNotes.removeProject(path, in: text) else { message = "Could not remove the project."; return }
-        text = updated; message = "Project removed from the draft. Save to keep it."
+        guard let updated = DebateNotes.removeProject(path, in: text) else { message = "Could not remove the resolution."; return }
+        text = updated; message = "Resolution removed from the draft. Save to keep it."
     }
 }
 
@@ -124,23 +131,39 @@ private struct DebateBrowser: View {
     let onNew: (String) -> Bool
     @State private var query = ""
     @State private var selected: String?
+    @State private var projectPath: String?
+    @State private var hasLoaded = false
     @State private var explanation = ""
     @State private var snapshot = LibrarySnapshot(cards: [], outgoing: [:], incoming: [:], unreadable: 0)
     @State private var message = "Choose a notes folder to browse debate cards."
     @State private var scanID = UUID()
 
-    private var folder: String { notesFolder.isEmpty ? saveFolder : notesFolder }
+    private var folder: String {
+        if !notesFolder.isEmpty { return notesFolder }
+        if !saveFolder.isEmpty { return saveFolder }
+        return currentURL?.deletingLastPathComponent().path ?? ""
+    }
     private var current: LibraryCard? { snapshot.cards.first { $0.path == selected } }
     private var currentInfo: DebateInfo { DebateNotes.parse(text) }
-    private var matches: [LibraryCard] {
-        snapshot.cards.filter {
-            let parsed = DebateNotes.parse($0.content)
-            return parsed.valid && parsed.role != nil && LibrarySearch.matches($0, query: query)
-        }
+    private var projects: [LibraryCard] { DebateHierarchy.projects(in: snapshot) }
+    private var hierarchy: DebateHierarchy { DebateHierarchy.build(snapshot: snapshot, projectPath: projectPath) }
+    private var searchResults: [LibraryCard] {
+        let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !term.isEmpty else { return [] }
+        return hierarchy.visibleCards.filter { LibrarySearch.matches($0, query: term) }
     }
     private func samePath(_ a: String, _ b: String) -> Bool { a.caseInsensitiveCompare(b) == .orderedSame }
     private func roleName(_ role: DebateRole?) -> String {
-        switch role { case .project: return "Project"; case .aff: return "AFF"; case .def: return "DEF"; case nil: return "Card" }
+        switch role {
+        case .project: return "Resolution"
+        case .aff: return "AFF"
+        case .def: return "DEF"
+        case .evidence: return "Evidence"
+        case .objection: return "Objection"
+        case .argument: return "Argument"
+        case .reply: return "Reply"
+        case nil: return "Card"
+        }
     }
     private func linkable(_ card: LibraryCard) -> Bool {
         guard card.canLink, DebateNotes.validPath(card.path), snapshot.unreadable == 0 else { return false }
@@ -153,89 +176,101 @@ private struct DebateBrowser: View {
         return true
     }
     private func canUse(_ card: LibraryCard) -> Bool {
-        linkable(card) && card.url.standardizedFileURL != currentURL?.standardizedFileURL
+        linkable(card) && card.url.resolvingSymlinksInPath().standardizedFileURL != currentURL?.resolvingSymlinksInPath().standardizedFileURL
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Debate").font(.title2.bold())
+                Text("Argument map").font(.title2.bold())
                 Spacer()
+                Button("New resolution") { newResolution() }
                 Button("Choose Folder…", action: chooseFolder)
                 Button("Refresh", action: scan).disabled(folder.isEmpty)
             }
-            Text(folder.isEmpty ? "No notes folder selected" : folder).font(.caption).lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
-            TextField("Search projects, AFF and DEF parents", text: $query)
+            HStack(spacing: 12) {
+                Picker("Resolution", selection: Binding(get: { projectPath }, set: { path in
+                    projectPath = path; selected = path; query = ""
+                })) {
+                    Text("Unassigned").tag(Optional<String>.none)
+                    ForEach(projects) { project in Text(project.title).tag(Optional(project.path)) }
+                }.frame(maxWidth: 320)
+                TextField("Search this map", text: $query).frame(maxWidth: 220)
+                if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Menu("\(searchResults.count) results") {
+                        ForEach(searchResults.prefix(100)) { card in
+                            Button(card.title) { selected = card.path }
+                        }
+                    }.disabled(searchResults.isEmpty)
+                }
+                Spacer()
+            }
             Text(message).font(.caption).foregroundStyle(.secondary)
             HSplitView {
-                List(matches, selection: $selected) { card in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(card.title).fontWeight(.medium).lineLimit(1)
-                        Text("\(roleName(DebateNotes.parse(card.content).role)) · \(card.path)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    }.tag(card.path)
-                }.frame(minWidth: 200)
+                DebateHierarchyView(hierarchy: hierarchy, hasResolutions: !projects.isEmpty, selectedPath: selected,
+                                    onSelect: { selected = $0.path }, onOpen: { open($0) },
+                                    onNewResolution: { newResolution() },
+                                    onNewPoint: { role, project in newParent(role, project: project) })
+                    .frame(minWidth: 520, minHeight: 350)
                 ScrollView {
                     if let card = current {
                         let parsed = DebateNotes.parse(card.content)
-                        VStack(alignment: .leading, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text(roleName(parsed.role)).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                             Text(card.title).font(.headline)
-                            Text("\(roleName(parsed.role)) · \(card.path)").font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-                            HStack {
-                                Button("Open") { open(card) }
-                                if parsed.role == .aff || parsed.role == .def {
-                                    Button("New connected card") { newChild(card) }.disabled(!linkable(card))
-                                }
-                            }
+                            Text(card.path).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                            Button("Open card") { open(card) }.buttonStyle(.borderedProminent)
                             if !linkable(card) {
                                 Text("A connection cannot be safely resolved. Check the filename, duplicate note names, and whether all notes are readable.").font(.caption).foregroundStyle(.secondary)
                             }
                             if parsed.role == .project {
+                                Divider()
+                                Text("Add a major point").font(.subheadline.bold())
                                 HStack {
-                                    Button("New AFF in project") { newParent(.aff, project: card) }.disabled(!linkable(card))
-                                    Button("New DEF in project") { newParent(.def, project: card) }.disabled(!linkable(card))
+                                    Button("New AFF") { newParent(.aff, project: card) }.disabled(!linkable(card))
+                                    Button("New DEF") { newParent(.def, project: card) }.disabled(!linkable(card))
                                 }
-                                Button("Add current parent to project") { changeProject(card) }
+                                Button("Add current parent to resolution") { changeProject(card) }
                                     .disabled(!canUse(card) || !currentInfo.valid || (currentInfo.role != .aff && currentInfo.role != .def))
-                                Divider()
-                                connectedSection("Parents in this project", cards: snapshot.cards.filter { candidate in
-                                    let info = DebateNotes.parse(candidate.content)
-                                    return info.valid && (info.role == .aff || info.role == .def) && info.projects.contains { samePath($0.path, card.path) }
-                                })
-                            } else if parsed.role == .aff || parsed.role == .def {
-                                TextField("Connection (optional)", text: $explanation)
-                                HStack {
-                                    Button("Set as primary parent") { setPrimary(card) }.disabled(!canUse(card) || !currentInfo.valid)
-                                    Button("Add related parent") { addRelated(card) }
-                                        .disabled(!canUse(card) || !currentInfo.valid || currentInfo.primary == nil)
-                                        .help("Choose a primary parent before adding related parents.")
+                            } else if parsed.role == .aff || parsed.role == .def || parsed.primary != nil {
+                                if let parent = parsed.primary {
+                                    Text("Primary parent: \(parent.path)").font(.caption).foregroundStyle(.secondary)
                                 }
                                 Divider()
-                                connectedSection("Primary cards", cards: snapshot.cards.filter { candidate in
-                                    let info = DebateNotes.parse(candidate.content)
-                                    return info.valid && info.primary.map { samePath($0.path, card.path) } == true
-                                })
-                                connectedSection("Related cards", cards: snapshot.cards.filter { candidate in
-                                    DebateBrowserSafety.isRelated(DebateNotes.parse(candidate.content), to: card.path)
-                                })
+                                Text("Develop this point").font(.subheadline.bold())
+                                Menu("New connected card") {
+                                    Button("Evidence") { newChild(card, role: .evidence) }
+                                    Button("Objection") { newChild(card, role: .objection) }
+                                    Button("Argument") { newChild(card, role: .argument) }
+                                    Button("Reply") { newChild(card, role: .reply) }
+                                    Divider()
+                                    Button("Other note") { newChild(card, role: nil) }
+                                }.disabled(!linkable(card))
+                                TextField("Connection (optional)", text: $explanation)
+                                Button("Set as primary parent") { setPrimary(card) }
+                                    .disabled(!canUse(card) || !currentInfo.valid || currentInfo.role == .project || currentInfo.role == .aff || currentInfo.role == .def)
+                                Button("Add related parent") { addRelated(card) }
+                                    .disabled(!canUse(card) || !currentInfo.valid || currentInfo.primary == nil || currentInfo.role == .project)
+                                    .help("Choose a primary parent before adding related parents.")
+                            } else {
+                                if let parent = parsed.primary {
+                                    Text("Primary parent: \(parent.path)").font(.caption).foregroundStyle(.secondary)
+                                }
+                                if !parsed.related.isEmpty {
+                                    Text("Related to \(parsed.related.count) other point\(parsed.related.count == 1 ? "" : "s")").font(.caption).foregroundStyle(.secondary)
+                                }
+                                Text("Open this card to read or edit it.").font(.caption).foregroundStyle(.secondary)
                             }
-                        }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
+                        }.frame(maxWidth: .infinity, alignment: .leading).padding(14)
                     } else {
-                        Text("Select a project or parent to see its connections.").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity).padding()
+                        Text("Select a resolution, AFF or DEF point, or connected card.")
+                            .foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity).padding()
                     }
-                }.frame(minWidth: 360)
+                }.frame(minWidth: 260, idealWidth: 280, maxWidth: 340)
             }
-            Text("Connections shown here come from saved notes. Save the current draft and refresh to update the list.").font(.caption).foregroundStyle(.secondary)
+            Text("The map shows saved notes. Save your draft and refresh to see new connections.").font(.caption).foregroundStyle(.secondary)
             HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.cancelAction) }
-        }.padding(20).frame(minWidth: 660, minHeight: 460)
+        }.padding(20).frame(minWidth: 900, minHeight: 570)
             .onAppear { if !folder.isEmpty { scan() } }
-    }
-    @ViewBuilder private func connectedSection(_ title: String, cards: [LibraryCard]) -> some View {
-        Text(title).font(.subheadline.bold())
-        if cards.isEmpty { Text("None yet.").font(.caption).foregroundStyle(.secondary) }
-        else {
-            ForEach(cards) { card in
-                Button(card.title) { open(card) }.buttonStyle(.link)
-            }
-        }
     }
     private func safe(_ card: LibraryCard, requireRole: Bool = false) -> Bool {
         let root = URL(fileURLWithPath: folder, isDirectory: true)
@@ -257,19 +292,35 @@ private struct DebateBrowser: View {
         guard safe(card) else { return }
         if onOpen(card.url) { dismiss() }
     }
-    private func newChild(_ parent: LibraryCard) {
+    private func newResolution() {
+        guard let draft = DebateNotes.setRole(.project, in: "# \n\n") else { message = "Could not create a resolution."; return }
+        if onNew(draft) { dismiss() }
+    }
+    private func newChild(_ parent: LibraryCard, role: DebateRole?) {
         guard safe(parent, requireRole: true) else { return }
-        guard let draft = DebateNotes.setPrimary(parent.path, explanation: "", in: "# \n\n") else { message = "Could not create a linked card."; return }
+        let template: String
+        switch role {
+        case .objection: template = "# \n\n## Objection\n\n## Response\n\n## Source\n"
+        case .evidence: template = "# \n\n## Evidence\n\n## Source\n"
+        case .reply: template = "# \n\n## Reply\n\n## Source\n"
+        default: template = "# \n\n"
+        }
+        let marked = role.flatMap { DebateNotes.setRole($0, in: template) } ?? template
+        guard let draft = DebateNotes.setPrimary(parent.path, explanation: "", in: marked) else { message = "Could not create a linked card."; return }
         if onNew(draft) { dismiss() }
     }
     private func newParent(_ role: DebateRole, project: LibraryCard) {
         guard safe(project, requireRole: true) else { return }
-        guard let marked = DebateNotes.setRole(role, in: "# \n\n"),
-              let draft = DebateNotes.addProject(project.path, in: marked) else { message = "Could not create a parent in this project."; return }
+        guard let marked = DebateNotes.setRole(role, in: "# \n\n## Main point\n\n## Supporting reasons\n\n## Sources\n"),
+              let draft = DebateNotes.addProject(project.path, in: marked) else { message = "Could not create a parent in this resolution."; return }
         if onNew(draft) { dismiss() }
     }
     private func setPrimary(_ parent: LibraryCard) {
         guard safe(parent, requireRole: true) else { return }
+        guard DebateHierarchy.canSetPrimary(snapshot: snapshot, currentURL: currentURL, proposedParent: parent) else {
+            message = "This parent would create a cycle or its chain cannot be resolved. Refresh and check the links."
+            return
+        }
         guard let updated = DebateNotes.setPrimary(parent.path, explanation: explanation, in: text) else { message = "Could not set the primary parent. Check the current note's debate links."; return }
         text = updated
         message = "Primary parent added to the current draft. Save to keep it."
@@ -283,27 +334,47 @@ private struct DebateBrowser: View {
     }
     private func changeProject(_ project: LibraryCard) {
         guard safe(project, requireRole: true) else { return }
-        guard let updated = DebateNotes.addProject(project.path, in: text) else { message = "Could not add the project. Check for duplicate or invalid links."; return }
+        guard let updated = DebateNotes.addProject(project.path, in: text) else { message = "Could not add the resolution. Check for duplicate or invalid links."; return }
         text = updated
-        message = "Project added to the current draft. Save to keep it."
+        message = "Resolution added to the current draft. Save to keep it."
     }
     private func chooseFolder() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = false
-        if panel.runModal() == .OK, let url = panel.url { notesFolder = url.path; scan() }
+        if panel.runModal() == .OK, let url = panel.url { notesFolder = url.path; hasLoaded = false; scan() }
     }
     private func scan() {
         guard !folder.isEmpty else { return }
         let url = URL(fileURLWithPath: folder, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL
-        let id = UUID(); scanID = id; selected = nil; message = "Searching notes…"
+        let id = UUID(); scanID = id; message = "Searching notes…"
+        let previousSelection = selected, previousProject = projectPath, firstLoad = !hasLoaded
         DispatchQueue.global(qos: .userInitiated).async {
             let found = LibrarySnapshot.load(folder: url)
             DispatchQueue.main.async {
                 guard scanID == id else { return }
                 guard let found else { message = "Could not open this folder. Choose it again."; return }
                 snapshot = found
-                let count = found.cards.filter { let info = DebateNotes.parse($0.content); return info.valid && info.role != nil }.count
-                message = "\(count) saved debate projects and parents." + (found.unreadable > 0 ? " Some notes could not be read." : "")
+                let availableProjects = DebateHierarchy.projects(in: found)
+                if firstLoad {
+                    let currentFile = currentURL?.resolvingSymlinksInPath().standardizedFileURL
+                    let openCard = found.cards.first { $0.url.resolvingSymlinksInPath().standardizedFileURL == currentFile }
+                    if let openCard {
+                        let info = DebateNotes.parse(openCard.content)
+                        if info.role == .project || info.role == .aff || info.role == .def || info.primary != nil {
+                            projectPath = DebateHierarchy.projectsForCard(snapshot: found, cardPath: openCard.path).first
+                        } else { projectPath = availableProjects.first?.path }
+                    } else { projectPath = availableProjects.first?.path }
+                } else if let previousProject, !availableProjects.contains(where: { samePath($0.path, previousProject) }) {
+                    projectPath = nil
+                } else { projectPath = previousProject }
+                let map = DebateHierarchy.build(snapshot: found, projectPath: projectPath)
+                let visible = map.visibleCards.map(\.path)
+                let openPath = currentURL.flatMap { current in found.cards.first { $0.url.resolvingSymlinksInPath().standardizedFileURL == current.resolvingSymlinksInPath().standardizedFileURL }?.path }
+                selected = [previousSelection, firstLoad ? openPath : nil, projectPath].compactMap { $0 }.first { visible.contains($0) }
+                hasLoaded = true
+                let count = availableProjects.count
+                message = count == 0 ? "Create a resolution to organize your points." : "\(count) saved resolution\(count == 1 ? "" : "s")."
+                if found.unreadable > 0 { message += " Some notes could not be read." }
             }
         }
     }

@@ -470,11 +470,28 @@ struct ContentView: View {
                     if cardMode == "markdown" && showDebate {
                         DebatePanel(text: $text, showBrowser: $showDebateBrowser, currentURL: fileURL, onOpen: { url in loadFile(url) }, onNew: { draft in
                             guard confirmReplaceDraft() else { return false }
+                            let info = DebateNotes.parse(draft)
+                            var prepared = draft
+                            if info.role == .aff || info.role == .def {
+                                do {
+                                    let existing = try DebateIDs.existing(in: scanRoots(for: fileURL))
+                                    guard let result = DebateIDs.prepare(draft, existing: existing) else {
+                                        status = "Could not prepare an AFF/DEF ID. Check the card metadata."
+                                        let alert = NSAlert(); alert.messageText = "Can't create this point"; alert.informativeText = status; alert.runModal()
+                                        return false
+                                    }
+                                    prepared = result
+                                } catch {
+                                    status = "Could not check debate IDs: \(error.localizedDescription)"
+                                    let alert = NSAlert(); alert.messageText = "Can't create this point"; alert.informativeText = status; alert.runModal()
+                                    return false
+                                }
+                            }
                             let folderPath = notesFolder.isEmpty ? saveFolder : notesFolder
                             let folder = folderPath.isEmpty ? fileURL?.deletingLastPathComponent() : URL(fileURLWithPath: folderPath, isDirectory: true)
-                            text = draft; fileURL = nil; branchSaveFolder = folder; savedMarkdownSnapshot = nil; history.detach()
+                            text = prepared; fileURL = nil; branchSaveFolder = folder; savedMarkdownSnapshot = nil; history.detach()
                             if idMode != .titleOnly && !ensureID() { return true }
-                            status = "New debate card. Save it when ready."
+                            status = info.role == .project ? "Enter the resolution in the title, then save." : "New debate card. Save it when ready."
                             return true
                         }, onFollowLink: followLink)
                     }
@@ -484,13 +501,13 @@ struct ContentView: View {
                         TodoListEditor(list: Binding(get: { todo }, set: { setTodo($0) }))
                     } else {
                     HStack {
-                        TextField("Title", text: Binding(get: { NoteEditing.title(in: text) }, set: { text = NoteEditing.setTitle($0, in: text) }))
+                        TextField(showDebate && DebateNotes.parse(text).role == .project ? "Resolution question" : "Title", text: Binding(get: { NoteEditing.title(in: text) }, set: { text = NoteEditing.setTitle($0, in: text) }))
                         Picker("ID style", selection: Binding(get: { idMode }, set: { mode in
                             storedIDMode = mode.rawValue
                             if mode != .titleOnly && CardMetadata.parse(text).id == nil { _ = ensureID() }
                         })) {
                             ForEach(IDMode.allCases) { mode in Text(mode.rawValue).tag(mode) }
-                        }.frame(width: 190).help("Choose how IDs are suggested for new notes. Existing IDs are kept.")
+                        }.frame(width: 190).help(showDebate ? "AFF and DEF points use their own IDs. Other new notes follow this setting; existing IDs are kept." : "Choose how IDs are suggested for new notes. Existing IDs are kept.")
                     }
                     HStack {
                         Text("Write").fontWeight(.semibold)
@@ -628,7 +645,8 @@ struct ContentView: View {
         let alert = NSAlert(); alert.messageText = "Can't open card"; alert.informativeText = message; alert.addButton(withTitle: "OK"); alert.runModal()
     }
     func followLink(_ target: CardLinkTarget) {
-        let folderPath = notesFolder.isEmpty ? saveFolder : notesFolder
+        let configuredFolder = notesFolder.isEmpty ? saveFolder : notesFolder
+        let folderPath = configuredFolder.isEmpty && showDebate ? (fileURL?.deletingLastPathComponent().path ?? "") : configuredFolder
         let folder = folderPath.isEmpty ? nil : URL(fileURLWithPath: folderPath, isDirectory: true)
         let sourceFile = fileURL
         let sourceText = text
@@ -637,8 +655,10 @@ struct ContentView: View {
         DispatchQueue.global(qos: .userInitiated).async {
             let result = CardLinkNavigation.resolve(target, folder: folder, currentFile: sourceFile)
             DispatchQueue.main.async {
+                let currentFolder = notesFolder.isEmpty ? saveFolder : notesFolder
+                let activeFolder = currentFolder.isEmpty && showDebate ? (fileURL?.deletingLastPathComponent().path ?? "") : currentFolder
                 guard requestID == linkRequestID, cardMode == "markdown", !showDebateBrowser, fileURL == sourceFile,
-                      (notesFolder.isEmpty ? saveFolder : notesFolder) == folderPath else { return }
+                      activeFolder == folderPath else { return }
                 guard text == sourceText else { status = "Link not opened because the card changed."; return }
                 switch result {
                 case .failure(let message): linkError(message)
@@ -869,7 +889,9 @@ struct ContentView: View {
         if let folder = branchSaveFolder { panel.directoryURL = folder }
         else if !saveFolder.isEmpty { panel.directoryURL = URL(fileURLWithPath: saveFolder, isDirectory: true) }
         panel.allowedContentTypes = [.init(filenameExtension: "md")!]
-        panel.nameFieldStringValue = fileURL?.lastPathComponent ?? (cardMode == "markdown" ? NoteEditing.filename(id: idMode == .titleOnly ? nil : CardMetadata.parse(text).id, title: NoteEditing.title(in: text)) : cardMode == "todos" ? NoteEditing.filename(id: nil, title: todo.title) : "Weekly Habits.md")
+        let role = cardMode == "markdown" ? DebateNotes.parse(text).role : nil
+        let useIDInFilename = idMode != .titleOnly || role == .aff || role == .def
+        panel.nameFieldStringValue = fileURL?.lastPathComponent ?? (cardMode == "markdown" ? NoteEditing.filename(id: useIDInFilename ? CardMetadata.parse(text).id : nil, title: NoteEditing.title(in: text)) : cardMode == "todos" ? NoteEditing.filename(id: nil, title: todo.title) : "Weekly Habits.md")
         if panel.runModal() == .OK, let url = panel.url {
             let content = cardMode == "habits" ? tracker.markdown : cardMode == "todos" ? todo.markdown : text
             if CardMetadata.parse(content).id == nil && CardMetadata.hasNonemptyID(content) {

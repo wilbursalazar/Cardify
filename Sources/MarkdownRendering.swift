@@ -30,7 +30,7 @@ enum MarkdownRendering {
                 }
             }
             let markerLine = lineIndex == 0 && line.hasPrefix("\u{FEFF}") ? String(line.dropFirst()) : line
-            let debateMarker = fence == nil && !htmlComment && ["<!-- cardify:debate=project -->", "<!-- cardify:debate=aff -->", "<!-- cardify:debate=def -->"].contains(markerLine)
+            let debateMarker = fence == nil && !htmlComment && ["<!-- cardify:debate=project -->", "<!-- cardify:debate=aff -->", "<!-- cardify:debate=def -->", "<!-- cardify:debate=evidence -->", "<!-- cardify:debate=objection -->", "<!-- cardify:debate=argument -->", "<!-- cardify:debate=reply -->"].contains(markerLine)
             if fence == nil && !debateMarker {
                 var cursor = line.startIndex
                 while cursor < line.endIndex {

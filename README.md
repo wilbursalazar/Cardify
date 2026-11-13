@@ -159,17 +159,19 @@ Choose **To Do** to write a heading and add tasks. Click each checkbox to mark o
 
 The saved file uses ordinary Markdown task checkboxes and a `<!-- cardify:todo -->` marker. The marker is hidden on the printed card and lets Cardify reopen the list in the structured editor. If a marked file contains additional content the editor cannot safely represent, Cardify opens it as a Research note instead of discarding that content.
 
-## Debate projects and connected cards
+## Debate: resolutions and argument maps
 
-Choose **Debate** to organize arguments using the same Markdown draft, ID options, links, Zotero tools, preview, and print controls as Research. Switching between Research and Debate does not create a second draft or a different save destination.
+Choose **Debate** to organize arguments using the same Markdown draft, ID options, links, Zotero tools, preview, and print controls as Research. The argument map shows a resolution at the top, AFF and DEF points underneath, and each point's evidence, objections, arguments, and replies below it. This structure is inspired by [William Lane Craig's description of preparing and reusing documented argument and response briefs](https://www.reasonablefaith.org/media/reasonable-faith-podcast/dr-craig-live-at-west-university-baptist-church-part-1/); the visual map is Cardify's own design.
 
-1. Choose **File → Choose Notes Folder…** and select the folder where you keep your notes. The debate browser searches this folder; if you have no notes folder, it uses the save folder.
-2. Under **New**, choose **Debate Project**, **AFF Parent**, or **DEF Parent**. Give it a title, write your argument or resolution, and save it in the notes folder. Use **Mark as** to turn an existing draft into a project or parent without renaming its file.
-3. Choose **Browse Debate…** to search saved projects and parents. Select a project to create additional AFF or DEF parents or add your current AFF or DEF parent to that project. A parent may be linked to more than one project.
-4. Select an AFF or DEF parent and choose **New connected card**, or use **Set as primary parent** to connect the current draft. Each connected card has one primary parent. Use **Add related parent** for other arguments it supports or challenges, and optionally explain each connection. Save the draft to keep the change.
-5. In the browser, select a parent to see its saved primary and related cards. Open a card and use **Connections** or the primary-parent link to navigate back. Save and refresh the browser after editing connections.
+1. Choose **File → Choose Notes Folder…** and select your notes folder. The argument map searches this folder; if none is selected, it uses the save folder.
+2. Under **New**, choose **Resolution**, give the resolution a title, and save it in the notes folder. Existing debate projects still appear as resolutions. Use **Mark as** to identify an existing draft without renaming its file.
+3. Open **Argument map…**. The map guides you to create a resolution, then add an AFF point; you can also add as many DEF points as you need. New points receive IDs such as `AFF-01` and `DEF-01`, shown at the top right of their cards and in their suggested filenames. Existing IDs and filenames are kept. Choose a notes or save folder first so Cardify can check for duplicate IDs.
+4. Select any point or connected card and choose **New connected card**, then choose Evidence, Objection, Argument, Reply, or Other note. The new card is linked to the selected card as its primary parent. Keep adding cards to build deeper chains—for example, an objection, a reply, and evidence for that reply. Save and refresh the map to see each new card.
+5. To connect an existing draft to another card, select its parent on the map and choose **Set as primary parent**. To connect it elsewhere too, choose **Add related parent**. A card has one primary parent; dashed connections show additional related parents. You can add a brief explanation of each relationship. Cardify refuses primary links that would make a cycle.
 
-Projects, parents, and connected cards are ordinary Markdown files. Role markers are hidden from the printed card, and the relationships are readable wiki links. No linked note is copied, automatically renamed, or modified when you connect your current draft. If a linked file is moved or renamed outside Cardify, repair its link in the Markdown. Anki integration and study scheduling are not included in this version.
+Select any node to inspect its actions; double-click it or choose **Open card** to edit the note. Use the resolution picker to switch between debates and search within the displayed map. The **Unassigned** view keeps earlier AFF/DEF notes that have no resolution link accessible. A parent may belong to more than one resolution, and a related card may appear under multiple points without being copied.
+
+Resolutions, points, and connected cards are ordinary Markdown files. Role markers are hidden from the printed card, and relationships are readable wiki links. No linked note is copied, automatically renamed, or modified when you connect your current draft. If a linked file is moved or renamed outside Cardify, repair its link in the Markdown. Anki integration and study scheduling are not included in this version.
 
 ## Printing
 

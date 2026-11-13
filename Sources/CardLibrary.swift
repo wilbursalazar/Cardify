@@ -38,7 +38,7 @@ struct LibrarySnapshot {
             let path = String(relative.dropLast(url.pathExtension.count + 1))
             let heading = NoteEditing.title(in: content).trimmingCharacters(in: .whitespacesAndNewlines)
             let title = heading.isEmpty ? url.deletingPathExtension().lastPathComponent : heading
-            let cardID = CardMetadata.parse(content).id ?? BranchIDs.filenameID(for: url) ?? BranchIDs.luhmannFilenameID(for: url)
+            let cardID = CardMetadata.parse(content).id ?? BranchIDs.filenameID(for: url) ?? BranchIDs.luhmannFilenameID(for: url) ?? BranchIDs.debateFilenameID(for: url)
             cards.append(LibraryCard(url: url, path: path, title: title, cardID: cardID, content: content))
         }
         cards.sort { $0.path.localizedStandardCompare($1.path) == .orderedAscending }

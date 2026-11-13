@@ -3,6 +3,11 @@ import Foundation
 func check(_ condition: @autoclosure () -> Bool, _ message: String) {
     if !condition() { fputs("FAIL: \(message)\n", stderr); exit(1) }
 }
+for role in [DebateRole.evidence, .objection, .argument, .reply] {
+ let original = "# Connected note\n"
+ let marked = DebateNotes.setRole(role, in: original)!
+ check(DebateNotes.parse(marked).role == role && marked.hasPrefix(original), "Typed connected notes retain their Markdown")
+}
 let note = "# A claim\n\nResearch and evidence.\n"
 let aff = DebateNotes.setRole(.aff, in: note)!
 check(aff.hasPrefix(note), "setting a role preserves existing text")

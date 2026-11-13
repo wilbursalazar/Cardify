@@ -35,6 +35,9 @@ try write("Alpha.md", "# Alpha heading\nchanged text")
 let second = LibrarySnapshot.load(folder: root)!
 check(second.outgoing["Alpha"] == nil && second.incoming["sub/Target"] == nil, "refresh removes stale backlinks")
 check(LibrarySearch.matches(second.cards.first { $0.path == "Alpha" }!, query: "changed text"), "refresh sees edited contents")
+try write("AFF-07 Imported.md", "# Imported parent")
+let imported = LibrarySnapshot.load(folder: root)!.cards.first { $0.path == "AFF-07 Imported" }
+check(imported?.cardID == "AFF-07", "filename-only debate ID is visible to navigation")
 print("Library search, nested files, unambiguous links/backlinks, sequence hints, timestamps, and refresh passed")
 func fixture(_ path: String, _ id: String) -> LibraryCard {
     LibraryCard(url: root.appendingPathComponent(path + ".md"), path: path, title: path, cardID: id, content: "")

@@ -3,7 +3,7 @@ import Foundation
 // Debate notes remain ordinary Markdown. Markers identify the kind of a note;
 // visible wiki links keep its connections usable in the editor and Obsidian.
 enum DebateRole: String, CaseIterable {
-    case project, aff, def
+    case project, aff, def, evidence, objection, argument, reply
 }
 
 struct DebateRelation: Equatable {

@@ -41,7 +41,7 @@ import PDFKit
    }
    print("\(portrait ? "portrait" : "landscape"): matching \(lPDF.pageCount)-card LF/CRLF text and link geometry")
   }
-  for role in ["project", "aff", "def"] {
+  for role in ["project", "aff", "def", "evidence", "objection", "argument", "reply"] {
    for ending in ["\n", "\r\n"] {
     let draft = ["<!-- cardify:debate=\(role) -->", "# Debate point", "", "Primary parent: [[Research/Parent]] — supports the argument"].joined(separator: ending)
     guard let data = CardDocument(text: draft, portrait: false, fontSize: 9).pdf(includeLinks: true),
