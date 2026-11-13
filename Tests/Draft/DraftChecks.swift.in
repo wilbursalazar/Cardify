@@ -137,6 +137,37 @@ final class Harness {
   let failed = Harness(); failed.text = "# Unchanged"; failed.fileURL = b; failed.history.visit(missing); failed.history.visit(b)
   failed.navigateHistory(back: true)
   precondition(failed.fileURL == b && failed.text == "# Unchanged" && failed.history.current == b && failed.history.backTarget == missing)
+  // A sidebar target can be swapped while the save prompt is open. Reject it
+  // before the next read and retain the save that the user explicitly made.
+  let raceTarget = temp.appendingPathComponent("sidebar-target.md")
+  let raceSave = temp.appendingPathComponent("sidebar-saved.md")
+  try "# Original target".write(to: raceTarget, atomically: true, encoding: .utf8)
+  let race = Harness(); race.text = "# Edited draft"; race.savedMarkdownSnapshot = "# A"; race.fileURL = a
+  race.saveTargets = [raceSave]; NSAlert.replies = [1]
+  var raceChecks = 0
+  precondition(!race.loadFile(raceTarget, validating: { raceChecks += 1; return raceChecks == 1 }))
+  precondition(raceChecks == 2 && race.text == "# Edited draft" && race.fileURL == raceSave && race.savedMarkdownSnapshot == race.text,
+               "A stale target after Save As must not replace the saved draft or its destination")
+  precondition((try? String(contentsOf: raceSave, encoding: .utf8)) == "# Edited draft" && race.status.contains("no longer safely available"))
+  let initialReject = Harness(); initialReject.text = "# Keep"; initialReject.fileURL = a
+  NSAlert.replies = []; precondition(!initialReject.loadFile(raceTarget, validating: { false }))
+  precondition(initialReject.text == "# Keep" && initialReject.fileURL == a && initialReject.editor.discardCount == 0,
+               "An unsafe target must fail before any draft prompt or mutation")
+  // Changing modes presents a second draft prompt; the target must also be
+  // revalidated after that prompt, including when its Save As succeeded.
+  let hiddenTarget = temp.appendingPathComponent("sidebar-habit.md")
+  let hiddenSave = temp.appendingPathComponent("sidebar-hidden-saved.md")
+  let crossSave = temp.appendingPathComponent("sidebar-cross-saved.md")
+  try "HABIT:target".write(to: hiddenTarget, atomically: true, encoding: .utf8)
+  let raceCross = Harness(); raceCross.text = "# Cross draft"; raceCross.savedMarkdownSnapshot = "# A"; raceCross.fileURL = a
+  raceCross.tracker = HabitTracker(markdown: "HABIT:hidden edited"); raceCross.savedHabitSnapshot = "HABIT:old"; raceCross.habitURL = habit
+  raceCross.saveTargets = [crossSave, hiddenSave]; NSAlert.replies = [1, 1]
+  var crossChecks = 0
+  precondition(!raceCross.loadFile(hiddenTarget, validating: { crossChecks += 1; return crossChecks <= 2 }))
+  precondition(crossChecks == 3 && raceCross.cardMode == "markdown" && raceCross.fileURL == crossSave && raceCross.text == "# Cross draft",
+               "A stale target after the second prompt must leave the active saved draft in place")
+  precondition(raceCross.habitURL == hiddenSave && raceCross.savedHabitSnapshot == "HABIT:hidden edited" &&
+               (try? String(contentsOf: hiddenSave, encoding: .utf8)) == "HABIT:hidden edited", "The hidden-mode save must remain committed")
   let tabs = Harness(); tabs.text = "# A"; tabs.fileURL = a; tabs.branchSaveFolder = temp; tabs.history.visit(a)
   tabs.switchMode(to: "habits"); precondition(tabs.fileURL == nil && tabs.history.detached)
   tabs.tracker = HabitTracker(markdown: "HABIT:first"); tabs.saveTargets = [habit]; precondition(tabs.saveMarkdown())

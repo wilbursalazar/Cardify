@@ -13,6 +13,8 @@ swiftc "${SWIFT_FLAGS[@]}" "$ROOT/Tests/CRLFEditor/main.swift" -o "$TEMP_DIR/crl
 "$ROOT/scripts/test-crlf.sh"
 "$ROOT/scripts/test-editor-undo.sh"
 "$ROOT/scripts/test-id-mode-selection.sh"
+"$ROOT/scripts/test-adaptive-toolbar.sh"
+"$ROOT/scripts/test-workspace-layout.sh"
 "$ROOT/scripts/test-debate.sh"
 "$ROOT/scripts/test-debate-templates.sh"
 "$ROOT/scripts/test-debate-ids.sh"

@@ -327,6 +327,11 @@ struct ResearchEditor: View {
     }
 }
 
+private struct EditorHeaderHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
 struct ContentView: View {
     @AppStorage("draft") private var text = "# Example Title\n\nMain content area for notes.\n- Keep it concise, or continue onto another card.\n- Use Markdown for Obsidian.\n\nSource: Book Title, p. 42\n\nTags: #quicknote #important"
     @AppStorage("portrait") private var portrait = false
@@ -343,6 +348,8 @@ struct ContentView: View {
     @AppStorage("idMode") private var storedIDMode = ""
     @AppStorage("newCardWorkflow") private var newCardWorkflow = WorkflowPreference.configured.rawValue
     @AppStorage("cardifyAppearance") private var storedAppearance = AppearancePreference.system.rawValue
+    @AppStorage("workspaceArrangement") private var storedWorkspaceArrangement = WorkspaceArrangement.editorLeft.rawValue
+    @AppStorage("showNotesSidebar") private var showNotesSidebar = true
     @StateObject private var editor = EditorState()
     @StateObject private var graphWindow = GraphWindowManager()
     @State private var fileURLs: [String: URL] = [:]
@@ -362,6 +369,8 @@ struct ContentView: View {
     @State private var linkRequestID = UUID()
     @State private var research: ResearchClip?
     @State private var status = "Draft saved on this Mac."
+    @State private var sidebarRefreshToken = UUID()
+    @State private var editorHeaderHeight: CGFloat = 100
     var fileURL: URL? {
         get { fileURLs[cardMode] }
         nonmutating set { fileURLs[cardMode] = newValue }
@@ -413,25 +422,36 @@ struct ContentView: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .center, spacing: 10) {
+            HStack(spacing: 10) {
+                Button { showNotesSidebar.toggle() } label: { Image(systemName: "sidebar.left") }
+                    .help(showNotesSidebar ? "Hide notes sidebar" : "Show notes sidebar")
+                    .accessibilityLabel(showNotesSidebar ? "Hide notes sidebar" : "Show notes sidebar")
                 Text("Cardify").font(.system(size: 18, weight: .semibold))
-                Spacer(minLength: 12)
-                Menu("File") {
-                    Button("New Card") {
-                        guard confirmReplaceDraft() else { return }
-                        fileURL = nil; branchSaveFolder = nil; history.detach()
-                        if cardMode == "habits" { savedHabitSnapshot = nil; setTracker(HabitTracker()); status = "New draft." }
-                        else if cardMode == "todos" { savedTodoSnapshot = nil; setTodo(TodoList()); status = "New draft." }
-                        else {
-                            editor.discardUndoHistory()
-                            savedMarkdownSnapshot = nil
-                            if let defaults = WorkflowPreference.defaults(for: newCardWorkflow) {
-                                storedIDMode = defaults.idMode.rawValue
-                                text = defaults.template?.markdown ?? ""
-                            } else { text = "" }
-                            if idMode != .titleOnly { _ = ensureID() } else { status = "New draft." }
+                Button { navigateHistory(back: true) } label: { Image(systemName: "chevron.left") }
+                    .help("Back to the previous card").keyboardShortcut("[", modifiers: .command).disabled(history.backTarget == nil)
+                Button { navigateHistory(back: false) } label: { Image(systemName: "chevron.right") }
+                    .help("Forward to the next visited card").keyboardShortcut("]", modifiers: .command).disabled(history.forwardTarget == nil)
+                Divider().frame(height: 16)
+                Button("Library") { showLibrary = true }.fixedSize()
+                Button("Graph") { showGraph() }.fixedSize().help("Explore card connections in a separate window")
+                Spacer(minLength: 8)
+                Menu("Layout") {
+                    ForEach(WorkspaceArrangement.allCases) { choice in
+                        Button {
+                            storedWorkspaceArrangement = choice.rawValue
+                        } label: {
+                            if WorkspaceArrangement.stored(storedWorkspaceArrangement) == choice {
+                                Label(choice.title, systemImage: "checkmark")
+                            } else {
+                                Text(choice.title)
+                            }
                         }
                     }
+                    Divider()
+                    Toggle("Show notes sidebar", isOn: $showNotesSidebar)
+                }
+                Menu("File") {
+                    Button("New Card", action: newCard)
                     Button("Open Markdown…", action: openFile)
                     Divider()
                     Button("Export PDF…", action: exportPDF)
@@ -445,30 +465,31 @@ struct ContentView: View {
                 Button("Print", action: printCards).fixedSize().keyboardShortcut("p")
                 Button("Save & Print") { if saveMarkdown() { printCards() } }.fixedSize().buttonStyle(.borderedProminent)
             }
-            HStack(spacing: 12) {
-                Button { navigateHistory(back: true) } label: { Image(systemName: "chevron.left") }
-                    .buttonStyle(.borderless).help("Back to the previous card").keyboardShortcut("[", modifiers: .command).disabled(history.backTarget == nil)
-                Button { navigateHistory(back: false) } label: { Image(systemName: "chevron.right") }
-                    .buttonStyle(.borderless).help("Forward to the next visited card").keyboardShortcut("]", modifiers: .command).disabled(history.forwardTarget == nil)
-                Button("Library") { showLibrary = true }.buttonStyle(.borderless).fixedSize()
-                Button("Graph") { showGraph() }.buttonStyle(.borderless).fixedSize().help("Explore card connections in a separate window")
-                Divider().frame(height: 16)
-                Text(currentCardTitle).lineLimit(1).truncationMode(.middle).help(currentCardTitle)
-                if cardMode == "markdown", let id = CardMetadata.parse(text).id {
-                    Text(id).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle).frame(maxWidth: 125, alignment: .leading).help(id)
-                }
-                Spacer(minLength: 0)
-            }
             Divider()
-            HSplitView {
+            HStack(alignment: .top, spacing: 0) {
+                if showNotesSidebar {
+                    CardSidebar(currentURL: fileURL, notesFolder: notesFolder, saveFolder: saveFolder,
+                                refreshToken: sidebarRefreshToken, onOpen: { url in
+                                    let folder = notesFolder.isEmpty ? saveFolder : notesFolder
+                                    guard !folder.isEmpty else { status = "Choose a notes folder before opening a sidebar note."; return false }
+                                    let root = URL(fileURLWithPath: folder, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL
+                                    return loadFile(url, validating: { CardGraph.canOpen(url, in: root) })
+                                }, onNew: newCard, onChooseFolder: chooseNotesFolder)
+                        .frame(width: 205)
+                    Divider().padding(.trailing, 10)
+                }
+                WorkspaceSplitView(arrangement: WorkspaceArrangement.stored(storedWorkspaceArrangement), editor: {
+                GeometryReader { editorGeometry in
                 VStack(alignment: .leading) {
+                    ScrollView(.vertical) {
+                    VStack(alignment: .leading) {
                     HStack(spacing: 8) {
                         Picker("Card type", selection: Binding(get: { cardMode == "markdown" && showDebate ? "debate" : cardMode }, set: { mode in
                             if mode == "debate" { showDebate = true; switchMode(to: "markdown") }
                             else { if mode == "markdown" { showDebate = false }; switchMode(to: mode) }
                         })) {
                             Text("Research").tag("markdown"); Text("Habit").tag("habits"); Text("To Do").tag("todos"); Text("Debate").tag("debate")
-                        }.pickerStyle(.segmented).labelsHidden().frame(minWidth: 240, maxWidth: 250)
+                        }.pickerStyle(.menu).labelsHidden().fixedSize().help("Choose Research, Habit, To Do, or Debate")
                         Spacer(minLength: 4)
                         Menu("Templates") {
                             if showDebate && cardMode == "markdown" {
@@ -551,19 +572,15 @@ struct ContentView: View {
                             return true
                         }, onFollowLink: followLink)
                     }
-                    if cardMode == "habits" {
-                        HabitTrackerEditor(tracker: Binding(get: { tracker }, set: { setTracker($0) }))
-                    } else if cardMode == "todos" {
-                        TodoListEditor(list: Binding(get: { todo }, set: { setTodo($0) }))
-                    } else {
+                    if cardMode == "markdown" {
                     HStack {
                         TextField(titlePlaceholder, text: Binding(get: { NoteEditing.title(in: text) }, set: { text = NoteEditing.setTitle($0, in: text) }))
                             .textFieldStyle(.plain).font(.system(size: 17, weight: .semibold)).padding(.vertical, 6)
-                        Picker("ID style", selection: Binding(get: { idMode }, set: { mode in
+                        Picker("ID", selection: Binding(get: { idMode }, set: { mode in
                             selectIDMode(mode)
                         })) {
                             ForEach(IDMode.allCases) { mode in Text(mode.rawValue).tag(mode) }
-                        }.frame(width: 190).help(showDebate ? "AFF and DEF points use their own IDs; connected cards inherit their parent’s ID. Existing IDs are kept." : "Choose how IDs are suggested for new notes. Existing IDs are kept.")
+                        }.labelsHidden().frame(width: 110).accessibilityLabel("ID style").help(showDebate ? "AFF and DEF points use their own IDs; connected cards inherit their parent’s ID. Existing IDs are kept." : "Choose how IDs are suggested for new notes. Existing IDs are kept.")
                     }
                     HStack {
                         Text("Write").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
@@ -584,36 +601,37 @@ struct ContentView: View {
                             Button("Branch from card") { relatedFromCurrent(continuation: false) }.fixedSize().help("Create a linked branch from the current card")
                         }
                     }
-                    VStack(spacing: 0) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack(spacing: 10) {
-                                Button("B") { editor.wrap("**") }.fontWeight(.bold).help("Bold")
-                                Button("I") { editor.wrap("*") }.italic().help("Italic")
-                                Button("H1") { editor.prefix("# ") }.help("Heading")
-                                Button("H2") { editor.prefix("## ") }.help("Subheading")
-                                Button("• List") { editor.prefix("- ") }.help("Bullet list")
-                                Button("☐ Task") { editor.prefix("- [ ] ") }.help("Task")
-                                Spacer(minLength: 0)
-                            }
-                            HStack(spacing: 14) {
-                                Button("Link Note") { showNotes = true }.fixedSize().help("Search your notes folder")
-                                Button("Add Zotero Source") { showZotero = true }.fixedSize().help("Find a source in Zotero")
-                                Spacer(minLength: 0)
-                            }
+                    }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(GeometryReader { proxy in
+                        Color.clear.preference(key: EditorHeaderHeightKey.self, value: proxy.size.height)
+                    })
+                    }
+                    .frame(height: min(editorHeaderHeight, max(0, editorGeometry.size.height - 130)))
+                    .overlay(alignment: .bottomTrailing) {
+                        if editorHeaderHeight > max(0, editorGeometry.size.height - 130) {
+                            Text("Scroll for more controls ↓").font(.caption2).padding(4)
+                                .background(.regularMaterial).allowsHitTesting(false)
                         }
-                        .buttonStyle(.borderless)
-                        .controlSize(.small)
-                        .font(.system(size: 12, weight: .medium))
-                        .padding(.horizontal, 10).padding(.vertical, 8)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color(nsColor: .controlBackgroundColor).opacity(0.65))
+                    }
+                    .onPreferenceChange(EditorHeaderHeightKey.self) { editorHeaderHeight = $0 }
+                    if cardMode == "habits" {
+                        HabitTrackerEditor(tracker: Binding(get: { tracker }, set: { setTracker($0) }))
+                    } else if cardMode == "todos" {
+                        TodoListEditor(list: Binding(get: { todo }, set: { setTodo($0) }))
+                    } else {
+                    VStack(spacing: 0) {
+                        AdaptiveFormattingToolbar(editor: editor, onLinkNote: { showNotes = true }, onZotero: { showZotero = true })
                         Divider()
                         MarkdownEditor(text: $text, editor: editor, onFollowLink: followLink)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.16)))
                     }
-                }.frame(minWidth: 340)
+                }
+                }.frame(minWidth: 280)
+                }, preview: {
                 VStack(alignment: .leading) {
                     HStack {
                         Text("Preview").fontWeight(.semibold)
@@ -646,8 +664,9 @@ struct ContentView: View {
                         }
                     Text("3 × 5 in · ⅜ in inset · Print at 100% scale")
                         .font(.caption).foregroundStyle(.secondary)
-                }.padding(.leading, 12).frame(minWidth: 332)
-            }
+                }.frame(minWidth: 230)
+                })
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
             Text(status).font(.caption).foregroundStyle(.secondary)
         }.padding(.horizontal, 20).padding(.vertical, 18).frame(minWidth: 850, minHeight: 600)
         .background(Color(nsColor: .windowBackgroundColor))
@@ -963,7 +982,14 @@ struct ContentView: View {
         if !committed { history.visit(target) }
     }
     @discardableResult
-    func loadFile(_ url: URL) -> Bool {
+    func loadFile(_ url: URL, validating validate: (() -> Bool)? = nil) -> Bool {
+        func targetIsSafe() -> Bool {
+            guard validate?() ?? true else {
+                status = "This note is no longer safely available. Refresh the sidebar and try again."
+                return false
+            }
+            return true
+        }
         var previousMode = cardMode, previousURL = fileURL, previousBranch = branchSaveFolder
         var loaded = false
         defer {
@@ -972,9 +998,11 @@ struct ContentView: View {
         do {
             // Check readability before prompting. Read again after each save so the
             // selected file cannot be replaced with stale pre-save contents.
+            guard targetIsSafe() else { return false }
             _ = try String(contentsOf: url, encoding: .utf8)
             guard confirmReplaceDraft() else { return false }
             previousMode = cardMode; previousURL = fileURL; previousBranch = branchSaveFolder
+            guard targetIsSafe() else { return false }
             var contents = try String(contentsOf: url, encoding: .utf8)
             var savedHabit = HabitTracker.fromMarkdown(contents)
             var savedTodo = savedHabit == nil ? TodoList.fromMarkdown(contents) : nil
@@ -983,6 +1011,7 @@ struct ContentView: View {
                 cardMode = targetMode
                 guard confirmReplaceDraft(hidden: true) else { return false }
                 cardMode = previousMode; fileURL = previousURL; branchSaveFolder = previousBranch
+                guard targetIsSafe() else { return false }
                 contents = try String(contentsOf: url, encoding: .utf8)
                 savedHabit = HabitTracker.fromMarkdown(contents)
                 savedTodo = savedHabit == nil ? TodoList.fromMarkdown(contents) : nil
@@ -1004,6 +1033,21 @@ struct ContentView: View {
     func chooseFolder() {
         let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true
         if panel.runModal() == .OK, let url = panel.url { saveFolder = url.path; status = "Default save folder: \(url.path)" }
+    }
+    func newCard() {
+        guard confirmReplaceDraft() else { return }
+        fileURL = nil; branchSaveFolder = nil; history.detach()
+        if cardMode == "habits" { savedHabitSnapshot = nil; setTracker(HabitTracker()); status = "New draft." }
+        else if cardMode == "todos" { savedTodoSnapshot = nil; setTodo(TodoList()); status = "New draft." }
+        else {
+            editor.discardUndoHistory()
+            savedMarkdownSnapshot = nil
+            if let defaults = WorkflowPreference.defaults(for: newCardWorkflow) {
+                storedIDMode = defaults.idMode.rawValue
+                text = defaults.template?.markdown ?? ""
+            } else { text = "" }
+            if idMode != .titleOnly { _ = ensureID() } else { status = "New draft." }
+        }
     }
     func saveMarkdown() -> Bool {
         if cardMode == "markdown" && idMode != .titleOnly && !ensureID() { return false }
@@ -1036,7 +1080,7 @@ struct ContentView: View {
                     }
                 } catch { status = "Could not verify card IDs: \(error.localizedDescription)"; return false }
             }
-            do { try content.write(to: url, atomically: true, encoding: .utf8); fileURL = url; if cardMode == "habits" { savedHabitSnapshot = content } else if cardMode == "todos" { savedTodoSnapshot = content } else { savedMarkdownSnapshot = content }; if !suppressHistorySave { history.saveCurrent(url) }; branchSaveFolder = nil; status = "Saved \(url.lastPathComponent)."; return true }
+            do { try content.write(to: url, atomically: true, encoding: .utf8); fileURL = url; if cardMode == "habits" { savedHabitSnapshot = content } else if cardMode == "todos" { savedTodoSnapshot = content } else { savedMarkdownSnapshot = content }; if !suppressHistorySave { history.saveCurrent(url) }; branchSaveFolder = nil; sidebarRefreshToken = UUID(); status = "Saved \(url.lastPathComponent)."; return true }
             catch { status = "Could not save: \(error.localizedDescription)" }
         }
         return false

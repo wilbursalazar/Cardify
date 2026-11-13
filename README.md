@@ -16,7 +16,7 @@ Cardify requires **macOS 13 or later** and includes code for both Apple silicon 
 
 ## Your first card
 
-1. Open Cardify. Choose **Research** to write a Markdown note, **Habit** for a weekly tracker, **To Do** for a checklist, or **Debate** to organize connected argument cards.
+1. Open Cardify. Use the card-type menu above the writing area to choose **Research**, **Habit**, **To Do**, or **Debate**.
 2. Optional: choose **File → Choose Save Folder…** to set the folder offered when you save a new note or export a PDF. To work with an Obsidian vault, you can choose a folder inside your vault.
 3. Optional: choose **File → Choose Notes Folder…** and select your vault or notes folder. For Obsidian, select the vault root so inserted paths are relative to the vault. Cardify searches this folder for notes to link and for existing card IDs. It can be the same folder as your save folder.
 4. Enter a title and write, or choose **Templates → Idea Card**, **Reading Card**, or **Index Card**. Templates insert editable Markdown at the cursor; they do not replace your draft.
@@ -28,7 +28,11 @@ Before New Card, opening a different card, or replacing a research clip overwrit
 
 ## Navigate between cards
 
-Use the **back** and **forward** arrows beside **Library** to revisit cards you have opened during the current session. The buttons follow your browsing history, not the card-number sequence; the current title and optional ID appear beside them. You can also use **⌘[** and **⌘]**. Opening a different card after going back starts a new path through your history.
+The notes sidebar shows Markdown cards from your notes folder, or your save folder if no notes folder is set. Search or select a card to open it; use the folder and refresh controls at the top to change or rescan the folder. **New Card** starts a draft in the selected card type. Use the sidebar button in the top ribbon, or **Layout → Show notes sidebar**, to hide or show it.
+
+Use the **back** and **forward** arrows in the top ribbon to revisit cards opened during the current session. The buttons follow browsing history, not the card-number sequence. You can also use **⌘[** and **⌘]**. Opening a different card after going back starts a new path through your history.
+
+Choose **Layout** in the top ribbon to put writing on the left, preview on the left, or writing above preview. Drag the divider to resize the areas; select the divider and use arrow keys to adjust it with the keyboard. Cardify remembers the arrangement. The formatting controls use one row when it fits and two rows when the writing area is narrower. If the controls above the editor need more space, scroll that area to see them all.
 
 Cardify asks about unsaved changes before replacing a draft. If you save a new draft before going back, you can return to the saved card with Forward. A discarded unsaved draft cannot be recovered through history. Research, Habit, and To Do each retain their own current draft and file association while you switch between them.
 
