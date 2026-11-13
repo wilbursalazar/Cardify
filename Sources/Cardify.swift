@@ -197,7 +197,12 @@ struct ContentView: View {
                 }.frame(minWidth: 300)
                 VStack(alignment: .leading) {
                     HStack { Text("Preview").fontWeight(.semibold); Spacer(); Text("\(pageCount) \(pageCount == 1 ? "card" : "cards")").foregroundStyle(.secondary) }
-                    PDFPreview(data: activePDF).border(Color.secondary.opacity(0.2))
+                    if let data = activePDF {
+                        PDFPreview(data: data).border(Color.secondary.opacity(0.2))
+                    } else {
+                        Text(cardMode == "habits" ? "The heading is too long to fit. Shorten it to preview and print." : "Could not create the preview.")
+                            .foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 }.frame(minWidth: 320)
             }
             Text("3 × 5-inch stock · ⅜-inch inset · Long notes continue onto more cards. Select 100% scale and the matching paper size in the print dialog.")
@@ -257,7 +262,7 @@ struct ContentView: View {
         return false
     }
     func exportPDF() {
-        guard let data = activePDF else { status = "Could not create PDF."; return }
+        guard let data = activePDF else { status = cardMode == "habits" ? "Shorten the heading to create a PDF." : "Could not create PDF."; return }
         let panel = NSSavePanel(); if !saveFolder.isEmpty { panel.directoryURL = URL(fileURLWithPath: saveFolder, isDirectory: true) }; panel.allowedContentTypes = [.pdf]; panel.nameFieldStringValue = (fileURL?.deletingPathExtension().lastPathComponent ?? "Index Card") + ".pdf"
         if panel.runModal() == .OK, let url = panel.url {
             do { try data.write(to: url, options: .atomic); status = "Exported \(url.lastPathComponent)." }
@@ -265,7 +270,7 @@ struct ContentView: View {
         }
     }
     func printCards() {
-        guard let data = activePDF, let pdf = PDFDocument(data: data) else { status = "Could not prepare cards."; return }
+        guard let data = activePDF, let pdf = PDFDocument(data: data) else { status = cardMode == "habits" ? "Shorten the heading to print." : "Could not prepare cards."; return }
         let info = NSPrintInfo.shared.copy() as! NSPrintInfo
         info.paperSize = NSSize(width: 216, height: 360)
         info.orientation = portrait ? .portrait : .landscape

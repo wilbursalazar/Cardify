@@ -23,7 +23,7 @@ The app is ad-hoc signed, not notarized. macOS may require an explicit confirmat
 
 ## Weekly habit cards and design
 
-Choose **Habits** in the editor to add named rows and mark each weekday with an X. Print a blank tracker or mark it digitally first. Save exports a Markdown table, and opening a table saved by Cardify restores the habit editor. Switch back to **Markdown** for ordinary notes; each draft is kept locally. Long habit names and additional rows continue across cards when needed.
+Choose **Habits** in the editor to edit the card heading, add named rows, and mark or clear each weekday with an X. Seven standard rows fit on a landscape card. Print a blank tracker or mark it digitally first. Save exports a Markdown table, and opening a table saved by Cardify restores the habit editor. Switch back to **Markdown** for ordinary notes; each draft is kept locally. Long habit names and additional rows continue across cards when needed.
 
 Choose **Design → Dot grid** to add a light gray grid to the preview, PDF and printed cards. The grid remains within the 3/8-inch safe inset.
 
