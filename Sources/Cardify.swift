@@ -142,6 +142,10 @@ final class PreviewPagesView: NSView {
             context.translateBy(x: -bounds.minX, y: -bounds.minY)
             context.drawPDFPage(pageRef)
             context.restoreGState()
+            NSColor.separatorColor.withAlphaComponent(0.55).setStroke()
+            let border = NSBezierPath(rect: rect.insetBy(dx: 0.5, dy: 0.5))
+            border.lineWidth = 1
+            border.stroke()
         }
     }
 
@@ -408,12 +412,9 @@ struct ContentView: View {
         if let fileURL { history.visit(fileURL) } else { history.detach() }
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .center, spacing: 10) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Cardify").font(.system(size: 25, weight: .bold))
-                    Text("Write, connect, and print your notes.").font(.caption).foregroundStyle(.secondary)
-                }
+                Text("Cardify").font(.system(size: 18, weight: .semibold))
                 Spacer(minLength: 12)
                 Menu("File") {
                     Button("New Card") {
@@ -446,11 +447,11 @@ struct ContentView: View {
             }
             HStack(spacing: 8) {
                 Button { navigateHistory(back: true) } label: { Image(systemName: "chevron.left") }
-                    .help("Back to the previous card").keyboardShortcut("[", modifiers: .command).disabled(history.backTarget == nil)
+                    .buttonStyle(.borderless).help("Back to the previous card").keyboardShortcut("[", modifiers: .command).disabled(history.backTarget == nil)
                 Button { navigateHistory(back: false) } label: { Image(systemName: "chevron.right") }
-                    .help("Forward to the next visited card").keyboardShortcut("]", modifiers: .command).disabled(history.forwardTarget == nil)
-                Button("Library…") { showLibrary = true }
-                Button("Graph…") { showGraph() }.help("Explore card connections in a separate window")
+                    .buttonStyle(.borderless).help("Forward to the next visited card").keyboardShortcut("]", modifiers: .command).disabled(history.forwardTarget == nil)
+                Button("Library…") { showLibrary = true }.buttonStyle(.borderless)
+                Button("Graph…") { showGraph() }.buttonStyle(.borderless).help("Explore card connections in a separate window")
                 Divider().frame(height: 16)
                 Text(currentCardTitle).lineLimit(1).truncationMode(.middle)
                 if cardMode == "markdown", let id = CardMetadata.parse(text).id {
@@ -557,6 +558,7 @@ struct ContentView: View {
                     } else {
                     HStack {
                         TextField(titlePlaceholder, text: Binding(get: { NoteEditing.title(in: text) }, set: { text = NoteEditing.setTitle($0, in: text) }))
+                            .textFieldStyle(.plain).font(.system(size: 17, weight: .semibold)).padding(.vertical, 6)
                         Picker("ID style", selection: Binding(get: { idMode }, set: { mode in
                             storedIDMode = mode.rawValue
                             if mode != .titleOnly && CardMetadata.parse(text).id == nil { _ = ensureID() }
@@ -565,7 +567,7 @@ struct ContentView: View {
                         }.frame(width: 190).help(showDebate ? "AFF and DEF points use their own IDs; connected cards inherit their parent’s ID. Existing IDs are kept." : "Choose how IDs are suggested for new notes. Existing IDs are kept.")
                     }
                     HStack {
-                        Text("Write").fontWeight(.semibold)
+                        Text("Write").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                         if showDebate || idMode != .titleOnly || CardMetadata.parse(text).id != nil {
                             TextField("Card ID", text: Binding(get: { CardMetadata.parse(text).id ?? "" }, set: { id in
                                 if let updated = NoteEditing.setID(id, in: text) { text = updated }
@@ -585,31 +587,32 @@ struct ContentView: View {
                     }
                     VStack(spacing: 0) {
                         VStack(alignment: .leading, spacing: 4) {
-                            HStack(spacing: 5) {
-                                Button("B") { editor.wrap("**") }.help("Bold")
-                                Button("I") { editor.wrap("*") }.help("Italic")
+                            HStack(spacing: 10) {
+                                Button("B") { editor.wrap("**") }.fontWeight(.bold).help("Bold")
+                                Button("I") { editor.wrap("*") }.italic().help("Italic")
                                 Button("H1") { editor.prefix("# ") }.help("Heading")
                                 Button("H2") { editor.prefix("## ") }.help("Subheading")
                                 Button("• List") { editor.prefix("- ") }.help("Bullet list")
                                 Button("☐ Task") { editor.prefix("- [ ] ") }.help("Task")
                                 Spacer(minLength: 0)
                             }
-                            HStack(spacing: 8) {
+                            HStack(spacing: 14) {
                                 Button("Link Note…") { showNotes = true }.help("Search your notes folder")
                                 Button("Add Zotero Source…") { showZotero = true }.help("Find a source in Zotero")
                                 Spacer(minLength: 0)
                             }
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.borderless)
                         .controlSize(.small)
-                        .padding(6)
+                        .font(.system(size: 12, weight: .medium))
+                        .padding(.horizontal, 10).padding(.vertical, 8)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color(nsColor: .controlBackgroundColor))
+                        .background(Color(nsColor: .controlBackgroundColor).opacity(0.65))
                         Divider()
                         MarkdownEditor(text: $text, editor: editor, onFollowLink: followLink)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
-                    .overlay(Rectangle().stroke(Color.secondary.opacity(0.2)))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.16)))
                     }
                 }.frame(minWidth: 340)
                 VStack(alignment: .leading) {
@@ -648,7 +651,8 @@ struct ContentView: View {
                 }.padding(.leading, 12).frame(minWidth: 332)
             }
             Text(status).font(.caption).foregroundStyle(.secondary)
-        }.padding(24).frame(minWidth: 850, minHeight: 600)
+        }.padding(.horizontal, 20).padding(.vertical, 18).frame(minWidth: 850, minHeight: 600)
+        .background(Color(nsColor: .windowBackgroundColor))
         .preferredColorScheme(AppearancePreference.colorScheme(for: storedAppearance))
         .onAppear {
             if storedIDMode.isEmpty { storedIDMode = (autoTimestampID ? IDMode.timestamp : IDMode.titleOnly).rawValue }

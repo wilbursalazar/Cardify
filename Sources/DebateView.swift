@@ -220,7 +220,7 @@ private struct DebateBrowser: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Argument map").font(.title2.bold())
+                Text("Argument map").font(.system(size: 20, weight: .semibold))
                 Spacer()
                 Button("New resolution") { newResolution() }.disabled(folder.isEmpty || !hasLoaded)
                 Button("Choose Folder…", action: chooseFolder)
@@ -255,9 +255,10 @@ private struct DebateBrowser: View {
                 }.frame(maxWidth: 320)
                 Picker("View", selection: $focusMode) {
                     Text("Full map").tag(false)
-                    Text("Focus").tag(true).disabled(selected == nil)
-                }.pickerStyle(.segmented).frame(width: 150)
-                    .help("Focus follows the selected card's branch.")
+                    Text("Focus branch").tag(true).disabled(selected == nil)
+                }.pickerStyle(.segmented).labelsHidden().frame(width: 190)
+                    .accessibilityLabel("Argument map view")
+                    .help("Focus shows the selected card's path and direct connections.")
                 TextField("Search this map", text: $query).frame(maxWidth: 220)
                 if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Menu("\(searchResults.count) results") {
@@ -288,6 +289,10 @@ private struct DebateBrowser: View {
                             }
                             Text(card.title).font(.headline).help(card.path)
                             Button("Open card") { open(card) }.buttonStyle(.borderedProminent)
+                            Button(focusMode ? "Show full map" : "Focus on this branch") { focusMode.toggle() }
+                                .help(focusMode ? "Return to all arguments in this resolution." : "See this card's path and directly connected cards.")
+                            Text(focusMode ? "Following this card's path and direct connections." : "Focus shows this card's path and direct connections.")
+                                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                             if !linkable(card) {
                                 Text("A connection cannot be safely resolved. Check the filename, duplicate note names, and whether all notes are readable.").font(.caption).foregroundStyle(.secondary)
                             }

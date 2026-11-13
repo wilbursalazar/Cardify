@@ -14,7 +14,7 @@ struct DebateHierarchyView: View {
     let onNewPoint: (DebateRole, LibraryCard) -> Void
 
     private let columnGap: CGFloat = 24
-    private var lineColor: Color { Color.secondary.opacity(0.38) }
+    private var lineColor: Color { Color.secondary.opacity(0.27) }
     private var columnWidth: CGFloat {
         // Keep deep nodes legible by expanding the scrollable canvas instead
         // of making each nested card narrower than its contents.
@@ -189,7 +189,7 @@ private struct DebateGraphBranch: View {
     let onOpen: (LibraryCard) -> Void
     var explanation = ""
     var isPrimaryChild = false
-    private var lineColor: Color { Color.secondary.opacity(0.38) }
+    private var lineColor: Color { Color.secondary.opacity(0.27) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -236,7 +236,7 @@ private struct DebateGraphConnector: View {
     let dashed: Bool
     var body: some View {
         Path { path in path.move(to: .zero); path.addLine(to: CGPoint(x: 12, y: 0)) }
-            .stroke(Color.secondary.opacity(0.38), style: StrokeStyle(lineWidth: 1, dash: dashed ? [3, 3] : []))
+            .stroke(Color.secondary.opacity(0.27), style: StrokeStyle(lineWidth: 1, dash: dashed ? [3, 3] : []))
     }
 }
 
@@ -250,7 +250,7 @@ private struct DebateGraphNode: View {
     let onOpen: (LibraryCard) -> Void
     var explanation = ""
     var showStance = false
-    private var lineColor: Color { Color.secondary.opacity(0.38) }
+    private var lineColor: Color { Color.secondary.opacity(0.27) }
     private var stanceLabel: String {
         switch DebateNotes.parse(card.content).primaryStance {
         case .supports: return "Supports parent"
@@ -281,11 +281,11 @@ private struct DebateGraphNode: View {
                         .lineLimit(2).multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            .padding(.horizontal, 10).padding(.vertical, 8)
+            .padding(.horizontal, 12).padding(.vertical, 10)
             .frame(width: width, alignment: .leading).frame(minHeight: 47, alignment: .leading)
-            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(selectedPath == card.path ? Color.accentColor : lineColor, lineWidth: selectedPath == card.path ? 2 : 1))
-            .contentShape(RoundedRectangle(cornerRadius: 8))
+            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(selectedPath == card.path ? Color.accentColor : lineColor, lineWidth: selectedPath == card.path ? 1.5 : 1))
+            .contentShape(RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(.plain)
         .help("\(card.path) · Click to select; double-click to open")

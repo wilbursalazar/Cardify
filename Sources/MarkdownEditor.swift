@@ -304,9 +304,9 @@ private struct MarkdownTextView: NSViewRepresentable {
         view.isVerticallyResizable = true; view.isHorizontallyResizable = false; view.autoresizingMask = [.width]
         view.textContainer?.containerSize = NSSize(width: contentSize.width, height: CGFloat.greatestFiniteMagnitude)
         view.textContainer?.widthTracksTextView = true
-        view.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+        view.font = .systemFont(ofSize: 14, weight: .regular)
         view.isRichText = false; view.isAutomaticQuoteSubstitutionEnabled = false; view.isAutomaticDashSubstitutionEnabled = false; view.isAutomaticTextReplacementEnabled = false
-        view.allowsUndo = true; view.delegate = context.coordinator; view.string = text; view.textContainerInset = NSSize(width: 10, height: 10)
+        view.allowsUndo = true; view.delegate = context.coordinator; view.string = text; view.textContainerInset = NSSize(width: 16, height: 16)
         view.handleCompletionKey = { [weak coordinator = context.coordinator] event in coordinator?.parent.completion.handleKey(event) ?? false }
         view.followLink = { [weak coordinator = context.coordinator] target in coordinator?.parent.onFollowLink(target) }
         scroll.documentView = view; editor.view = view; completion.view = view
