@@ -14,7 +14,24 @@ struct CardDocument {
         let size = pageSize
         let inset: CGFloat = 27 // 3/8 inch, in PDF points
         let body = CGRect(x: inset, y: inset, width: size.width - 2 * inset, height: size.height - 2 * inset)
-        let attributed = MarkdownRendering.render(text, fontSize: CGFloat(fontSize))
+        let metadata = CardMetadata.parse(text)
+        var textBody = body
+        var idLine: CTLine?
+        var idWidth: CGFloat = 0
+        if let id = metadata.id {
+            guard !id.contains(where: { $0.isNewline || $0.isASCII && $0.isWhitespace && $0 != " " }) else { return nil }
+            var size: CGFloat = 6.5
+            repeat {
+                let attr = NSAttributedString(string: id, attributes: [.font: NSFont.systemFont(ofSize: size), .foregroundColor: NSColor(calibratedWhite: 0.40, alpha: 1)])
+                idLine = CTLineCreateWithAttributedString(attr)
+                idWidth = CGFloat(CTLineGetTypographicBounds(idLine!, nil, nil, nil))
+                if idWidth <= body.width { break }
+                size -= 0.5
+            } while size >= 5
+            guard idWidth <= body.width else { return nil }
+            textBody.size.height -= 12
+        }
+        let attributed = MarkdownRendering.render(metadata.body, fontSize: CGFloat(fontSize))
         let framesetter = CTFramesetterCreateWithAttributedString(attributed)
         let data = NSMutableData()
         guard let consumer = CGDataConsumer(data: data as CFMutableData) else { return nil }
@@ -37,7 +54,11 @@ struct CardDocument {
             }
             context.saveGState()
             context.clip(to: body)
-            let path = CGPath(rect: body, transform: nil)
+            if let idLine {
+                context.textPosition = CGPoint(x: body.maxX - idWidth, y: body.maxY - 7)
+                CTLineDraw(idLine, context)
+            }
+            let path = CGPath(rect: textBody, transform: nil)
             let frame = CTFramesetterCreateFrame(framesetter, CFRange(location: location, length: 0), path, nil)
             CTFrameDraw(frame, context)
             let visible = CTFrameGetVisibleStringRange(frame)
@@ -134,11 +155,14 @@ struct ContentView: View {
     @AppStorage("habitDraft") private var habitDraft = ""
     @State private var tracker = HabitTracker()
     @AppStorage("saveFolder") private var saveFolder = ""
+    @AppStorage("notesFolder") private var notesFolder = ""
     @StateObject private var editor = EditorState()
     @State private var fileURL: URL?
     @State private var showZotero = false
     @State private var showNotes = false
     @State private var research: ResearchClip?
+    @State private var zettelKind: ZettelEditor.Kind?
+    @State private var suggestedID = ""
     @State private var status = "Draft saved on this Mac."
     var card: CardDocument { CardDocument(text: text, portrait: portrait, fontSize: fontSize, dotGrid: dotGrid) }
     var activePDF: Data? { cardMode == "habits" ? tracker.pdf(portrait: portrait, dotGrid: dotGrid, fontSize: fontSize) : card.pdf() }
@@ -166,6 +190,12 @@ struct ContentView: View {
                 Spacer()
                 Menu("Design") { Toggle("Dot grid", isOn: $dotGrid) }
                 Menu("Templates") {
+                    Button("Idea Card…") { startZettel(.idea) }
+                    Button("Reading Card…") { startZettel(.reading) }
+                    Button("Index Card…") { startZettel(.index) }
+                    Divider()
+                    Button("Choose ID / Notes Folder…", action: chooseNotesFolder)
+                    Divider()
                     Button("Research Card…") { research = ResearchClip() }
                     Button("Weekly Habit Tracker") { fileURL = nil; cardMode = "habits" }
                 }
@@ -216,6 +246,11 @@ struct ContentView: View {
             if let clip = ResearchClip.from(url) { research = clip }
             else { status = "Could not open that clip." }
         }
+        .sheet(item: $zettelKind) { kind in
+            ZettelEditor(kind: kind, hasDraft: !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, onUse: { content in
+                text = content; cardMode = "markdown"; fileURL = nil; status = "\(kind.rawValue) card ready."
+            }, cardID: suggestedID)
+        }
         .sheet(item: $research) { clip in
             ResearchEditor(clip: clip) { content, append in
                 if cardMode != "markdown" { fileURL = nil }
@@ -235,6 +270,15 @@ struct ContentView: View {
                 status = "Zotero source added."
             }
         }
+    }
+    func chooseNotesFolder() {
+        let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true
+        if panel.runModal() == .OK, let url = panel.url { notesFolder = url.path; status = "ID and notes folder: \(url.path)" }
+    }
+    func startZettel(_ kind: ZettelEditor.Kind) {
+        let folder = !notesFolder.isEmpty ? notesFolder : saveFolder
+        suggestedID = CardIDIndex.suggest(in: folder.isEmpty ? nil : URL(fileURLWithPath: folder, isDirectory: true))
+        zettelKind = kind
     }
     var pageCount: Int { activePDF.flatMap { PDFDocument(data: $0)?.pageCount } ?? 0 }
     func openFile() {
@@ -256,7 +300,28 @@ struct ContentView: View {
     func saveMarkdown() -> Bool {
         let panel = NSSavePanel(); if !saveFolder.isEmpty { panel.directoryURL = URL(fileURLWithPath: saveFolder, isDirectory: true) }; panel.allowedContentTypes = [.init(filenameExtension: "md")!]; panel.nameFieldStringValue = fileURL?.lastPathComponent ?? "Index Card.md"
         if panel.runModal() == .OK, let url = panel.url {
-            do { try (cardMode == "habits" ? tracker.markdown : text).write(to: url, atomically: true, encoding: .utf8); fileURL = url; status = "Saved \(url.lastPathComponent)."; return true }
+            let content = cardMode == "habits" ? tracker.markdown : text
+            if CardMetadata.parse(content).id == nil && CardMetadata.hasNonemptyID(content) {
+                status = "Could not read card_id metadata. Check its formatting before saving."; return false
+            }
+            if let id = CardMetadata.parse(content).id {
+                guard !id.contains(where: { $0.isNewline || ($0.isASCII && $0.isWhitespace && $0 != " ") }) else { status = "Card IDs must be a single line."; return false }
+                var roots = [url.deletingLastPathComponent().standardizedFileURL]
+                if !notesFolder.isEmpty {
+                    let folder = URL(fileURLWithPath: notesFolder, isDirectory: true).standardizedFileURL
+                    if roots[0].path == folder.path || roots[0].path.hasPrefix(folder.path + "/") { roots = [folder] }
+                    else { roots.append(folder) }
+                }
+                do {
+                    for root in roots {
+                        if let duplicate = try CardIDIndex.ids(in: root, excluding: url).first(where: { $0.0.caseInsensitiveCompare(id) == .orderedSame }) {
+                            let alert = NSAlert(); alert.messageText = "This card ID is already in use"; alert.informativeText = "\(id) is used by \(duplicate.1.lastPathComponent). Change the ID before saving."; alert.runModal()
+                            status = "Duplicate card ID: \(id)."; return false
+                        }
+                    }
+                } catch { status = "Could not verify card IDs: \(error.localizedDescription)"; return false }
+            }
+            do { try content.write(to: url, atomically: true, encoding: .utf8); fileURL = url; status = "Saved \(url.lastPathComponent)."; return true }
             catch { status = "Could not save: \(error.localizedDescription)" }
         }
         return false

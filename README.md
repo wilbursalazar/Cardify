@@ -21,6 +21,12 @@ open build/Cardify.app
 
 The app is ad-hoc signed, not notarized. macOS may require an explicit confirmation before opening it. The build script produces a universal binary targeting macOS 13 and later; support for other macOS releases and hardware has not been comprehensively tested.
 
+## Zettelkasten templates
+
+Choose **Templates → Idea Card, Reading Card, or Index Card**. Each offers an optional suggested ID, editable by you, plus related-card links and explanations. Reading cards can attach a Zotero source and page. ID-bearing notes store `card_id` in Markdown frontmatter; the ID prints in small type in the card's safe area. Choosing a template replaces the Markdown draft only after confirmation.
+
+Choose **Templates → Choose ID / Notes Folder** to search a vault for existing IDs. Before saving an ID-bearing note, Cardify checks the selected notes folder and, when outside that folder, the destination folder and their subfolders for duplicate `card_id` metadata. Saving back to the same file is allowed. If a folder cannot be read or contains unparseable card ID metadata, verification stops rather than assuming the ID is unique. These checks cover only the searched folders and cannot prevent simultaneous edits by other apps. Existing files are not automatically renamed or renumbered.
+
 ## Weekly habit cards and design
 
 Choose **Habits** in the editor to edit the card heading, add named rows, and mark or clear each weekday with an X. Seven standard rows fit on a landscape card at the default text size; larger text may continue onto additional cards. Print a blank tracker or mark it digitally first. Save exports a Markdown table, and opening a table saved by Cardify restores the habit editor. Switch back to **Markdown** for ordinary notes; each draft is kept locally. Long habit names and additional rows continue across cards when needed.
