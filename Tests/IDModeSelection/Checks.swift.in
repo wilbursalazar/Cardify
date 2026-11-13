@@ -1,0 +1,76 @@
+import Foundation
+
+extension Int { static let alertFirstButtonReturn = 1 }
+final class NSAlert {
+    static var replies: [Int] = []
+    static var shown: [(String, String, [String])] = []
+    var messageText = "", informativeText = "", buttons: [String] = []
+    func addButton(withTitle title: String) { buttons.append(title) }
+    func runModal() -> Int {
+        Self.shown.append((messageText, informativeText, buttons))
+        precondition(!Self.replies.isEmpty, "Unexpected alert")
+        return Self.replies.removeFirst()
+    }
+}
+
+final class Harness {
+    var text = "", status = "", cardMode = "markdown", storedIDMode = IDMode.timestamp.rawValue
+    var showDebate = false, autoTimestampID = false
+    var notesFolder = "", saveFolder = ""
+    var fileURL: URL?
+    var idMode: IDMode { IDMode(rawValue: storedIDMode) ?? (autoTimestampID ? .timestamp : .titleOnly) }
+    // METHODS
+}
+
+@main struct Check {
+    static func main() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("cardify-id-mode-" + UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try "---\ncard_id: \"1\"\n---\n# First\n".write(to: root.appendingPathComponent("first.md"), atomically: true, encoding: .utf8)
+        try "---\ncard_id: \"2a\"\n---\n# Branch\n".write(to: root.appendingPathComponent("branch.md"), atomically: true, encoding: .utf8)
+        let original = "---\r\n# Keep this comment\r\ncard_id: \"202611131430\" # Keep this too\r\ntags: [research]\r\n---\r\n# A title\r\n\r\nBody.\r\n"
+        func fresh() -> Harness { let h = Harness(); h.notesFolder = root.path; h.text = original; return h }
+        NSAlert.shown = []; NSAlert.replies = [1]
+        let replace = fresh(); replace.selectIDMode(.luhmann)
+        precondition(replace.idMode == .luhmann && CardMetadata.parse(replace.text).id == "3")
+        precondition(replace.text.contains("# Keep this comment\r\n") && replace.text.contains("# Keep this too\r\n") && replace.text.contains("# A title\r\n\r\nBody.\r\n"), "Replacement must preserve metadata, content, and CRLF")
+        precondition(NSAlert.shown.count == 1 && NSAlert.shown[0].1.contains("202611131430") && NSAlert.shown[0].1.contains("3"))
+        precondition(NSAlert.shown[0].2 == ["Replace ID", "Keep Current ID"])
+        NSAlert.shown = []; NSAlert.replies = [2]
+        let cancel = fresh(); cancel.selectIDMode(.luhmann)
+        precondition(cancel.text == original && cancel.idMode == .timestamp, "Declining must keep ID and previous style")
+        let saved = fresh(); let savedURL = root.appendingPathComponent("saved.md")
+        try original.write(to: savedURL, atomically: true, encoding: .utf8); saved.fileURL = savedURL
+        NSAlert.shown = []; NSAlert.replies = []; saved.selectIDMode(.luhmann)
+        precondition(saved.text == original && saved.idMode == .luhmann && NSAlert.shown.isEmpty, "Saved IDs must stay unchanged")
+        precondition((try? String(contentsOf: savedURL, encoding: .utf8)) == original)
+        let debate = fresh(); debate.showDebate = true; debate.text = "---\ncard_id: \"AFF-01\"\n---\n# Point\n"
+        let debateOriginal = debate.text; debate.selectIDMode(.luhmann)
+        precondition(debate.text == debateOriginal && debate.idMode == .luhmann && NSAlert.shown.isEmpty && debate.status == "Debate cards keep their existing IDs.", "Debate IDs must stay unchanged")
+        let debateInResearch = fresh(); debateInResearch.text = "---\ncard_id: \"AFF-01\"\n---\n# Point\n<!-- cardify:debate=aff -->\n"
+        let debateInResearchOriginal = debateInResearch.text; debateInResearch.selectIDMode(.luhmann)
+        precondition(debateInResearch.text == debateInResearchOriginal && debateInResearch.idMode == .luhmann && NSAlert.shown.isEmpty && debateInResearch.status == "Debate cards keep their existing IDs.", "Debate IDs must stay unchanged in Research mode")
+        let noID = fresh(); noID.text = "# A title\n\nBody.\n"; noID.selectIDMode(.luhmann)
+        precondition(CardMetadata.parse(noID.text).id == "3" && noID.idMode == .luhmann && NSAlert.shown.isEmpty)
+        let invalid = fresh(); invalid.text = "---\ncard_id: \"unterminated\n---\n# Note\n"; let invalidOriginal = invalid.text
+        invalid.selectIDMode(.luhmann); precondition(invalid.text == invalidOriginal && invalid.idMode == .timestamp)
+        let invalidHeader = fresh(); invalidHeader.text = "---\n# unfinished metadata"; let oldHeader = invalidHeader.text
+        invalidHeader.selectIDMode(.luhmann); precondition(invalidHeader.text == oldHeader && invalidHeader.idMode == .timestamp)
+        let invalidSaved = fresh(); invalidSaved.fileURL = savedURL; invalidSaved.text = "---\ncard_id: \"unterminated\n---\n# Note\n"
+        let invalidSavedText = invalidSaved.text; invalidSaved.selectIDMode(.luhmann)
+        precondition(invalidSaved.text == invalidSavedText && invalidSaved.idMode == .timestamp, "Malformed saved IDs must keep the previous style")
+        let scanFailure = fresh(); scanFailure.showDebate = true; scanFailure.text = "# Note\n"; scanFailure.notesFolder = root.appendingPathComponent("missing").path
+        let scanFailureText = scanFailure.text; scanFailure.selectIDMode(.luhmann)
+        precondition(scanFailure.text == scanFailureText && scanFailure.idMode == .timestamp, "Failed scans must keep the previous style")
+        let missing = fresh(); missing.notesFolder = root.appendingPathComponent("missing").path
+        NSAlert.shown = []; NSAlert.replies = [1]; missing.selectIDMode(.luhmann)
+        precondition(missing.text == original && missing.idMode == .timestamp && NSAlert.shown.count == 1, "Scan failure must not alter ID or style")
+        let noFolder = fresh(); noFolder.notesFolder = ""; NSAlert.shown = []; NSAlert.replies = [1]; noFolder.selectIDMode(.luhmann)
+        precondition(noFolder.text == original && noFolder.idMode == .timestamp && NSAlert.shown.count == 1)
+        let alreadySelected = fresh(); alreadySelected.storedIDMode = IDMode.luhmann.rawValue
+        NSAlert.shown = []; NSAlert.replies = []; alreadySelected.selectIDMode(.luhmann)
+        precondition(alreadySelected.text == original && NSAlert.shown.isEmpty, "Reselecting the same style must not renumber")
+        print("ID style confirmation, collision checks, saved and Debate preservation, cancellation, CRLF and failure safety passed")
+    }
+}

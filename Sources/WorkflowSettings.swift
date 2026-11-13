@@ -43,6 +43,7 @@ enum WorkflowPreference: String, CaseIterable, Identifiable {
 struct WorkflowSettings: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("newCardWorkflow") private var storedWorkflow = WorkflowPreference.configured.rawValue
+    @AppStorage("dotGrid") private var dotGrid = false
     private var preference: WorkflowPreference { WorkflowPreference(rawValue: storedWorkflow) ?? .configured }
 
     var body: some View {
@@ -50,6 +51,8 @@ struct WorkflowSettings: View {
             Text("Settings").font(.title2.bold())
             Text("Appearance").font(.headline)
             AppearanceSettings()
+            Toggle("Dot grid on cards", isOn: $dotGrid)
+                .help("Show a light dot grid in the preview and on printed cards.")
             Text("New Markdown cards").font(.headline)
             Picker("Starting workflow", selection: Binding(get: { preference }, set: { storedWorkflow = $0.rawValue })) {
                 ForEach(WorkflowPreference.allCases) { choice in Text(choice.name).tag(choice) }
@@ -59,6 +62,6 @@ struct WorkflowSettings: View {
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Spacer()
             HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
-        }.padding(24).frame(width: 500, height: 330)
+        }.padding(24).frame(width: 500, height: 370)
     }
 }

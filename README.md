@@ -20,7 +20,7 @@ Cardify requires **macOS 13 or later** and includes code for both Apple silicon 
 2. Optional: choose **File → Choose Save Folder…** to set the folder offered when you save a new note or export a PDF. To work with an Obsidian vault, you can choose a folder inside your vault.
 3. Optional: choose **File → Choose Notes Folder…** and select your vault or notes folder. For Obsidian, select the vault root so inserted paths are relative to the vault. Cardify searches this folder for notes to link and for existing card IDs. It can be the same folder as your save folder.
 4. Enter a title and write, or choose **Templates → Idea Card**, **Reading Card**, or **Index Card**. Templates insert editable Markdown at the cursor; they do not replace your draft.
-5. Check the preview. Use the controls beside it to change orientation, text size, or the dot grid. Then choose **Save…**, **Print…**, or **Save & Print…**.
+5. Check the preview. Use the controls beside it to change orientation or text size. To add a dot grid, open **Settings → Appearance**. Then choose **Save**, **Print**, or **Save & Print**.
 
 Before New Card, opening a different card, or replacing a research clip overwrites an unsaved draft, Cardify offers **Save**, **Discard**, or **Cancel**. **Save** opens a dialog to save a `.md` file. **Print** opens the printer dialog. **Save & Print** saves first and starts printing only if the save succeeds. **File → Export PDF…** saves a PDF for review or printing later. Longer notes can continue onto more than one card.
 
@@ -34,9 +34,9 @@ Cardify asks about unsaved changes before replacing a draft. If you save a new d
 
 ## Find and connect cards
 
-Click **Library…** to browse the Markdown files in your notes folder, or in your save folder if no notes folder is set. Search by title, filename, card ID, or note text. Select a card to see its text, outgoing links, and notes that link to it. Click a connection to inspect it, then **Open Card** to edit it. The library reads files; browsing does not rename or rewrite them. Use **Refresh** after changes outside Cardify.
+Click **Library** to browse the Markdown files in your notes folder, or in your save folder if no notes folder is set. Search by title, filename, card ID, or note text. Select a card to see its text, outgoing links, and notes that link to it. Click a connection to inspect it, then **Open Card** to edit it. The library reads files; browsing does not rename or rewrite them. Use **Refresh** after changes outside Cardify.
 
-In the Cards view, **Insert Link** adds a link to the selected card in the current Markdown draft. You can include an optional explanation, such as “supports this argument.” You can do the same from **Link Note…** above the editor. Links to ambiguous or unrecognized targets may not appear in the library’s connections; the Markdown itself remains unchanged. Nearby IDs are hints inferred from address shapes, not proof that cards are related.
+In the Cards view, **Insert Link** adds a link to the selected card in the current Markdown draft. You can include an optional explanation, such as “supports this argument.” You can do the same from **Link Note** above the editor. Links to ambiguous or unrecognized targets may not appear in the library’s connections; the Markdown itself remains unchanged. Nearby IDs are hints inferred from address shapes, not proof that cards are related.
 
 ### Create a keyword index
 
@@ -50,7 +50,7 @@ Open a reading card and choose **Templates → New Idea from This Card…**. If 
 
 ## Explore the graph
 
-Click **Graph…** beside Library to open a separate, read-only window for the selected notes folder. When your current saved card is in that folder, the graph starts with its nearby connections; otherwise it opens the whole-vault view. Search the list, select a node to inspect it, and use **Open Card** or double-click a node to open it in the editor. Opening a card follows the usual unsaved-draft protection.
+Click **Graph** beside Library to open a separate, read-only window for the selected notes folder. When your current saved card is in that folder, the graph starts with its nearby connections; otherwise it opens the whole-vault view. Search the list, select a node to inspect it, and use **Open Card** or double-click a node to open it in the editor. Opening a card follows the usual unsaved-draft protection.
 
 Solid lines show actual links to other Markdown cards. Dotted lines, controlled by **Possible branches**, are *possible* relationships inferred from card IDs; an ID alone does not establish why notes are related. A node’s number, color, and size show its count of distinct neighbors connected by actual links, not importance. Links that cannot be resolved safely are counted in the status but not guessed.
 
@@ -78,7 +78,7 @@ Eco's method is especially helpful when you need to distinguish **what a source 
 
 Luhmann's physical card index used fixed addresses, sequences, branches, cross-references, and an index of entry points. New notes could be placed near an existing line of thought without renumbering the whole collection. Cross-references could connect ideas in different places, allowing several paths through the file.
 
-**Try it in Cardify:** choose the **Luhmann** ID style, write an idea, and save it. Use **Continue sequence…** for the next address in a sequence or **Branch from card…** for an offshoot. Add links and a sentence explaining why the notes belong together. An Index Card can serve as an entry point into a topic.
+**Try it in Cardify:** choose the **Luhmann** ID style, write an idea, and save it. Use **Continue sequence** for the next address in a sequence or **Branch from card** for an offshoot. Add links and a sentence explaining why the notes belong together. An Index Card can serve as an entry point into a topic.
 
 Cardify's numbering is **Luhmann-inspired**, not an exact reconstruction of every address in his historical archive. You remain free to edit an ID or write notes in a different style.
 
@@ -99,12 +99,12 @@ Think of a **continuation** as the next address at the same level and a **branch
 | `1a1` | Continue sequence | `1a2` | Add another note at the offshoot's level. |
 | `1a1` | Branch from card | `1a1a` | Explore another offshoot. |
 
-These examples assume the suggested IDs are available. Cardify searches for existing IDs and skips ones already in use. Your actual suggestion may differ, and you can edit it. **Continue sequence…** appears in Luhmann mode; **Branch from card…** is available in Luhmann and Timestamp modes.
+These examples assume the suggested IDs are available. Cardify searches for existing IDs and skips ones already in use. Your actual suggestion may differ, and you can edit it. **Continue sequence** appears in Luhmann mode; **Branch from card** is available in Luhmann and Timestamp modes.
 
 To use either action:
 
 1. Give the current card an ID. If the card is new or has unsaved edits, Cardify asks you to save it first.
-2. Choose **Continue sequence…** or **Branch from card…**. Cardify creates a new draft with a suggested ID and a link back to the saved card.
+2. Choose **Continue sequence** or **Branch from card**. Cardify creates a new draft with a suggested ID and a link back to the saved card.
 3. Give the new draft a title, write your note, and save it. The new draft is **not saved automatically**.
 
 The original card keeps its ID and filename. Cardify does not automatically add a link from the original card to the new one; add one yourself if you want a link in both directions. Neither action automatically renumbers existing notes.
@@ -119,13 +119,13 @@ The **ID style** selector sits above the writing area. IDs are optional and edit
 | **Luhmann** | An available numeric starting ID, with continuation and branch suggestions. | You want addresses that express sequences and offshoots. |
 | **Title only** | No new ID. | You prefer a descriptive filename without an automatically generated ID. |
 
-With Timestamp or Luhmann selected, a new note's suggested filename combines its ID and title. For example, a card titled `Ways of remembering` might be suggested as `202611122145 Ways of remembering.md`. Title only suggests a title-based filename. Switching styles does not remove an existing ID or automatically rename an existing file; you can edit the ID field yourself.
+With Timestamp or Luhmann selected, a new note's suggested filename combines its ID and title. For example, a card titled `Ways of remembering` might be suggested as `202611122145 Ways of remembering.md`. Title only suggests a title-based filename. If an unsaved Research card already has an ID when you choose Luhmann, Cardify checks the notes or save folder and shows the current and suggested IDs. Choose **Replace ID** to use the new one, or **Keep Current ID** to leave the ID and style unchanged. Saved card IDs and filenames are not changed automatically, and Debate cards keep their own IDs. You can also edit the ID field yourself.
 
 Before saving an ID-bearing note, Cardify checks the selected notes folder and the destination folder, including their subfolders, for duplicate IDs it recognizes. If the check cannot be completed, Cardify stops the save instead of assuming the ID is unique. These checks apply only to the folders searched and cannot prevent simultaneous changes by another app.
 
 ## Link and format notes
 
-In a Markdown card, type `[[` to search the selected notes folder by filename and insert a link. Use the arrow keys to choose a suggestion, Return or Tab to insert it, and Escape to dismiss the list. You can also click **Link Note…** and search for a note. Cardify inserts a path-based link such as `[[Research/Memory and archives]]`; it does not change the linked file.
+In a Markdown card, type `[[` to search the selected notes folder by filename and insert a link. Use the arrow keys to choose a suggestion, Return or Tab to insert it, and Escape to dismiss the list. You can also click **Link Note** and search for a note. Cardify inserts a path-based link such as `[[Research/Memory and archives]]`; it does not change the linked file.
 
 To follow a link, **Command-click** it in the Markdown editor, or click the underlined link in the card preview. `[[Note]]`, `[[Folder/Note|label]]`, and heading links such as `[[Note#Heading]]` open Markdown cards in Cardify; web links open in your browser. Links to Zotero items open in Zotero. Cardify asks about unsaved changes before opening another card.
 
@@ -142,7 +142,7 @@ Use the buttons above the editor for **bold**, *italic*, headings, bullet lists,
 ## Add a Zotero source
 
 1. Open Zotero. In Zotero, enable **Settings → Advanced → Allow other applications on this computer to communicate with Zotero**.
-2. In a Markdown card, click **Add Zotero Source…**.
+2. In a Markdown card, click **Add Zotero Source**.
 3. Search your library, select a source, and optionally enter a page or other location. Cardify adds a readable source and a link that opens the item in Zotero.
 
 You can choose your personal library or an available group, search more fields, and load additional results. Zotero must be running with local access enabled. Cardify reads through Zotero's local API and does not modify your library. Check source details and page numbers before citing them.
@@ -165,7 +165,7 @@ Choose **Debate** to organize arguments using the same Markdown draft, ID option
 
 1. Choose **File → Choose Notes Folder…** and select your notes folder. The argument map searches this folder; if none is selected, it uses the save folder.
 2. Under **New**, choose **Resolution**, give the resolution a title, and save it in the notes folder. Existing debate projects still appear as resolutions. Use **Mark as** to identify an existing draft without renaming its file.
-3. Open **Argument map…**. The map guides you to create a resolution, then add an AFF point; you can also add as many DEF points as you need. New points receive IDs such as `AFF-01` and `DEF-01`, shown at the top right of their cards and in their suggested filenames. Existing IDs and filenames are kept. Choose a notes or save folder first so Cardify can check for duplicate IDs.
+3. Open **Argument map**. The map guides you to create a resolution, then add an AFF point; you can also add as many DEF points as you need. New points receive IDs such as `AFF-01` and `DEF-01`, shown at the top right of their cards and in their suggested filenames. Existing IDs and filenames are kept. Choose a notes or save folder first so Cardify can check for duplicate IDs.
 4. Select a point or connected card on the map. Choose **Add objection or counterargument**, **Add supporting evidence**, **Add response**, or **Add supporting argument**. The new card branches from the selected card, which becomes its primary parent. You can select that new card later to continue the chain. It inherits its parent's ID: an objection under `AFF-01` might be `AFF-01-OB-01`, and its reply `AFF-01-OB-01-RE-01`. The other type codes are `EV` (evidence), `AR` (argument), and `NT` (other note); each type has its own sequence. If an older parent has no ID, you can add one first or continue without an inherited ID. Save and refresh the map to see each new card.
 5. To connect an existing draft to another card, select its parent on the map and choose **Set as primary parent**. To connect it elsewhere too, choose **Add related parent**. A card has one primary parent; dashed connections show additional related parents. You can add a brief explanation of each relationship. Cardify refuses primary links that would make a cycle.
 
@@ -179,12 +179,12 @@ Resolutions, points, and connected cards are ordinary Markdown files. Role and r
 
 1. Choose **Landscape · 5 × 3** or **Portrait · 3 × 5** beside the preview.
 2. Review the preview and card count. Adjust text size if needed; long content can continue onto additional cards.
-3. Click **Print…**. In your printer dialog, choose a printer-supported **3 × 5-inch** paper size and the matching orientation. Print at **100% scale**, without fit-to-page scaling.
+3. Click **Print**. In your printer dialog, choose a printer-supported **3 × 5-inch** paper size and the matching orientation. Print at **100% scale**, without fit-to-page scaling.
 4. Feed the cards according to your printer's instructions. Print a test card to check the feed, orientation, ink, and margins for your printer.
 
 Cardify generates a 3 × 5-inch PDF with a 3/8-inch inset. Actual printable margins and media handling depend on the printer and driver. If the result is clipped, blank, or misaligned, check the paper size, media type, tray, and scaling in the printer dialog; try **File → Export PDF…** to inspect or print the PDF separately. A correct preview cannot guarantee that a particular printer will handle the card stock correctly.
 
-For a light background, choose **Design → Dot grid** beside the preview. It appears in the preview, exported PDF, and printed cards.
+For a light background, enable **Dot grid on cards** under **Settings → Appearance**. It appears in the preview, exported PDF, and printed cards.
 
 ## Clip research from the web
 

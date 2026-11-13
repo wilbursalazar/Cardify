@@ -47,7 +47,7 @@ struct DebatePanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
-                Button("Argument map…") { showBrowser = true }
+                Button("Argument map") { showBrowser = true }.fixedSize()
                 Menu("New") {
                     Button("Resolution") { newRole(.project) }
                     Button("Unassigned AFF point") { newRole(.aff) }

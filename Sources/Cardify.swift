@@ -441,21 +441,21 @@ struct ContentView: View {
                     Divider()
                     Button("Settings…") { showSettings = true }
                 }
-                Button("Save…") { _ = saveMarkdown() }.keyboardShortcut("s")
-                Button("Print…", action: printCards).keyboardShortcut("p")
-                Button("Save & Print…") { if saveMarkdown() { printCards() } }.buttonStyle(.borderedProminent)
+                Button("Save") { _ = saveMarkdown() }.fixedSize().keyboardShortcut("s")
+                Button("Print", action: printCards).fixedSize().keyboardShortcut("p")
+                Button("Save & Print") { if saveMarkdown() { printCards() } }.fixedSize().buttonStyle(.borderedProminent)
             }
-            HStack(spacing: 8) {
+            HStack(spacing: 12) {
                 Button { navigateHistory(back: true) } label: { Image(systemName: "chevron.left") }
                     .buttonStyle(.borderless).help("Back to the previous card").keyboardShortcut("[", modifiers: .command).disabled(history.backTarget == nil)
                 Button { navigateHistory(back: false) } label: { Image(systemName: "chevron.right") }
                     .buttonStyle(.borderless).help("Forward to the next visited card").keyboardShortcut("]", modifiers: .command).disabled(history.forwardTarget == nil)
-                Button("Library…") { showLibrary = true }.buttonStyle(.borderless)
-                Button("Graph…") { showGraph() }.buttonStyle(.borderless).help("Explore card connections in a separate window")
+                Button("Library") { showLibrary = true }.buttonStyle(.borderless).fixedSize()
+                Button("Graph") { showGraph() }.buttonStyle(.borderless).fixedSize().help("Explore card connections in a separate window")
                 Divider().frame(height: 16)
-                Text(currentCardTitle).lineLimit(1).truncationMode(.middle)
+                Text(currentCardTitle).lineLimit(1).truncationMode(.middle).help(currentCardTitle)
                 if cardMode == "markdown", let id = CardMetadata.parse(text).id {
-                    Text(id).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle).frame(maxWidth: 125, alignment: .leading)
+                    Text(id).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle).frame(maxWidth: 125, alignment: .leading).help(id)
                 }
                 Spacer(minLength: 0)
             }
@@ -560,8 +560,7 @@ struct ContentView: View {
                         TextField(titlePlaceholder, text: Binding(get: { NoteEditing.title(in: text) }, set: { text = NoteEditing.setTitle($0, in: text) }))
                             .textFieldStyle(.plain).font(.system(size: 17, weight: .semibold)).padding(.vertical, 6)
                         Picker("ID style", selection: Binding(get: { idMode }, set: { mode in
-                            storedIDMode = mode.rawValue
-                            if mode != .titleOnly && CardMetadata.parse(text).id == nil { _ = ensureID() }
+                            selectIDMode(mode)
                         })) {
                             ForEach(IDMode.allCases) { mode in Text(mode.rawValue).tag(mode) }
                         }.frame(width: 190).help(showDebate ? "AFF and DEF points use their own IDs; connected cards inherit their parent’s ID. Existing IDs are kept." : "Choose how IDs are suggested for new notes. Existing IDs are kept.")
@@ -580,9 +579,9 @@ struct ContentView: View {
                     if idMode != .titleOnly {
                         HStack {
                             if idMode == .luhmann {
-                                Button("Continue sequence…") { relatedFromCurrent(continuation: true) }.help("Create the next card in this sequence")
+                                Button("Continue sequence") { relatedFromCurrent(continuation: true) }.fixedSize().help("Create the next card in this sequence")
                             }
-                            Button("Branch from card…") { relatedFromCurrent(continuation: false) }.help("Create a linked branch from the current card")
+                            Button("Branch from card") { relatedFromCurrent(continuation: false) }.fixedSize().help("Create a linked branch from the current card")
                         }
                     }
                     VStack(spacing: 0) {
@@ -597,8 +596,8 @@ struct ContentView: View {
                                 Spacer(minLength: 0)
                             }
                             HStack(spacing: 14) {
-                                Button("Link Note…") { showNotes = true }.help("Search your notes folder")
-                                Button("Add Zotero Source…") { showZotero = true }.help("Find a source in Zotero")
+                                Button("Link Note") { showNotes = true }.fixedSize().help("Search your notes folder")
+                                Button("Add Zotero Source") { showZotero = true }.fixedSize().help("Find a source in Zotero")
                                 Spacer(minLength: 0)
                             }
                         }
@@ -628,7 +627,6 @@ struct ContentView: View {
                             Text("Portrait · 3 × 5").tag(true)
                         }.labelsHidden().frame(maxWidth: 190)
                         Spacer(minLength: 0)
-                        Menu("Design") { Toggle("Dot grid", isOn: $dotGrid) }
                     }
                     HStack(spacing: 8) {
                         Text("Text size").font(.caption).foregroundStyle(.secondary)
@@ -767,6 +765,57 @@ struct ContentView: View {
         if let folder = fallback?.standardizedFileURL,
            !roots.contains(where: { folder.path == $0.path || folder.path.hasPrefix($0.path + "/") }) { roots.append(folder) }
         return roots
+    }
+    func selectIDMode(_ mode: IDMode) {
+        guard mode != idMode else { return }
+        let currentID = CardMetadata.parse(text).id
+        let debate = DebateNotes.parse(text)
+        let isDebateCard = showDebate || debate.role != nil || debate.primary != nil || !debate.projects.isEmpty || !debate.related.isEmpty
+        if mode == .luhmann && cardMode == "markdown" && !isDebateCard && fileURL == nil {
+            guard currentID != nil || !CardMetadata.hasNonemptyID(text) else {
+                status = "Fix existing card_id metadata before changing ID style."
+                return
+            }
+            let roots = scanRoots(for: fileURL)
+            guard currentID == nil || !roots.isEmpty else {
+                status = "Choose a notes or save folder before changing the card ID."
+                let alert = NSAlert(); alert.messageText = "Can't check card IDs"; alert.informativeText = status; alert.runModal()
+                return
+            }
+            do {
+                let existing = try BranchIDs.existing(in: roots)
+                guard let proposedID = CardIDs.newID(mode: .luhmann, existing: existing),
+                      let updated = NoteEditing.setID(proposedID, in: text),
+                      CardMetadata.parse(updated).id == proposedID else {
+                    status = "Could not prepare a Luhmann ID. Check the card metadata."
+                    return
+                }
+                if let currentID, proposedID != currentID {
+                    let alert = NSAlert()
+                    alert.messageText = "Replace the current card ID?"
+                    alert.informativeText = "Current ID: \(currentID)\nSuggested Luhmann ID: \(proposedID)\n\nThis changes only the current unsaved draft."
+                    alert.addButton(withTitle: "Replace ID")
+                    alert.addButton(withTitle: "Keep Current ID")
+                    guard alert.runModal() == .alertFirstButtonReturn else {
+                        status = "Kept the current card ID and ID style."
+                        return
+                    }
+                }
+                text = updated; storedIDMode = mode.rawValue
+                status = "Luhmann ID added: \(proposedID)."
+            } catch {
+                status = "Could not check card IDs: \(error.localizedDescription)"
+                let alert = NSAlert(); alert.messageText = "Can't check card IDs"; alert.informativeText = status; alert.runModal()
+            }
+            return
+        }
+        let previousStoredMode = storedIDMode
+        storedIDMode = mode.rawValue
+        if mode != .titleOnly && currentID == nil {
+            if !ensureID() { storedIDMode = previousStoredMode }
+        }
+        else if mode == .luhmann && isDebateCard && currentID != nil { status = "Debate cards keep their existing IDs." }
+        else if mode == .luhmann && fileURL != nil && currentID != nil { status = "Luhmann style selected; the saved card ID was kept." }
     }
     @discardableResult func ensureID() -> Bool {
         if idMode == .titleOnly { return true }
