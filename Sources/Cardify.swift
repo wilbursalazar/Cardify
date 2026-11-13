@@ -7,6 +7,7 @@ struct CardDocument {
     var text: String
     var portrait: Bool
     var fontSize: Double
+    var dotGrid: Bool = false
     var pageSize: CGSize { portrait ? CGSize(width: 216, height: 360) : CGSize(width: 360, height: 216) }
 
     func pdf() -> Data? {
@@ -24,6 +25,16 @@ struct CardDocument {
             context.beginPDFPage(nil)
             context.setFillColor(NSColor.white.cgColor)
             context.fill(media)
+            if dotGrid {
+                context.saveGState()
+                context.setFillColor(gray: 0.82, alpha: 1)
+                for y in stride(from: body.minY + 3, through: body.maxY - 3, by: 12) {
+                    for x in stride(from: body.minX + 3, through: body.maxX - 3, by: 12) {
+                        context.fillEllipse(in: CGRect(x: x - 0.45, y: y - 0.45, width: 0.9, height: 0.9))
+                    }
+                }
+                context.restoreGState()
+            }
             context.saveGState()
             context.clip(to: body)
             let path = CGPath(rect: body, transform: nil)
@@ -69,65 +80,6 @@ struct ZoteroItem: Decodable, Identifiable {
         let loc = Self.clean(location)
         let suffix = loc.isEmpty ? "" : ", " + loc
         return "Source: " + description + suffix + "\nZotero: [Open source](zotero://select/library/items/" + key + ")"
-    }
-}
-
-struct ZoteroPicker: View {
-    @Environment(\.dismiss) private var dismiss
-    var onInsert: (String) -> Void
-    @State private var query = ""
-    @State private var location = ""
-    @State private var items: [ZoteroItem] = []
-    @State private var selection: String?
-    @State private var message = "Search your personal Zotero library."
-    @State private var searching = false
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Add a Zotero source").font(.title2.bold())
-            HStack {
-                TextField("Title, author, or keyword", text: $query).onSubmit { search() }
-                Button("Search", action: search).disabled(searching || query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-            Text(message).font(.caption).foregroundStyle(.secondary)
-            List(items, selection: $selection) { item in
-                VStack(alignment: .leading) {
-                    Text(item.title).fontWeight(.medium)
-                    Text([item.authors, ZoteroItem.clean(item.data.date ?? "")].filter { !$0.isEmpty }.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
-                }.tag(item.key)
-            }.frame(minHeight: 240)
-            TextField("Page or location (optional), e.g. p. 42", text: $location)
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Add source") {
-                    if let item = items.first(where: { $0.key == selection }) { onInsert(item.markdown(location: location)); dismiss() }
-                }.disabled(selection == nil).keyboardShortcut(.defaultAction)
-            }
-        }.padding(22).frame(width: 560, height: 440)
-    }
-    func search() {
-        let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !term.isEmpty else { return }
-        var components = URLComponents(string: "http://127.0.0.1:23119/api/users/0/items/top")!
-        components.queryItems = [URLQueryItem(name: "q", value: term), URLQueryItem(name: "qmode", value: "titleCreatorYear"), URLQueryItem(name: "limit", value: "50")]
-        var request = URLRequest(url: components.url!)
-        request.setValue("3", forHTTPHeaderField: "Zotero-API-Version")
-        request.timeoutInterval = 5
-        searching = true; selection = nil; items = []; message = "Searching…"
-        URLSession.shared.dataTask(with: request) { data, response, error in
-            let result: Result<[ZoteroItem], Error>
-            if let error { result = .failure(error) }
-            else if let response = response as? HTTPURLResponse, response.statusCode == 200, let data {
-                result = Result { try JSONDecoder().decode([ZoteroItem].self, from: data) }
-            } else { result = .failure(NSError(domain: "Zotero", code: (response as? HTTPURLResponse)?.statusCode ?? 0)) }
-            DispatchQueue.main.async {
-                searching = false
-                switch result {
-                case .success(let found): items = found; message = found.isEmpty ? "No matching items found." : "\(found.count) results (up to 50). Select a source."
-                case .failure: message = "Could not reach Zotero. Open Zotero and enable Settings → Advanced → Allow other applications on this computer to communicate with Zotero."
-                }
-            }
-        }.resume()
     }
 }
 
@@ -177,6 +129,10 @@ struct ContentView: View {
     @AppStorage("draft") private var text = "# Example Title\n\nMain content area for notes.\n- Keep it concise, or continue onto another card.\n- Use Markdown for Obsidian.\n\nSource: Book Title, p. 42\n\nTags: #quicknote #important"
     @AppStorage("portrait") private var portrait = false
     @AppStorage("fontSize") private var fontSize = 9.0
+    @AppStorage("dotGrid") private var dotGrid = false
+    @AppStorage("cardMode") private var cardMode = "markdown"
+    @AppStorage("habitDraft") private var habitDraft = ""
+    @State private var tracker = HabitTracker()
     @AppStorage("saveFolder") private var saveFolder = ""
     @StateObject private var editor = EditorState()
     @State private var fileURL: URL?
@@ -184,7 +140,12 @@ struct ContentView: View {
     @State private var showNotes = false
     @State private var research: ResearchClip?
     @State private var status = "Draft saved on this Mac."
-    var card: CardDocument { CardDocument(text: text, portrait: portrait, fontSize: fontSize) }
+    var card: CardDocument { CardDocument(text: text, portrait: portrait, fontSize: fontSize, dotGrid: dotGrid) }
+    var activePDF: Data? { cardMode == "habits" ? tracker.pdf(portrait: portrait, dotGrid: dotGrid) : card.pdf() }
+    func setTracker(_ value: HabitTracker) {
+        tracker = value
+        if let data = try? JSONEncoder().encode(value), let encoded = String(data: data, encoding: .utf8) { habitDraft = encoded }
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .firstTextBaseline) {
@@ -200,19 +161,26 @@ struct ContentView: View {
             HStack {
                 Picker("Layout", selection: $portrait) { Text("Landscape (5 × 3)").tag(false); Text("Portrait (3 × 5)").tag(true) }.frame(width: 240)
                 Text("Text size")
-                Slider(value: $fontSize, in: 7...18, step: 1).frame(width: 120)
+                Slider(value: $fontSize, in: 7...18, step: 1).frame(width: 120).disabled(cardMode == "habits").help(cardMode == "habits" ? "Habit grid text uses a fixed size to fit the card." : "Text size")
                 Text("\(Int(fontSize)) pt").monospacedDigit().frame(width: 45)
                 Spacer()
+                Menu("Design") { Toggle("Dot grid", isOn: $dotGrid) }
                 Menu("Templates") {
                     Button("Research Card…") { research = ResearchClip() }
-                    Button("Weekly Habit Tracker") { insertHabit() }
+                    Button("Weekly Habit Tracker") { fileURL = nil; cardMode = "habits" }
                 }
-                Button("Add Source…") { showZotero = true }
+                Button("Add Source…") { showZotero = true }.disabled(cardMode == "habits")
                 Button("Save Folder…", action: chooseFolder)
-                Button("New Card") { text = ""; fileURL = nil; status = "New draft." }
+                Button("New Card") { if cardMode == "habits" { setTracker(HabitTracker()) } else { text = "" }; fileURL = nil; status = "New draft." }
             }
             HSplitView {
                 VStack(alignment: .leading) {
+                    Picker("Card type", selection: Binding(get: { cardMode }, set: { cardMode = $0; fileURL = nil })) {
+                        Text("Markdown").tag("markdown"); Text("Habits").tag("habits")
+                    }.pickerStyle(.segmented)
+                    if cardMode == "habits" {
+                        HabitTrackerEditor(tracker: Binding(get: { tracker }, set: { setTracker($0) }))
+                    } else {
                     HStack { Text("Write").fontWeight(.semibold); Spacer(); Text("Markdown · use - [ ] for tasks").foregroundStyle(.secondary) }
                     HStack(spacing: 5) {
                         Button("B") { editor.wrap("**") }.help("Bold")
@@ -225,22 +193,28 @@ struct ContentView: View {
                         Button("Link Note…") { showNotes = true }.help("Search your notes folder")
                     }.buttonStyle(.bordered)
                     MarkdownEditor(text: $text, editor: editor).border(Color.secondary.opacity(0.2))
+                    }
                 }.frame(minWidth: 300)
                 VStack(alignment: .leading) {
                     HStack { Text("Preview").fontWeight(.semibold); Spacer(); Text("\(pageCount) \(pageCount == 1 ? "card" : "cards")").foregroundStyle(.secondary) }
-                    PDFPreview(data: card.pdf()).border(Color.secondary.opacity(0.2))
+                    PDFPreview(data: activePDF).border(Color.secondary.opacity(0.2))
                 }.frame(minWidth: 320)
             }
             Text("3 × 5-inch stock · ⅜-inch inset · Long notes continue onto more cards. Select 100% scale and the matching paper size in the print dialog.")
                 .font(.caption).foregroundStyle(.secondary)
             Text(status).font(.caption).foregroundStyle(.secondary)
         }.padding(24).frame(minWidth: 850, minHeight: 600)
+        .onAppear {
+            if let data = habitDraft.data(using: .utf8), let saved = try? JSONDecoder().decode(HabitTracker.self, from: data) { tracker = saved }
+        }
         .onOpenURL { url in
             if let clip = ResearchClip.from(url) { research = clip }
             else { status = "Could not open that clip." }
         }
         .sheet(item: $research) { clip in
             ResearchEditor(clip: clip) { content, append in
+                if cardMode != "markdown" { fileURL = nil }
+                cardMode = "markdown"
                 if append { text += (text.isEmpty ? "" : "\n\n") + content }
                 else { text = content; fileURL = nil }
                 status = "Research card ready."
@@ -257,21 +231,16 @@ struct ContentView: View {
             }
         }
     }
-    func insertHabit() {
-        let alert = NSAlert(); alert.messageText = "Create a weekly habit card?"; alert.informativeText = "Replace the current draft, or append the template to it."
-        alert.addButton(withTitle: "Replace Draft"); alert.addButton(withTitle: "Append"); alert.addButton(withTitle: "Cancel")
-        switch alert.runModal() {
-        case .alertFirstButtonReturn: text = HabitTemplate.markdown; fileURL = nil
-        case .alertSecondButtonReturn: text += (text.isEmpty ? "" : "\n\n") + HabitTemplate.markdown
-        default: return
-        }
-        status = "Weekly habit tracker ready."
-    }
-    var pageCount: Int { card.pdf().flatMap { PDFDocument(data: $0)?.pageCount } ?? 0 }
+    var pageCount: Int { activePDF.flatMap { PDFDocument(data: $0)?.pageCount } ?? 0 }
     func openFile() {
         let panel = NSOpenPanel(); panel.allowedContentTypes = [.plainText]; panel.allowsMultipleSelection = false
         if panel.runModal() == .OK, let url = panel.url {
-            do { text = try String(contentsOf: url, encoding: .utf8); fileURL = url; status = "Opened \(url.lastPathComponent)." }
+            do {
+                let contents = try String(contentsOf: url, encoding: .utf8)
+                if let saved = HabitTracker.fromMarkdown(contents) { setTracker(saved); cardMode = "habits" }
+                else { text = contents; cardMode = "markdown" }
+                fileURL = url; status = "Opened \(url.lastPathComponent)."
+            }
             catch { status = "Could not open file: \(error.localizedDescription)" }
         }
     }
@@ -282,13 +251,13 @@ struct ContentView: View {
     func saveMarkdown() -> Bool {
         let panel = NSSavePanel(); if !saveFolder.isEmpty { panel.directoryURL = URL(fileURLWithPath: saveFolder, isDirectory: true) }; panel.allowedContentTypes = [.init(filenameExtension: "md")!]; panel.nameFieldStringValue = fileURL?.lastPathComponent ?? "Index Card.md"
         if panel.runModal() == .OK, let url = panel.url {
-            do { try text.write(to: url, atomically: true, encoding: .utf8); fileURL = url; status = "Saved \(url.lastPathComponent)."; return true }
+            do { try (cardMode == "habits" ? tracker.markdown : text).write(to: url, atomically: true, encoding: .utf8); fileURL = url; status = "Saved \(url.lastPathComponent)."; return true }
             catch { status = "Could not save: \(error.localizedDescription)" }
         }
         return false
     }
     func exportPDF() {
-        guard let data = card.pdf() else { status = "Could not create PDF."; return }
+        guard let data = activePDF else { status = "Could not create PDF."; return }
         let panel = NSSavePanel(); if !saveFolder.isEmpty { panel.directoryURL = URL(fileURLWithPath: saveFolder, isDirectory: true) }; panel.allowedContentTypes = [.pdf]; panel.nameFieldStringValue = (fileURL?.deletingPathExtension().lastPathComponent ?? "Index Card") + ".pdf"
         if panel.runModal() == .OK, let url = panel.url {
             do { try data.write(to: url, options: .atomic); status = "Exported \(url.lastPathComponent)." }
@@ -296,7 +265,7 @@ struct ContentView: View {
         }
     }
     func printCards() {
-        guard let data = card.pdf(), let pdf = PDFDocument(data: data) else { status = "Could not prepare cards."; return }
+        guard let data = activePDF, let pdf = PDFDocument(data: data) else { status = "Could not prepare cards."; return }
         let info = NSPrintInfo.shared.copy() as! NSPrintInfo
         info.paperSize = NSSize(width: 216, height: 360)
         info.orientation = portrait ? .portrait : .landscape

@@ -21,6 +21,12 @@ open build/Cardify.app
 
 The app is ad-hoc signed, not notarized. macOS may require an explicit confirmation before opening it. The build script produces a universal binary targeting macOS 13 and later; support for other macOS releases and hardware has not been comprehensively tested.
 
+## Weekly habit cards and design
+
+Choose **Habits** in the editor to add named rows and mark each weekday with an X. Print a blank tracker or mark it digitally first. Save exports a Markdown table, and opening a table saved by Cardify restores the habit editor. Switch back to **Markdown** for ordinary notes; each draft is kept locally. Long habit names and additional rows continue across cards when needed.
+
+Choose **Design → Dot grid** to add a light gray grid to the preview, PDF and printed cards. The grid remains within the 3/8-inch safe inset.
+
 ## Print
 
 Choose a printer-supported 3 × 5-inch paper size and matching orientation in the print dialog; print at 100% scale. The generated PDF uses a 3/8-inch inset and continues long notes onto additional cards. Printer feed, available media sizes and nonprintable margins vary; verify using a test card. Export PDF is available for checking first.
@@ -33,7 +39,7 @@ Select text on a normal webpage, click the extension, then **Open in Cardify**. 
 
 ## Zotero
 
-Open Zotero and enable **Settings → Advanced → Allow other applications on this computer to communicate with Zotero**. **Add Source** searches the personal library through the local API. It does not modify Zotero; group libraries are not currently searched.
+Open Zotero and enable **Settings → Advanced → Allow other applications on this computer to communicate with Zotero**. **Add Source** shows recent sources and searches as you type. Choose your personal library or an available group, optionally search all fields and full text, and load more results. The app uses Zotero’s local API and does not modify the library. Live search depends on Zotero running with local access enabled.
 
 ## Privacy
 
