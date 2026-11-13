@@ -54,6 +54,23 @@ import PDFKit
     }, "Debate relation must remain clickable in preview")
    }
   }
+  for stance in ["supports", "challenges"] {
+   for ending in ["\n", "\r\n"] {
+    let draft = ["<!-- cardify:stance=\(stance) -->", "# Debate point", "", "Primary parent: [[Research/Parent]]"].joined(separator: ending)
+    guard let data = CardDocument(text: draft, portrait: false, fontSize: 9).pdf(includeLinks: true),
+          let page = PDFDocument(data: data)?.page(at: 0) else { fatalError("Could not create stance card") }
+    let output = page.string ?? ""
+    precondition(!output.contains("cardify:stance") && output.contains("Debate point") && output.contains("Primary parent"), "Stance metadata must not print")
+    precondition(page.annotations.contains { annotation in
+     guard let url = (annotation.action as? PDFActionURL)?.url else { return false }
+     return CardPreviewLinks.target(from: url) == .wiki("Research/Parent")
+    }, "Stance metadata must preserve clickable parent link")
+   }
+  }
+  let quotedStance = "```\n<!-- cardify:stance=supports -->\n```"
+  precondition(MarkdownRendering.render(quotedStance, fontSize: 9).string.contains("cardify:stance=supports"), "A stance example in code must remain visible")
+  let commentedStance = "<!-- example\n<!-- cardify:stance=supports -->\n-->"
+  precondition(MarkdownRendering.render(commentedStance, fontSize: 9).string.contains("cardify:stance=supports"), "A stance example inside a comment must not be treated as metadata")
   let bomMarker = "\u{FEFF}<!-- cardify:debate=aff -->\r\n# Debate point"
   precondition(!MarkdownRendering.render(bomMarker, fontSize: 9).string.contains("cardify:debate"), "A BOM must not expose a debate marker")
   let commentMarker = "<!-- example\n<!-- cardify:debate=aff -->\n-->"

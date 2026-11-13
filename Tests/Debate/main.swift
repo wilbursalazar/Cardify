@@ -73,4 +73,40 @@ let bomFirst = "\u{FEFF}Primary parent: [[Claims/A]]\r\n# Body\r\n"
 check(DebateNotes.setPrimary(nil, explanation: "", in: bomFirst) == "\u{FEFF}# Body\r\n", "removing first relation preserves BOM")
 let mixed = "# Title\r\nBody\nRelated parent: [[Claims/A]] — proof\r\nOther\n"
 check(DebateNotes.removeRelated("Claims/A", in: mixed) == "# Title\r\nBody\nOther\n", "unrelated mixed line endings remain unchanged")
+// Relationship direction belongs to the primary edge, not the note's kind.
+for role in [DebateRole.objection, .evidence, .argument, .reply] {
+ let legacy = DebateNotes.setPrimary("Claims/A", explanation: "", in: DebateNotes.setRole(role, in: "# Old note\n")!)!
+ let before = DebateNotes.parse(legacy)
+ check(before.valid && before.explicitStance == nil && before.primaryStance == nil, "legacy role never implies link stance")
+ check(DebateNotes.setStance(nil, in: legacy) == legacy, "reading an unclassified legacy note never rewrites it")
+ for stance in [DebateStance.supports, .challenges] {
+  let updated = DebateNotes.setStance(stance, in: legacy)!
+  let info = DebateNotes.parse(updated)
+  check(info.valid && info.role == role && info.primary == before.primary && info.explicitStance == stance && info.primaryStance == stance, "explicit stance is independent of the card type")
+  check(DebateNotes.setStance(nil, in: updated) == legacy, "clearing a stance preserves the original legacy note")
+ }
+}
+let crlfNote = "\u{FEFF}---\r\ncard_id: A\r\n---\r\n# Title\r\nPrimary parent: [[Claims/A]]\r\n"
+let support = DebateNotes.setStance(.supports, in: crlfNote)!
+check(support.hasPrefix(crlfNote) && !support.replacingOccurrences(of: "\r\n", with: "").contains("\n"), "stance preserves BOM and CRLF")
+let changedStance = DebateNotes.setStance(.challenges, in: support)!
+check(DebateNotes.parse(changedStance).primaryStance == .challenges && !changedStance.contains("stance=supports"), "stance changes without duplicate markers")
+let sameParent = DebateNotes.setPrimary("claims/a", explanation: "updated reason", in: support)!
+check(DebateNotes.parse(sameParent).primaryStance == .supports, "same parent keeps its stance")
+let differentParent = DebateNotes.setPrimary("Claims/B", explanation: "", in: support)!
+check(DebateNotes.parse(differentParent).primaryStance == nil && !differentParent.contains("cardify:stance="), "reparenting clears old edge stance")
+let removedParent = DebateNotes.setPrimary(nil, explanation: "", in: support)!
+check(DebateNotes.parse(removedParent).primary == nil && !removedParent.contains("cardify:stance="), "removing a parent clears its stance")
+let fencedStance = "# Example\n\n```md\n<!-- cardify:stance=supports -->\n```\n"
+check(DebateNotes.parse(fencedStance).valid && DebateNotes.parse(fencedStance).explicitStance == nil, "stance examples in code are ignored")
+let commentedStance = "# Example\n<!--\n<!-- cardify:stance=supports -->\n-->\n"
+check(DebateNotes.parse(commentedStance).explicitStance == nil, "stance examples in comments are ignored")
+for invalidStance in ["<!-- cardify:stance=unknown -->\n", "<!-- cardify:stance=supports -->\n<!-- cardify:stance=challenges -->\n", "<!-- cardify:stance=supports\n"] {
+ check(!DebateNotes.parse(invalidStance).valid && DebateNotes.setStance(.supports, in: invalidStance) == nil, "malformed stance metadata is left intact")
+}
+check(DebateNotes.setStance(.supports, in: "# Unconnected\n") == nil, "cannot assign a stance without a primary parent")
+let noParent = "# Unconnected\n<!-- cardify:stance=supports -->\n"
+check(DebateNotes.parse(noParent).explicitStance == .supports && DebateNotes.parse(noParent).primaryStance == nil, "an orphan marker does not classify a missing primary relation")
+let attached = DebateNotes.setPrimary("Claims/New", explanation: "", in: noParent)!
+check(DebateNotes.parse(attached).primaryStance == nil && !attached.contains("cardify:stance="), "an orphan marker is cleared before classifying a new primary edge")
 print("Debate Markdown roles, multiple projects, primary and related links, safe edits and CRLF passed")

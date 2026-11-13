@@ -12,6 +12,14 @@ enum DebateBrowserSafety {
     }
 }
 
+private func debateStanceLabel(_ stance: DebateStance?) -> String {
+    switch stance {
+    case .supports: return "Supports parent"
+    case .challenges: return "Challenges parent"
+    case nil: return "Not specified"
+    }
+}
+
 // Debate is a view of the same Markdown draft used by Research. No files are
 // changed by browsing; relationship actions change only the open draft.
 struct DebatePanel: View {
@@ -89,6 +97,23 @@ struct DebatePanel: View {
                     }
                 }
             }
+            if info.valid, info.primary != nil {
+                HStack(spacing: 6) {
+                    Text("Relationship to parent").font(.caption).foregroundStyle(.secondary)
+                    Menu(debateStanceLabel(info.primaryStance)) {
+                        Button("Supports parent") { changeStance(.supports) }
+                        Button("Challenges parent") { changeStance(.challenges) }
+                        Button("Not specified") { changeStance(nil) }
+                    }.help("Describe how this card relates to its immediate parent.")
+                }
+            }
+            if info.role == .project {
+                Text(currentURL == nil ? "Enter your resolution as the title, then save it and open the argument map." : "Open the argument map to add AFF and DEF points.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if currentURL == nil && (info.role != nil || info.primary != nil) {
+                Text("Give this card a title, write your point, and save it. Open the argument map to continue the chain.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             if !message.isEmpty {
                 Text(message).font(.caption).foregroundStyle(.secondary).lineLimit(2)
             }
@@ -105,6 +130,11 @@ struct DebatePanel: View {
         guard let updated = DebateNotes.setRole(role, in: text) else { message = "Could not mark this draft. Check its debate metadata."; return }
         text = updated
         message = "Marked this draft. Save to update the debate browser."
+    }
+    private func changeStance(_ stance: DebateStance?) {
+        guard let updated = DebateNotes.setStance(stance, in: text) else { message = "Could not update the relationship. Check the card's metadata."; return }
+        text = updated
+        message = "Relationship updated. Save to keep it."
     }
     private func removePrimary() {
         guard info.related.isEmpty else { message = "Remove related parents before removing the primary parent."; return }
@@ -133,6 +163,8 @@ private struct DebateBrowser: View {
     @State private var selected: String?
     @State private var projectPath: String?
     @State private var hasLoaded = false
+    @State private var loading = false
+    @State private var focusMode = false
     @State private var explanation = ""
     @State private var snapshot = LibrarySnapshot(cards: [], outgoing: [:], incoming: [:], unreadable: 0)
     @State private var message = "Choose a notes folder to browse debate cards."
@@ -190,10 +222,30 @@ private struct DebateBrowser: View {
             HStack {
                 Text("Argument map").font(.title2.bold())
                 Spacer()
-                Button("New resolution") { newResolution() }
+                Button("New resolution") { newResolution() }.disabled(folder.isEmpty || !hasLoaded)
                 Button("Choose Folder…", action: chooseFolder)
                 Button("Refresh", action: scan).disabled(folder.isEmpty)
             }
+            if folder.isEmpty {
+                VStack(spacing: 10) {
+                    Image(systemName: "folder").font(.system(size: 30)).foregroundStyle(.secondary)
+                    Text("Choose a notes folder").font(.headline)
+                    Text("Cardify uses this folder to save and connect your debate cards as Markdown.")
+                        .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    Button("Choose Notes Folder…", action: chooseFolder).buttonStyle(.borderedProminent)
+                }.frame(maxWidth: .infinity, maxHeight: .infinity).padding()
+            } else if !hasLoaded {
+                VStack(spacing: 10) {
+                    if loading { ProgressView() }
+                    Text(message).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    if !loading {
+                        HStack {
+                            Button("Try Again", action: scan)
+                            Button("Choose Another Folder…", action: chooseFolder)
+                        }
+                    }
+                }.frame(maxWidth: .infinity, maxHeight: .infinity).padding()
+            } else {
             HStack(spacing: 12) {
                 Picker("Resolution", selection: Binding(get: { projectPath }, set: { path in
                     projectPath = path; selected = path; query = ""
@@ -201,6 +253,11 @@ private struct DebateBrowser: View {
                     Text("Unassigned").tag(Optional<String>.none)
                     ForEach(projects) { project in Text(DebateHierarchy.displayName(project)).tag(Optional(project.path)) }
                 }.frame(maxWidth: 320)
+                Picker("View", selection: $focusMode) {
+                    Text("Full map").tag(false)
+                    Text("Focus").tag(true).disabled(selected == nil)
+                }.pickerStyle(.segmented).frame(width: 150)
+                    .help("Focus follows the selected card's branch.")
                 TextField("Search this map", text: $query).frame(maxWidth: 220)
                 if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Menu("\(searchResults.count) results") {
@@ -214,7 +271,7 @@ private struct DebateBrowser: View {
             Text(message).font(.caption).foregroundStyle(.secondary)
             HSplitView {
                 DebateHierarchyView(hierarchy: hierarchy, hasResolutions: !projects.isEmpty, selectedPath: selected,
-                                    onSelect: { selected = $0.path }, onOpen: { open($0) },
+                                    isFocused: focusMode, onSelect: { selected = $0.path }, onOpen: { open($0) },
                                     onNewResolution: { newResolution() },
                                     onNewPoint: { role, project in newParent(role, project: project) })
                     .frame(minWidth: 520, minHeight: 350)
@@ -237,6 +294,7 @@ private struct DebateBrowser: View {
                             if parsed.role == .project {
                                 Divider()
                                 Text("Add a major point").font(.subheadline.bold())
+                                Text("Choose a side to start building this resolution.").font(.caption).foregroundStyle(.secondary)
                                 HStack {
                                     Button("New AFF") { newParent(.aff, project: card) }.disabled(!linkable(card))
                                     Button("New DEF") { newParent(.def, project: card) }.disabled(!linkable(card))
@@ -248,6 +306,9 @@ private struct DebateBrowser: View {
                             } else if parsed.role == .aff || parsed.role == .def || parsed.primary != nil {
                                 if let parent = parsed.primary {
                                     Text("Parent: \(parentLabel(parent.path))").font(.caption).foregroundStyle(.secondary)
+                                    Text("Relationship: \(debateStanceLabel(parsed.primaryStance))")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                        .help("Open this card to change its relationship to its parent.")
                                 } else if let project = hierarchy.project {
                                     Text("Resolution: \(DebateHierarchy.displayName(project))").font(.caption).foregroundStyle(.secondary)
                                 } else {
@@ -258,14 +319,15 @@ private struct DebateBrowser: View {
                                 Text("Develop this point").font(.subheadline.bold())
                                 Text("Create a card connected to this one.").font(.caption).foregroundStyle(.secondary)
                                 VStack(alignment: .leading, spacing: 6) {
-                                    Button("Add objection or counterargument") { newChild(card, role: .objection) }
-                                    Button("Add supporting evidence") { newChild(card, role: .evidence) }
-                                    Button("Add response") { newChild(card, role: .reply) }
-                                    Button("Add supporting argument") { newChild(card, role: .argument) }
+                                    Button("Add objection or counterargument") { newChild(card, role: .objection, stance: .challenges) }
+                                    Button("Add supporting evidence") { newChild(card, role: .evidence, stance: .supports) }
+                                    Button("Add response") { newChild(card, role: .reply, stance: nil) }
+                                    Button("Add supporting argument") { newChild(card, role: .argument, stance: .supports) }
                                 }.disabled(!linkable(card))
                                 DisclosureGroup("More options") {
                                     VStack(alignment: .leading, spacing: 6) {
-                                        Button("Add another kind of note") { newChild(card, role: nil) }.disabled(!linkable(card))
+                                        Button("Add challenging evidence") { newChild(card, role: .evidence, stance: .challenges) }.disabled(!linkable(card))
+                                        Button("Add another kind of note") { newChild(card, role: nil, stance: nil) }.disabled(!linkable(card))
                                         Text("Link the current draft to this card:").font(.caption).foregroundStyle(.secondary)
                                         TextField("Connection explanation (optional)", text: $explanation)
                                         Button("Use this as its primary parent") { setPrimary(card) }
@@ -292,6 +354,7 @@ private struct DebateBrowser: View {
                 }.frame(minWidth: 260, idealWidth: 280, maxWidth: 340)
             }
             Text("The map shows saved notes. Save your draft and refresh to see new connections.").font(.caption).foregroundStyle(.secondary)
+            }
             HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.cancelAction) }
         }.padding(20).frame(minWidth: 900, minHeight: 570)
             .onAppear { if !folder.isEmpty { scan() } }
@@ -320,7 +383,7 @@ private struct DebateBrowser: View {
         guard let draft = DebateNotes.setRole(.project, in: DebateTemplates.body(for: .project)) else { message = "Could not create a resolution."; return }
         if onNew(draft, nil) { dismiss() }
     }
-    private func newChild(_ parent: LibraryCard, role: DebateRole?) {
+    private func newChild(_ parent: LibraryCard, role: DebateRole?, stance: DebateStance?) {
         guard safe(parent, requireRole: true),
               let latest = try? String(contentsOf: parent.url, encoding: .utf8) else { return }
         let latestInfo = DebateNotes.parse(latest)
@@ -339,7 +402,8 @@ private struct DebateBrowser: View {
         }
         let template = DebateTemplates.body(for: role)
         let marked = role.flatMap { DebateNotes.setRole($0, in: template) } ?? template
-        guard let draft = DebateNotes.setPrimary(parent.path, explanation: "", in: marked) else { message = "Could not create a linked card."; return }
+        guard let linked = DebateNotes.setPrimary(parent.path, explanation: "", in: marked),
+              let draft = DebateNotes.setStance(stance, in: linked) else { message = "Could not create a linked card."; return }
         let reference = DebateParentReference(url: parent.url, root: URL(fileURLWithPath: folder, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL,
                                               path: parent.path, expectedID: parentID, expectedRole: latestInfo.role)
         if onNew(draft, reference) { dismiss() }
@@ -387,13 +451,14 @@ private struct DebateBrowser: View {
     private func scan() {
         guard !folder.isEmpty else { return }
         let url = URL(fileURLWithPath: folder, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL
-        let id = UUID(); scanID = id; message = "Searching notes…"
+        let id = UUID(); scanID = id; loading = true; message = "Searching notes…"
         let previousSelection = selected, previousProject = projectPath, firstLoad = !hasLoaded
         DispatchQueue.global(qos: .userInitiated).async {
             let found = LibrarySnapshot.load(folder: url)
             DispatchQueue.main.async {
                 guard scanID == id else { return }
-                guard let found else { message = "Could not open this folder. Choose it again."; return }
+                loading = false
+                guard let found else { hasLoaded = false; message = "Could not open this folder. Choose it again."; return }
                 snapshot = found
                 let availableProjects = DebateHierarchy.projects(in: found)
                 if firstLoad {
@@ -414,7 +479,7 @@ private struct DebateBrowser: View {
                 selected = [previousSelection, firstLoad ? openPath : nil, projectPath].compactMap { $0 }.first { visible.contains($0) }
                 hasLoaded = true
                 let count = availableProjects.count
-                message = count == 0 ? "Create a resolution to organize your points." : "\(count) saved resolution\(count == 1 ? "" : "s")."
+                message = count == 0 ? "Create a resolution to begin, then add AFF and DEF points." : "\(count) saved resolution\(count == 1 ? "" : "s")."
                 if found.unreadable > 0 { message += " Some notes could not be read." }
             }
         }

@@ -94,6 +94,20 @@ check(!DebateHierarchy.canSetPrimary(snapshot: nestedSnapshot, currentURL: evide
 check(DebateHierarchy.canSetPrimary(snapshot: nestedSnapshot, currentURL: def.url, proposedParent: reply), "related cross-links do not count as ancestry")
 check(DebateHierarchy.canSetPrimary(snapshot: nestedSnapshot, currentURL: nil, proposedParent: objection), "a new draft can choose a parent with a valid ancestry")
 check(!DebateHierarchy.canSetPrimary(snapshot: nestedSnapshot, currentURL: nil, proposedParent: missing), "missing ancestry is refused even for a new draft")
+let focusedProject = nested.focus(on: project1.path)!
+check(focusedProject.ancestors.isEmpty && focusedProject.children.map(\.path) == [aff.path, def.path], "focusing resolution shows its immediate AFF and DEF points")
+let focusedReply = nested.focus(on: reply.path)!
+check(focusedReply.ancestors.map(\.path) == [project1.path, aff.path, evidence.path, objection.path], "focus preserves the primary ancestor chain")
+check(focusedReply.children.map(\.path) == [followup.path] && focusedReply.related.isEmpty && !focusedReply.relatedOnly, "focus shows only the selected card's immediate children")
+let focusedDef = nested.focus(on: def.path)!
+check(focusedDef.related.map(\.path).contains(reply.path) && !focusedDef.children.map(\.path).contains(reply.path), "related cards stay separate from primary children")
+check(nested.focus(on: "missing-card") == nil && nested.focus(on: nil) == nil, "unknown selections do not invent a branch")
+let externalRoot = card("External/Root", "# Outside\n<!-- cardify:debate=def -->\n")
+let externalCard = card("External/Card", "# Outside child\nPrimary parent: [[External/Root]]\nRelated parent: [[Points/AFF]]\n")
+let crossGraph = DebateHierarchy.build(snapshot: LibrarySnapshot(cards: [project1, aff, externalRoot, externalCard], unreadable: 0), projectPath: project1.path)
+let crossFocus = crossGraph.focus(on: externalCard.path)!
+check(crossFocus.relatedOnly && crossFocus.ancestors.isEmpty && crossFocus.children.isEmpty, "cross-link with home outside the map has no invented ancestry")
+
 
 let cycleA = card("Cycle/A", "# A\n<!-- cardify:debate=aff -->\nDebate project: [[Debates/Resolution]]\nPrimary parent: [[Cycle/B]]\n")
 let cycleB = card("Cycle/B", "# B\n<!-- cardify:debate=objection -->\nPrimary parent: [[Cycle/A]]\n")

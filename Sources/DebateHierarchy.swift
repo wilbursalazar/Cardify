@@ -45,6 +45,16 @@ private struct DebateLookup {
     func isProject(_ index: Int) -> Bool { info[index].valid && info[index].role == .project }
 }
 
+// A focused view uses the primary tree for ancestry; related links remain
+// separate references and never become an assumed parent.
+struct DebateFocus {
+    let selected: LibraryCard
+    let ancestors: [LibraryCard]
+    let children: [LibraryCard]
+    let related: [LibraryCard]
+    let relatedOnly: Bool
+}
+
 struct DebateHierarchy {
     // Show an address alongside the readable title without repeating an ID
     // already present in an imported filename or heading.
@@ -79,6 +89,28 @@ struct DebateHierarchy {
             stack.append(contentsOf: branch.primaryBranches.reversed())
         }
         return result
+    }
+
+    // Use the already-resolved primary tree rather than guessing from IDs or
+    // related links. A related-only card can be seen without inventing ancestry.
+    func focus(on path: String?) -> DebateFocus? {
+        guard let path else { return nil }
+        if let project, project.path == path {
+            return DebateFocus(selected: project, ancestors: [], children: (aff + def).map(\.parent), related: [], relatedOnly: false)
+        }
+        var pending = (aff + def).reversed().map { ($0, project.map { [$0] } ?? []) }
+        var relatedOnly: LibraryCard?
+        while let (branch, ancestors) = pending.popLast() {
+            if branch.parent.path == path {
+                return DebateFocus(selected: branch.parent, ancestors: ancestors,
+                                   children: branch.primaryBranches.map(\.parent), related: branch.related, relatedOnly: false)
+            }
+            if relatedOnly == nil { relatedOnly = branch.related.first { $0.path == path } }
+            let nextAncestors = ancestors + [branch.parent]
+            pending.append(contentsOf: branch.primaryBranches.reversed().map { ($0, nextAncestors) })
+        }
+        guard let relatedOnly else { return nil }
+        return DebateFocus(selected: relatedOnly, ancestors: [], children: [], related: [], relatedOnly: true)
     }
 
     // Before changing a note's primary parent, follow only explicit primary

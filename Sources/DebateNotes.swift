@@ -6,6 +6,9 @@ enum DebateRole: String, CaseIterable {
     case project, aff, def, evidence, objection, argument, reply
 }
 
+// The direction of a primary connection is separate from the kind of card.
+enum DebateStance: String, CaseIterable { case supports, challenges }
+
 struct DebateRelation: Equatable {
     let path: String
     let explanation: String
@@ -17,16 +20,25 @@ struct DebateInfo {
     let primary: DebateRelation?
     let related: [DebateRelation]
     let valid: Bool
+    let explicitStance: DebateStance?
+
+    // A role describes the card, not the direction of its primary link.
+    // Earlier notes remain unclassified until the user chooses a stance.
+    var primaryStance: DebateStance? {
+        guard valid, primary != nil else { return nil }
+        return explicitStance
+    }
 }
 
 enum DebateNotes {
-    private enum Field { case role, project, primary, related }
+    private enum Field { case role, stance, project, primary, related }
     private struct Item {
         let field: Field
         let line: NSRange
         let full: NSRange
         let relation: DebateRelation?
         let role: DebateRole?
+        let stance: DebateStance?
     }
     private struct Document {
         let source: NSString
@@ -105,7 +117,13 @@ enum DebateNotes {
                 guard value.hasSuffix(" -->"), let role = DebateRole(rawValue: String(value.dropFirst(prefix.count).dropLast(4))) else {
                     valid = false; offset = NSMaxRange(full); continue
                 }
-                items.append(Item(field: .role, line: line, full: full, relation: nil, role: role))
+                items.append(Item(field: .role, line: line, full: full, relation: nil, role: role, stance: nil))
+            } else if value.hasPrefix("<!-- cardify:stance=") {
+                let prefix = "<!-- cardify:stance="
+                guard value.hasSuffix(" -->"), let stance = DebateStance(rawValue: String(value.dropFirst(prefix.count).dropLast(4))) else {
+                    valid = false; offset = NSMaxRange(full); continue
+                }
+                items.append(Item(field: .stance, line: line, full: full, relation: nil, role: nil, stance: stance))
             } else {
                 scanComments(value)
                 let fields: [(String, Field)] = [("Debate project: ", .project), ("Primary parent: ", .primary), ("Related parent: ", .related)]
@@ -120,7 +138,7 @@ enum DebateNotes {
                         valid = false; offset = NSMaxRange(full); continue
                     }
                     let explanation = suffix.isEmpty ? "" : String(suffix.dropFirst(3))
-                    items.append(Item(field: field, line: line, full: full, relation: DebateRelation(path: path, explanation: explanation), role: nil))
+                    items.append(Item(field: field, line: line, full: full, relation: DebateRelation(path: path, explanation: explanation), role: nil, stance: nil))
                 }
             }
             offset = NSMaxRange(full)
@@ -128,7 +146,7 @@ enum DebateNotes {
         // Appending into an unfinished YAML or fenced-code block would make
         // the new relationship part of that block instead of a note link.
         if frontmatter || fence != nil || htmlComment { valid = false }
-        if items.filter({ $0.field == .role }).count > 1 || items.filter({ $0.field == .primary }).count > 1 { valid = false }
+        if items.filter({ $0.field == .role }).count > 1 || items.filter({ $0.field == .stance }).count > 1 || items.filter({ $0.field == .primary }).count > 1 { valid = false }
         for field in [Field.project, .related] {
             var seen: Set<String> = []
             for item in items where item.field == field {
@@ -147,7 +165,8 @@ enum DebateNotes {
                           projects: doc.items.filter { $0.field == .project }.compactMap(\.relation),
                           primary: doc.items.first(where: { $0.field == .primary })?.relation,
                           related: doc.items.filter { $0.field == .related }.compactMap(\.relation),
-                          valid: doc.valid)
+                          valid: doc.valid,
+                          explicitStance: doc.items.first(where: { $0.field == .stance })?.stance)
     }
     private static func line(_ prefix: String, path: String, explanation: String = "") -> String {
         let clean = explanation.components(separatedBy: .newlines).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -177,6 +196,21 @@ enum DebateNotes {
         }
         return checked(append(value, to: doc))
     }
+    // A stance describes only the primary edge, never the type of evidence or
+    // secondary links. Existing notes remain unmodified until explicitly set.
+    static func setStance(_ stance: DebateStance?, in text: String) -> String? {
+        let doc = document(text)
+        guard doc.valid else { return nil }
+        let current = doc.items.first(where: { $0.field == .stance })
+        guard let stance else {
+            guard let current else { return text }
+            return checked(remove(current, from: doc))
+        }
+        guard doc.items.contains(where: { $0.field == .primary }) else { return nil }
+        let value = "<!-- cardify:stance=\(stance.rawValue) -->"
+        if let current { return checked(doc.source.replacingCharacters(in: current.line, with: value)) }
+        return checked(append(value, to: doc))
+    }
     static func addProject(_ path: String, in text: String) -> String? {
         let doc = document(text)
         guard doc.valid, validPath(path), !doc.items.contains(where: { $0.field == .project && $0.relation?.path.caseInsensitiveCompare(path) == .orderedSame }) else { return nil }
@@ -196,12 +230,22 @@ enum DebateNotes {
             // A connected card cannot have secondary parents without a primary.
             guard !doc.items.contains(where: { $0.field == .related }) else { return nil }
             guard let current else { return text }
-            return checked(remove(current, from: doc))
+            guard let withoutParent = checked(remove(current, from: doc)) else { return nil }
+            return setStance(nil, in: withoutParent)
         }
         guard validPath(path), !doc.items.contains(where: { $0.field == .related && $0.relation?.path.caseInsensitiveCompare(path) == .orderedSame }) else { return nil }
         let value = line("Primary parent: ", path: path, explanation: explanation)
-        if let current { return checked(doc.source.replacingCharacters(in: current.line, with: value)) }
-        return checked(append(value, to: doc))
+        if let current {
+            guard let updated = checked(doc.source.replacingCharacters(in: current.line, with: value)) else { return nil }
+            // A stance pertains to the old edge; changing its parent requires
+            // the user to classify the new connection separately.
+            if current.relation?.path.caseInsensitiveCompare(path) != .orderedSame { return setStance(nil, in: updated) }
+            return updated
+        }
+        guard let updated = checked(append(value, to: doc)) else { return nil }
+        // A pre-existing orphan marker cannot describe a newly selected edge.
+        if doc.items.contains(where: { $0.field == .stance }) { return setStance(nil, in: updated) }
+        return updated
     }
     static func addRelated(_ path: String, explanation: String, in text: String) -> String? {
         let doc = document(text)
