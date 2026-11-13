@@ -289,7 +289,7 @@ struct ContentView: View {
                     }
                     Text("3 × 5 in · ⅜ in inset · Print at 100% scale")
                         .font(.caption).foregroundStyle(.secondary)
-                }.frame(minWidth: 320)
+                }.padding(.leading, 12).frame(minWidth: 332)
             }
             Text(status).font(.caption).foregroundStyle(.secondary)
         }.padding(24).frame(minWidth: 850, minHeight: 600)
