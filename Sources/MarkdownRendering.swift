@@ -10,11 +10,15 @@ enum MarkdownRendering {
         let recognizedLinks = CardLinkParser.links(in: markdown)
         var offset = 0
         var lines: [(text: String, offset: Int, links: [CardLink])] = []
-        for line in sourceLines {
+        for (lineIndex, originalLine) in sourceLines.enumerated() {
+            // Strip only the CR belonging to a CRLF line ending for rendering.
+            // Keep the original UTF-16 length when advancing source offsets so
+            // link annotations still point to the correct Markdown characters.
+            let line = lineIndex < sourceLines.count - 1 && originalLine.hasSuffix("\r") ? String(originalLine.dropLast()) : originalLine
             let count = (line as NSString).length
             let links = recognizedLinks.filter { $0.range.location >= offset && NSMaxRange($0.range) <= offset + count }
             if !line.hasPrefix("Zotero: [Open source](zotero://select/") { lines.append((line, offset, links)) }
-            offset += count + 1
+            offset += (originalLine as NSString).length + 1
         }
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineSpacing = 1.5

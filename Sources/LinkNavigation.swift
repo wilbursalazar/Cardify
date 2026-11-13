@@ -127,13 +127,15 @@ enum CardLinkNavigation {
         // mistaken for headings in the note body.
         if source.length > 0 {
             let first = source.lineRange(for: NSRange(location: 0, length: 0))
-            if source.substring(with: first).trimmingCharacters(in: .whitespacesAndNewlines) == "---" {
+            var opening = source.substring(with: first).trimmingCharacters(in: .newlines)
+            if opening.hasPrefix("\u{FEFF}") { opening.removeFirst() }
+            if opening.hasPrefix("---") && opening.dropFirst(3).allSatisfy({ $0 == " " || $0 == "\t" }) {
                 let mapping = try! NSRegularExpression(pattern: #"^[A-Za-z_][A-Za-z0-9_. -]*:[ \t]*(?:.*)$"#)
                 var cursor = NSMaxRange(first), sawMapping = false
                 while cursor < source.length {
                     let lineRange = source.lineRange(for: NSRange(location: cursor, length: 0))
                     let line = source.substring(with: lineRange).trimmingCharacters(in: .newlines)
-                    if line.trimmingCharacters(in: .whitespaces) == "---" {
+                    if line.hasPrefix("---") && line.dropFirst(3).allSatisfy({ $0 == " " || $0 == "\t" }) {
                         if sawMapping { location = NSMaxRange(lineRange) }
                         break
                     }

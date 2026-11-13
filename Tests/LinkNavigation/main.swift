@@ -54,3 +54,11 @@ check(CardLinkNavigation.headingRange("Not real", in: content) == nil, "ignore f
 check(CardLinkNavigation.headingRange("Missing", in: content) == nil, "missing heading")
 check(CardLinkNavigation.headingRange("^block", in: content) == nil, "block heading unsupported")
 print("Link resolution, aliases, anchors, paths, duplicate names, symlinks, schemes, and UTF-16 headings passed")
+let multilineHeaderLF = "---\ncard_id: 1a\nsummary: |\n  ---\n  # Hidden metadata\n  Details\n---\n😀 Intro\n# Visible heading\n## Other heading\n"
+let multilineHeaderCRLF = multilineHeaderLF.replacingOccurrences(of: "\n", with: "\r\n")
+for (name, source) in [("LF", multilineHeaderLF), ("CRLF", multilineHeaderCRLF), ("BOM LF", "\u{FEFF}" + multilineHeaderLF), ("BOM CRLF", "\u{FEFF}" + multilineHeaderCRLF)] {
+ check(CardLinkNavigation.headingRange("Hidden metadata", in: source) == nil, "\(name) literal block must stay inside frontmatter")
+ let actual = CardLinkNavigation.headingRange("Visible heading", in: source)
+ check(actual != nil && (source as NSString).substring(with: actual!) == "Visible heading", "\(name) heading range remains correct after emoji")
+}
+print("CRLF and LF heading links skip multiline YAML blocks")

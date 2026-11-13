@@ -568,9 +568,16 @@ struct ContentView: View {
             if let data = todoDraft.data(using: .utf8), let saved = try? JSONDecoder().decode(TodoList.self, from: data) { todo = saved }
         }
         .onDisappear { graphWindow.close() }
-        .onOpenURL { url in
+        .onReceive(EditorWindowCoordinator.shared.$pendingURL) { incomingURL in
+            guard let url = incomingURL else { return }
             if let clip = ResearchClip.from(url) { research = clip }
             else { status = "Could not open that clip." }
+            // Published values are delivered before assignment completes.
+            DispatchQueue.main.async {
+                if EditorWindowCoordinator.shared.pendingURL == url {
+                    EditorWindowCoordinator.shared.pendingURL = nil
+                }
+            }
         }
         .sheet(item: $research) { clip in
             ResearchEditor(clip: clip) { content, append in
@@ -910,6 +917,84 @@ struct ContentView: View {
     }
 }
 
+// WindowGroup preserves macOS URL routing and reopening behavior, but the editor's
+// persisted draft is shared. Only mount one editor so its file destination cannot
+// diverge from a second window displaying the same draft.
+@MainActor final class EditorWindowCoordinator: ObservableObject {
+    static let shared = EditorWindowCoordinator()
+    @Published var pendingURL: URL?
+    private(set) weak var window: NSWindow?
+    private var closeObserver: NSObjectProtocol?
+
+    func claim(_ candidate: NSWindow) -> Bool {
+        if let window { return window === candidate }
+        window = candidate
+        closeObserver = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: candidate, queue: .main) { [weak self, weak candidate] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.window === candidate else { return }
+                self.window = nil
+                if let observer = self.closeObserver { NotificationCenter.default.removeObserver(observer) }
+                self.closeObserver = nil
+            }
+        }
+        return true
+    }
+
+    func showExistingWindow() {
+        guard let window else { return }
+        if window.isMiniaturized { window.deminiaturize(nil) }
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
+private struct EditorWindowProbe: NSViewRepresentable {
+    var onClaim: () -> Void
+    func makeNSView(context: Context) -> Probe { Probe(onClaim: onClaim) }
+    func updateNSView(_ view: Probe, context: Context) { view.onClaim = onClaim }
+
+    final class Probe: NSView {
+        var onClaim: () -> Void
+        init(onClaim: @escaping () -> Void) { self.onClaim = onClaim; super.init(frame: .zero) }
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard let window else { return }
+            let coordinator = EditorWindowCoordinator.shared
+            if coordinator.claim(window) {
+                DispatchQueue.main.async { [weak self, weak window] in
+                    guard let self, let window, self.window === window, coordinator.window === window else { return }
+                    self.onClaim()
+                }
+            } else {
+                DispatchQueue.main.async { [weak window] in
+                    window?.close()
+                    coordinator.showExistingWindow()
+                }
+            }
+        }
+    }
+}
+
+private struct EditorWindowRoot: View {
+    @State private var isEditor = false
+    var body: some View {
+        ZStack {
+            if isEditor { ContentView() }
+            EditorWindowProbe { isEditor = true }.frame(width: 0, height: 0)
+        }
+        .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
+        .onOpenURL { url in
+            EditorWindowCoordinator.shared.pendingURL = url
+            EditorWindowCoordinator.shared.showExistingWindow()
+        }
+    }
+}
+
 @main struct CardifyApp: App {
-    var body: some Scene { WindowGroup { ContentView() }.windowStyle(.titleBar) }
+    var body: some Scene {
+        WindowGroup { EditorWindowRoot() }
+            .windowStyle(.titleBar)
+            .commands { CommandGroup(replacing: .newItem) {} }
+    }
 }
