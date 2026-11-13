@@ -23,13 +23,17 @@ The app is ad-hoc signed, not notarized. macOS may require an explicit confirmat
 
 ## Zettelkasten writing
 
-Choose **Templates → Idea Card, Reading Card, or Index Card** to insert a plain Markdown scaffold into the regular editor without replacing the current draft. Use **Link Note…** to search the notes folder and insert a real Obsidian file link; add context to explain the connection. Reading notes can attach a Zotero source and page through **Add Source…**.
+Choose **Templates → Idea Card, Reading Card, or Index Card** to insert a plain Markdown scaffold into the regular editor without replacing the current draft. Type `[[` to open the inline suggestion list and search notes in the chosen vault, or use **Link Note…**. The suggestion list uses the selected notes folder, or the Save Folder if no notes folder is set; you can also choose a folder from the list. Inserted links point to actual vault-relative filenames; write context beside the link to explain the connection. Reading notes can attach a Zotero source and page through **Add Source…**.
 
-Turn on **Timestamp ID** to add a timestamp ID such as `202611122145` to a note's `card_id` metadata and suggest `202611122145 Title.md` when saving a new note. Timestamps use the Mac's local time; collisions get a suffix. Existing IDs are retained, and turning the checkbox off does not remove an existing ID. The ID prints in small type inside the safe area.
+Choose an **ID style** above the editor:
 
-**Branch from Card…** saves the current card first if needed, then creates a linked draft with an alternating branch marker, for example `1 → 1a → 1a1`. The branch references the actual parent filename. The parent is not modified by branch creation after its changes have been saved.
+- **Timestamp** suggests a unique local timestamp such as `202611122145`.
+- **Luhmann** suggests numeric roots and offers **Continue sequence** and **Branch** actions. Suggested IDs can be edited; this is a flexible adaptation, not a reconstruction of every historical numbering practice.
+- **Title only** creates new notes without an ID.
 
-Choose **Templates → Choose ID / Notes Folder** to search a vault for existing IDs. Before saving an ID-bearing note, Cardify checks the selected notes folder and, when outside that folder, the destination folder and their subfolders for duplicate `card_id` metadata and timestamp-prefixed filenames. Saving back to the same file is allowed. If a folder cannot be read or contains unparseable card ID metadata, verification stops rather than assuming the ID is unique. These checks cover only the searched folders and cannot prevent simultaneous edits by other apps. Existing files are never automatically renamed or renumbered.
+For notes with IDs, Cardify stores `card_id` in Markdown frontmatter, prints it in small type, and suggests an ID-plus-title filename for a new note. Switching styles does not remove or replace an existing ID. Existing files are never automatically renamed or renumbered. The ID field allows manual edits.
+
+Branching or continuing saves the current card first if necessary, then creates a linked draft using a new available address. The parent is not changed after its current edits are saved. Choose **Templates → Choose ID / Notes Folder** to search a vault for existing IDs. Before saving an ID-bearing note, Cardify checks the selected notes folder and, when outside that folder, the destination folder and their subfolders for duplicate `card_id` metadata or recognized ID-prefixed filenames. Saving back to the same file is allowed. If a folder cannot be read or contains unparseable card ID metadata, verification stops rather than assuming the ID is unique. These checks cover only the searched folders and cannot prevent simultaneous edits by other apps.
 
 ## Weekly habit cards and design
 

@@ -71,6 +71,7 @@ enum CardIDIndex {
             if let id = metadataID { result.append((id, url)) }
             else if CardMetadata.hasNonemptyID(text) { throw ScanError.invalidMetadata(url.lastPathComponent) }
             if let filenameID = BranchIDs.filenameID(for: url), filenameID.caseInsensitiveCompare(metadataID ?? "") != .orderedSame { result.append((filenameID, url)) }
+            else if metadataID == nil, let filenameID = BranchIDs.luhmannFilenameID(for: url) { result.append((filenameID, url)) }
         }
         if encounteredError { throw ScanError.inaccessible }
         return result

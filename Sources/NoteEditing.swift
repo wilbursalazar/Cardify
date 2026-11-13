@@ -32,6 +32,28 @@ enum NoteEditing {
         }
         return raw + text
     }
+    // Edit only the card_id property; preserve all other frontmatter and note text.
+    static func setID(_ id: String, in text: String) -> String? {
+        let clean = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.contains(where: { $0.isNewline }) else { return nil }
+        var lines = text.components(separatedBy: "\n")
+        if lines.first == "---" {
+            guard let end = lines.indices.dropFirst().first(where: { lines[$0].trimmingCharacters(in: .whitespacesAndNewlines) == "---" }) else { return nil }
+            let index = lines.indices.dropFirst().prefix(end - 1).first(where: { lines[$0].trimmingCharacters(in: .whitespaces).hasPrefix("card_id:") })
+            if clean.isEmpty {
+                if let index { lines.remove(at: index) }
+                if lines.count > 1 && lines[1].trimmingCharacters(in: .whitespacesAndNewlines) == "---" {
+                    lines.removeFirst(2)
+                    if lines.first == "" { lines.removeFirst() }
+                }
+            } else {
+                guard let encoded = try? JSONEncoder().encode(clean), let quoted = String(data: encoded, encoding: .utf8) else { return nil }
+                if let index { lines[index] = "card_id: " + quoted } else { lines.insert("card_id: " + quoted, at: end) }
+            }
+            return lines.joined(separator: "\n")
+        }
+        return clean.isEmpty ? text : CardMetadata.frontmatter(clean) + text
+    }
     static func filename(id: String?, title: String) -> String {
         func clean(_ input: String) -> String {
             let prohibited = CharacterSet(charactersIn: "/:\\").union(.controlCharacters)

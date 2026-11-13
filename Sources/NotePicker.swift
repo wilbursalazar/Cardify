@@ -6,7 +6,7 @@ struct CardifyNote: Identifiable, Hashable {
     var id: String { path }
     var title: String { URL(fileURLWithPath: path).lastPathComponent }
     // Obsidian treats these characters as link syntax rather than filename characters.
-    var canLink: Bool { !path.contains(where: { "[]|#^\n\r".contains($0) }) }
+    var canLink: Bool { !path.contains("%%") && !path.contains(where: { "[]|#^:\n\r".contains($0) }) }
     var wikiLink: String { "[[\(path)]]" }
 }
 

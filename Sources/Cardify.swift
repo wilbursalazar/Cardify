@@ -157,6 +157,7 @@ struct ContentView: View {
     @AppStorage("saveFolder") private var saveFolder = ""
     @AppStorage("notesFolder") private var notesFolder = ""
     @AppStorage("autoTimestampID") private var autoTimestampID = false
+    @AppStorage("idMode") private var storedIDMode = ""
     @StateObject private var editor = EditorState()
     @State private var fileURL: URL?
     @State private var savedMarkdownSnapshot: String?
@@ -166,6 +167,7 @@ struct ContentView: View {
     @State private var research: ResearchClip?
     @State private var status = "Draft saved on this Mac."
     var card: CardDocument { CardDocument(text: text, portrait: portrait, fontSize: fontSize, dotGrid: dotGrid) }
+    var idMode: IDMode { IDMode(rawValue: storedIDMode) ?? (autoTimestampID ? .timestamp : .titleOnly) }
     var activePDF: Data? { cardMode == "habits" ? tracker.pdf(portrait: portrait, dotGrid: dotGrid, fontSize: fontSize) : card.pdf() }
     func setTracker(_ value: HabitTracker) {
         tracker = value
@@ -205,7 +207,7 @@ struct ContentView: View {
                 Button("New Card") {
                     fileURL = nil; savedMarkdownSnapshot = nil; branchSaveFolder = nil
                     if cardMode == "habits" { setTracker(HabitTracker()); status = "New draft." }
-                    else { text = ""; if autoTimestampID { _ = ensureTimestamp() } else { status = "New draft." } }
+                    else { text = ""; if idMode != .titleOnly { _ = ensureID() } else { status = "New draft." } }
                 }
             }
             HSplitView {
@@ -218,16 +220,30 @@ struct ContentView: View {
                     } else {
                     HStack {
                         TextField("Title", text: Binding(get: { NoteEditing.title(in: text) }, set: { text = NoteEditing.setTitle($0, in: text) }))
-                        Toggle("Timestamp ID", isOn: Binding(get: { autoTimestampID }, set: { enabled in
-                            if enabled { if ensureTimestamp() { autoTimestampID = true } }
-                            else { autoTimestampID = false }
-                        })).toggleStyle(.checkbox).help("Automatically add a timestamp ID to new notes. Existing IDs are kept.")
+                        Picker("ID style", selection: Binding(get: { idMode }, set: { mode in
+                            storedIDMode = mode.rawValue
+                            if mode != .titleOnly && CardMetadata.parse(text).id == nil { _ = ensureID() }
+                        })) {
+                            ForEach(IDMode.allCases) { mode in Text(mode.rawValue).tag(mode) }
+                        }.frame(width: 190).help("Choose how IDs are suggested for new notes. Existing IDs are kept.")
                     }
                     HStack {
                         Text("Write").fontWeight(.semibold)
-                        if let id = CardMetadata.parse(text).id { Text(id).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
+                        if idMode != .titleOnly || CardMetadata.parse(text).id != nil {
+                            TextField("Card ID", text: Binding(get: { CardMetadata.parse(text).id ?? "" }, set: { id in
+                                if let updated = NoteEditing.setID(id, in: text) { text = updated }
+                                else { status = "Could not edit card ID in the existing metadata." }
+                            })).frame(width: 145).help("Edit the card ID; existing files are not automatically renamed.")
+                        }
                         Spacer()
-                        Button("Branch from Card…", action: branchFromCurrent).help("Create a linked card branching from the saved current card")
+                    }
+                    if idMode != .titleOnly {
+                        HStack {
+                            if idMode == .luhmann {
+                                Button("Continue sequence…") { relatedFromCurrent(continuation: true) }.help("Create the next card in this sequence")
+                            }
+                            Button("Branch from card…") { relatedFromCurrent(continuation: false) }.help("Create a linked branch from the current card")
+                        }
                     }
                     HStack(spacing: 5) {
                         Button("B") { editor.wrap("**") }.help("Bold")
@@ -257,6 +273,7 @@ struct ContentView: View {
             Text(status).font(.caption).foregroundStyle(.secondary)
         }.padding(24).frame(minWidth: 850, minHeight: 600)
         .onAppear {
+            if storedIDMode.isEmpty { storedIDMode = (autoTimestampID ? IDMode.timestamp : IDMode.titleOnly).rawValue }
             if let data = habitDraft.data(using: .utf8), let saved = try? JSONDecoder().decode(HabitTracker.self, from: data) { tracker = saved }
         }
         .onOpenURL { url in
@@ -295,23 +312,24 @@ struct ContentView: View {
            !roots.contains(where: { folder.path == $0.path || folder.path.hasPrefix($0.path + "/") }) { roots.append(folder) }
         return roots
     }
-    @discardableResult func ensureTimestamp() -> Bool {
+    @discardableResult func ensureID() -> Bool {
+        if idMode == .titleOnly { return true }
         if CardMetadata.parse(text).id != nil { return true }
         if CardMetadata.hasNonemptyID(text) { status = "Fix existing card_id metadata before adding an ID."; return false }
-        if let file = fileURL, let existingID = BranchIDs.filenameID(for: file) {
+        if let file = fileURL, let existingID = (BranchIDs.filenameID(for: file) ?? (idMode == .luhmann ? BranchIDs.luhmannFilenameID(for: file) : nil)) {
             guard let updated = NoteEditing.addID(existingID, to: text) else { status = "Could not add ID to the existing metadata."; return false }
             text = updated; status = "Kept the existing filename ID: \(existingID)."; return true
         }
         do {
             let existing = try BranchIDs.existing(in: scanRoots(for: fileURL))
-            let id = BranchIDs.timestamp(existing: existing)
+            guard let id = CardIDs.newID(mode: idMode, existing: existing) else { return true }
             guard let updated = NoteEditing.addID(id, to: text) else { status = "Could not add ID to the existing metadata."; return false }
-            text = updated; status = "Timestamp ID added: \(id)."; return true
+            text = updated; status = "Card ID added: \(id)."; return true
         } catch { status = "Could not check existing IDs: \(error.localizedDescription)"; return false }
     }
     func insertTemplate(_ template: InlineTemplate) {
         cardMode = "markdown"
-        if autoTimestampID && !ensureTimestamp() { return }
+        if idMode != .titleOnly && !ensureID() { return }
         let offset = editor.view?.selectedRange().location ?? (text as NSString).length
         let result = template.inserting(in: text, at: offset)
         text = result.text; status = "\(template.rawValue) template inserted."
@@ -321,8 +339,8 @@ struct ContentView: View {
             view.window?.makeFirstResponder(view)
         }
     }
-    func branchFromCurrent() {
-        if CardMetadata.parse(text).id == nil && autoTimestampID && !ensureTimestamp() { return }
+    func relatedFromCurrent(continuation: Bool) {
+        if CardMetadata.parse(text).id == nil && idMode != .titleOnly && !ensureID() { return }
         guard let parentID = CardMetadata.parse(text).id ?? fileURL.flatMap({ BranchIDs.filenameID(for: $0) }) else {
             status = "Add a card ID before branching."; return
         }
@@ -335,14 +353,15 @@ struct ContentView: View {
         guard let parentURL = fileURL else { return }
         do {
             let existing = try BranchIDs.existing(in: scanRoots(for: parentURL))
-            let childID = try BranchIDs.branch(from: parentID, existing: existing)
+            let childID = try (continuation ? CardIDs.continuation(from: parentID, existing: existing) : CardIDs.branch(from: parentID, existing: existing))
             let root = notesFolder.isEmpty ? nil : URL(fileURLWithPath: notesFolder, isDirectory: true).standardizedFileURL.path
             let path = parentURL.deletingPathExtension().standardizedFileURL.path
             let link = root != nil && path.hasPrefix(root! + "/") ? String(path.dropFirst(root!.count + 1)) : parentURL.deletingPathExtension().lastPathComponent
             guard !link.contains(where: { "[]|#^\n\r".contains($0) }) else { status = "The parent filename cannot be used in an Obsidian link."; return }
-            text = CardMetadata.frontmatter(childID) + "# \n\nRelated: [[\(link)]] — branches from this card.\n"
+            let relation = continuation ? "continues this card" : "branches from this card"
+            text = CardMetadata.frontmatter(childID) + "# \n\nRelated: [[\(link)]] — \(relation).\n"
             branchSaveFolder = parentURL.deletingLastPathComponent(); fileURL = nil; savedMarkdownSnapshot = nil
-            status = "Branch \(childID) created. The parent is unchanged."
+            status = "\(continuation ? "Continuation" : "Branch") \(childID) created. The parent is unchanged."
         } catch { status = "Could not create branch: \(error.localizedDescription)" }
     }
     var pageCount: Int { activePDF.flatMap { PDFDocument(data: $0)?.pageCount } ?? 0 }
@@ -363,12 +382,12 @@ struct ContentView: View {
         if panel.runModal() == .OK, let url = panel.url { saveFolder = url.path; status = "Default save folder: \(url.path)" }
     }
     func saveMarkdown() -> Bool {
-        if cardMode == "markdown" && autoTimestampID && !ensureTimestamp() { return false }
+        if cardMode == "markdown" && idMode != .titleOnly && !ensureID() { return false }
         let panel = NSSavePanel()
         if let folder = branchSaveFolder { panel.directoryURL = folder }
         else if !saveFolder.isEmpty { panel.directoryURL = URL(fileURLWithPath: saveFolder, isDirectory: true) }
         panel.allowedContentTypes = [.init(filenameExtension: "md")!]
-        panel.nameFieldStringValue = fileURL?.lastPathComponent ?? (cardMode == "markdown" ? NoteEditing.filename(id: CardMetadata.parse(text).id, title: NoteEditing.title(in: text)) : "Weekly Habits.md")
+        panel.nameFieldStringValue = fileURL?.lastPathComponent ?? (cardMode == "markdown" ? NoteEditing.filename(id: idMode == .titleOnly ? nil : CardMetadata.parse(text).id, title: NoteEditing.title(in: text)) : "Weekly Habits.md")
         if panel.runModal() == .OK, let url = panel.url {
             let content = cardMode == "habits" ? tracker.markdown : text
             if CardMetadata.parse(content).id == nil && CardMetadata.hasNonemptyID(content) {

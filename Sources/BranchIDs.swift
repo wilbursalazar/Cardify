@@ -58,6 +58,15 @@ enum BranchIDs {
         return String(name[range])
     }
 
+    // Bare sequential/branch identifiers in imported filenames, used for collision checks.
+    static func luhmannFilenameID(for file: URL) -> String? {
+        guard file.pathExtension.lowercased() == "md" else { return nil }
+        let name = file.deletingPathExtension().lastPathComponent
+        let pattern = try! NSRegularExpression(pattern: #"^([0-9]+(?:[A-Za-z]+[0-9]*)*)(?=$|[ _-])"#)
+        guard let match = pattern.firstMatch(in: name, range: NSRange(name.startIndex..., in: name)), let range = Range(match.range(at: 1), in: name) else { return nil }
+        return String(name[range])
+    }
+
     static func existing(in roots: [URL], excluding target: URL? = nil) throws -> Set<String> {
         var result: Set<String> = []
         for root in roots {
