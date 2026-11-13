@@ -41,7 +41,7 @@ final class Harness {
     var saveTargets: [URL] = []
     var notesFolder = "", saveFolder = ""
     var research: String?
-    var showNotes = false, showLibrary = false, showSettings = false, showZotero = false
+    var showNotes = false, showLibrary = false, showDebateBrowser = false, showSettings = false, showZotero = false
     let graphWindow = GraphWindowManager()
     func setTracker(_ value: HabitTracker) { tracker = value }
     func setTodo(_ value: TodoList) { todo = value }
@@ -83,6 +83,9 @@ final class Harness {
         app.showZotero = true; app.graphWindow.click(target); app.showZotero = false
         app.research = "clip"; app.graphWindow.click(target); app.research = nil
         precondition(NSAlert.messages.count == 5 && app.fileURL == source && app.text == "# Modified" && editorWindow.frontCount == 0, "Open sheets must block graph navigation")
+        app.showDebateBrowser = true; app.graphWindow.click(target); app.showDebateBrowser = false
+        precondition(NSAlert.messages.count == 6 && app.fileURL == source && app.text == "# Modified", "Debate browsing must block graph navigation")
+        NSAlert.messages.removeLast()
 
         // Stale, out-of-vault and symlink targets must fail before draft handling.
         let missing = root.appendingPathComponent("missing.md")

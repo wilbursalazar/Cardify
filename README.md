@@ -16,7 +16,7 @@ Cardify requires **macOS 13 or later** and includes code for both Apple silicon 
 
 ## Your first card
 
-1. Open Cardify. Choose **Research** to write a Markdown note, **Habit** for a weekly tracker, or **To Do** for a checklist.
+1. Open Cardify. Choose **Research** to write a Markdown note, **Habit** for a weekly tracker, **To Do** for a checklist, or **Debate** to organize connected argument cards.
 2. Optional: choose **File → Choose Save Folder…** to set the folder offered when you save a new note or export a PDF. To work with an Obsidian vault, you can choose a folder inside your vault.
 3. Optional: choose **File → Choose Notes Folder…** and select your vault or notes folder. For Obsidian, select the vault root so inserted paths are relative to the vault. Cardify searches this folder for notes to link and for existing card IDs. It can be the same folder as your save folder.
 4. Enter a title and write, or choose **Templates → Idea Card**, **Reading Card**, or **Index Card**. Templates insert editable Markdown at the cursor; they do not replace your draft.
@@ -158,6 +158,18 @@ Use the preview's **Text size** control to change the tracker font. Seven standa
 Choose **To Do** to write a heading and add tasks. Click each checkbox to mark or clear it, and use **Add task** or the minus button to change the list. Adjust text size and orientation beside the preview, then save, print, or both.
 
 The saved file uses ordinary Markdown task checkboxes and a `<!-- cardify:todo -->` marker. The marker is hidden on the printed card and lets Cardify reopen the list in the structured editor. If a marked file contains additional content the editor cannot safely represent, Cardify opens it as a Research note instead of discarding that content.
+
+## Debate projects and connected cards
+
+Choose **Debate** to organize arguments using the same Markdown draft, ID options, links, Zotero tools, preview, and print controls as Research. Switching between Research and Debate does not create a second draft or a different save destination.
+
+1. Choose **File → Choose Notes Folder…** and select the folder where you keep your notes. The debate browser searches this folder; if you have no notes folder, it uses the save folder.
+2. Under **New**, choose **Debate Project**, **AFF Parent**, or **DEF Parent**. Give it a title, write your argument or resolution, and save it in the notes folder. Use **Mark as** to turn an existing draft into a project or parent without renaming its file.
+3. Choose **Browse Debate…** to search saved projects and parents. Select a project to create additional AFF or DEF parents or add your current AFF or DEF parent to that project. A parent may be linked to more than one project.
+4. Select an AFF or DEF parent and choose **New connected card**, or use **Set as primary parent** to connect the current draft. Each connected card has one primary parent. Use **Add related parent** for other arguments it supports or challenges, and optionally explain each connection. Save the draft to keep the change.
+5. In the browser, select a parent to see its saved primary and related cards. Open a card and use **Connections** or the primary-parent link to navigate back. Save and refresh the browser after editing connections.
+
+Projects, parents, and connected cards are ordinary Markdown files. Role markers are hidden from the printed card, and the relationships are readable wiki links. No linked note is copied, automatically renamed, or modified when you connect your current draft. If a linked file is moved or renamed outside Cardify, repair its link in the Markdown. Anki integration and study scheduling are not included in this version.
 
 ## Printing
 

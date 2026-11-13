@@ -352,6 +352,8 @@ struct ContentView: View {
     @State private var showZotero = false
     @State private var showNotes = false
     @State private var showLibrary = false
+    @State private var showDebate = false
+    @State private var showDebateBrowser = false
     @State private var showSettings = false
     @State private var linkRequestID = UUID()
     @State private var research: ResearchClip?
@@ -446,9 +448,12 @@ struct ContentView: View {
             HSplitView {
                 VStack(alignment: .leading) {
                     HStack(spacing: 8) {
-                        Picker("Card type", selection: Binding(get: { cardMode }, set: { switchMode(to: $0) })) {
-                            Text("Research").tag("markdown"); Text("Habit").tag("habits"); Text("To Do").tag("todos")
-                        }.pickerStyle(.segmented).labelsHidden().frame(maxWidth: 220)
+                        Picker("Card type", selection: Binding(get: { cardMode == "markdown" && showDebate ? "debate" : cardMode }, set: { mode in
+                            if mode == "debate" { showDebate = true; switchMode(to: "markdown") }
+                            else { if mode == "markdown" { showDebate = false }; switchMode(to: mode) }
+                        })) {
+                            Text("Research").tag("markdown"); Text("Habit").tag("habits"); Text("To Do").tag("todos"); Text("Debate").tag("debate")
+                        }.pickerStyle(.segmented).labelsHidden().frame(minWidth: 240, maxWidth: 250)
                         Spacer(minLength: 4)
                         Menu("Templates") {
                             Button("Idea Card") { insertTemplate(.idea) }
@@ -461,6 +466,17 @@ struct ContentView: View {
                             Button("Research Card…") { research = ResearchClip() }
                             Button("Weekly Habit Tracker") { switchMode(to: "habits") }
                         }
+                    }
+                    if cardMode == "markdown" && showDebate {
+                        DebatePanel(text: $text, showBrowser: $showDebateBrowser, currentURL: fileURL, onOpen: { url in loadFile(url) }, onNew: { draft in
+                            guard confirmReplaceDraft() else { return false }
+                            let folderPath = notesFolder.isEmpty ? saveFolder : notesFolder
+                            let folder = folderPath.isEmpty ? fileURL?.deletingLastPathComponent() : URL(fileURLWithPath: folderPath, isDirectory: true)
+                            text = draft; fileURL = nil; branchSaveFolder = folder; savedMarkdownSnapshot = nil; history.detach()
+                            if idMode != .titleOnly && !ensureID() { return true }
+                            status = "New debate card. Save it when ready."
+                            return true
+                        }, onFollowLink: followLink)
                     }
                     if cardMode == "habits" {
                         HabitTrackerEditor(tracker: Binding(get: { tracker }, set: { setTracker($0) }))
@@ -595,7 +611,7 @@ struct ContentView: View {
         let editorWindow = NSApplication.shared.keyWindow
         graphWindow.show(currentURL: fileURL) { [weak editorWindow] url in
             guard let editorWindow else { return }
-            guard research == nil && !showNotes && !showLibrary && !showSettings && !showZotero else {
+            guard research == nil && !showNotes && !showLibrary && !showDebateBrowser && !showSettings && !showZotero else {
                 graphError("Finish the open dialog before opening a card from the graph.")
                 return
             }
@@ -621,7 +637,7 @@ struct ContentView: View {
         DispatchQueue.global(qos: .userInitiated).async {
             let result = CardLinkNavigation.resolve(target, folder: folder, currentFile: sourceFile)
             DispatchQueue.main.async {
-                guard requestID == linkRequestID, cardMode == "markdown", fileURL == sourceFile,
+                guard requestID == linkRequestID, cardMode == "markdown", !showDebateBrowser, fileURL == sourceFile,
                       (notesFolder.isEmpty ? saveFolder : notesFolder) == folderPath else { return }
                 guard text == sourceText else { status = "Link not opened because the card changed."; return }
                 switch result {

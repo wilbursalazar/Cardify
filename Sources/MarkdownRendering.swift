@@ -9,6 +9,8 @@ enum MarkdownRendering {
         let sourceLines = markdown.components(separatedBy: "\n")
         let recognizedLinks = CardLinkParser.links(in: markdown)
         var offset = 0
+        var fence: (Character, Int)?
+        var htmlComment = false
         var lines: [(text: String, offset: Int, links: [CardLink])] = []
         for (lineIndex, originalLine) in sourceLines.enumerated() {
             // Strip only the CR belonging to a CRLF line ending for rendering.
@@ -17,7 +19,27 @@ enum MarkdownRendering {
             let line = lineIndex < sourceLines.count - 1 && originalLine.hasSuffix("\r") ? String(originalLine.dropLast()) : originalLine
             let count = (line as NSString).length
             let links = recognizedLinks.filter { $0.range.location >= offset && NSMaxRange($0.range) <= offset + count }
-            if !line.hasPrefix("Zotero: [Open source](zotero://select/") { lines.append((line, offset, links)) }
+            let trimmed = line.drop(while: { $0 == " " })
+            let indentation = line.count - trimmed.count
+            if !htmlComment, indentation <= 3, let marker = trimmed.first, marker == "`" || marker == "~" {
+                let count = trimmed.prefix(while: { $0 == marker }).count
+                if count >= 3 {
+                    if let open = fence {
+                        if open.0 == marker && count >= open.1 && trimmed.dropFirst(count).trimmingCharacters(in: .whitespaces).isEmpty { fence = nil }
+                    } else { fence = (marker, count) }
+                }
+            }
+            let markerLine = lineIndex == 0 && line.hasPrefix("\u{FEFF}") ? String(line.dropFirst()) : line
+            let debateMarker = fence == nil && !htmlComment && ["<!-- cardify:debate=project -->", "<!-- cardify:debate=aff -->", "<!-- cardify:debate=def -->"].contains(markerLine)
+            if fence == nil && !debateMarker {
+                var cursor = line.startIndex
+                while cursor < line.endIndex {
+                    let marker = htmlComment ? "-->" : "<!--"
+                    guard let range = line.range(of: marker, range: cursor..<line.endIndex) else { break }
+                    htmlComment.toggle(); cursor = range.upperBound
+                }
+            }
+            if !debateMarker && !line.hasPrefix("Zotero: [Open source](zotero://select/") { lines.append((line, offset, links)) }
             offset += (originalLine as NSString).length + 1
         }
         let paragraph = NSMutableParagraphStyle()

@@ -41,5 +41,25 @@ import PDFKit
    }
    print("\(portrait ? "portrait" : "landscape"): matching \(lPDF.pageCount)-card LF/CRLF text and link geometry")
   }
+  for role in ["project", "aff", "def"] {
+   for ending in ["\n", "\r\n"] {
+    let draft = ["<!-- cardify:debate=\(role) -->", "# Debate point", "", "Primary parent: [[Research/Parent]] — supports the argument"].joined(separator: ending)
+    guard let data = CardDocument(text: draft, portrait: false, fontSize: 9).pdf(includeLinks: true),
+          let pdf = PDFDocument(data: data), let page = pdf.page(at: 0) else { fatalError("Could not create debate card") }
+    let output = page.string ?? ""
+    precondition(!output.contains("cardify:debate") && output.contains("Debate point") && output.contains("Primary parent"), "Debate marker must be hidden while the note remains readable on paper")
+    precondition(page.annotations.contains { annotation in
+     guard let url = (annotation.action as? PDFActionURL)?.url else { return false }
+     return CardPreviewLinks.target(from: url) == .wiki("Research/Parent")
+    }, "Debate relation must remain clickable in preview")
+   }
+  }
+  let bomMarker = "\u{FEFF}<!-- cardify:debate=aff -->\r\n# Debate point"
+  precondition(!MarkdownRendering.render(bomMarker, fontSize: 9).string.contains("cardify:debate"), "A BOM must not expose a debate marker")
+  let commentMarker = "<!-- example\n<!-- cardify:debate=aff -->\n-->"
+  precondition(MarkdownRendering.render(commentMarker, fontSize: 9).string.contains("cardify:debate=aff"), "A marker inside another comment is not debate metadata")
+  let quotedMarker = "```\n<!-- cardify:debate=aff -->\n```"
+  precondition(MarkdownRendering.render(quotedMarker, fontSize: 9).string.contains("cardify:debate=aff"), "A literal marker in a code fence must not be hidden")
+  print("Debate role markers stay off printed cards and links remain clickable")
  }
 }
