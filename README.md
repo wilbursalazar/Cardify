@@ -23,7 +23,7 @@ The app is ad-hoc signed, not notarized. macOS may require an explicit confirmat
 
 ## Zettelkasten writing
 
-Choose **Templates → Idea Card, Reading Card, or Index Card** to insert a plain Markdown scaffold into the regular editor without replacing the current draft. Type `[[` to open the inline suggestion list and search notes in the chosen vault, or use **Link Note…**. The suggestion list uses the selected notes folder, or the Save Folder if no notes folder is set; you can also choose a folder from the list. Inserted links point to actual vault-relative filenames; write context beside the link to explain the connection. Reading notes can attach a Zotero source and page through **Add Source…**.
+Choose **Templates → Idea Card, Reading Card, or Index Card** to insert a plain Markdown scaffold into the regular editor without replacing the current draft. Type `[[` to open the inline suggestion list and search notes in the chosen vault, or use **Link Note…**. The suggestion list uses the selected notes folder, or the Save Folder if no notes folder is set; you can also choose a folder from the list. Inserted links point to actual vault-relative filenames; write context beside the link to explain the connection. Reading notes can attach a Zotero source and page through **Add Zotero Source…**.
 
 Choose an **ID style** above the editor:
 
@@ -33,7 +33,7 @@ Choose an **ID style** above the editor:
 
 For notes with IDs, Cardify stores `card_id` in Markdown frontmatter, prints it in small type, and suggests an ID-plus-title filename for a new note. Switching styles does not remove or replace an existing ID. Existing files are never automatically renamed or renumbered. The ID field allows manual edits.
 
-Branching or continuing saves the current card first if necessary, then creates a linked draft using a new available address. The parent is not changed after its current edits are saved. Choose **Templates → Choose ID / Notes Folder** to search a vault for existing IDs. Before saving an ID-bearing note, Cardify checks the selected notes folder and, when outside that folder, the destination folder and their subfolders for duplicate `card_id` metadata or recognized ID-prefixed filenames. Saving back to the same file is allowed. If a folder cannot be read or contains unparseable card ID metadata, verification stops rather than assuming the ID is unique. These checks cover only the searched folders and cannot prevent simultaneous edits by other apps.
+Branching or continuing saves the current card first if necessary, then creates a linked draft using a new available address. The parent is not changed after its current edits are saved. Choose **File → Choose Notes Folder…** to search a vault for existing IDs. Before saving an ID-bearing note, Cardify checks the selected notes folder and, when outside that folder, the destination folder and their subfolders for duplicate `card_id` metadata or recognized ID-prefixed filenames. Saving back to the same file is allowed. If a folder cannot be read or contains unparseable card ID metadata, verification stops rather than assuming the ID is unique. These checks cover only the searched folders and cannot prevent simultaneous edits by other apps.
 
 ## Weekly habit cards and design
 
@@ -53,7 +53,7 @@ Select text on a normal webpage, click the extension, then **Open in Cardify**. 
 
 ## Zotero
 
-Open Zotero and enable **Settings → Advanced → Allow other applications on this computer to communicate with Zotero**. **Add Source** shows recent sources and searches as you type. Choose your personal library or an available group, optionally search all fields and full text, and load more results. The app uses Zotero’s local API and does not modify the library. Live search depends on Zotero running with local access enabled.
+Open Zotero and enable **Settings → Advanced → Allow other applications on this computer to communicate with Zotero**. **Add Zotero Source…** shows recent sources and searches as you type. Choose your personal library or an available group, optionally search all fields and full text, and load more results. The app uses Zotero’s local API and does not modify the library. Live search depends on Zotero running with local access enabled.
 
 ## Privacy
 

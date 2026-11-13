@@ -175,46 +175,46 @@ struct ContentView: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 3) { Text("Cardify").font(.system(size: 28, weight: .bold)); Text("Cards for your paper and digital notes.").foregroundStyle(.secondary) }
-                Spacer()
-                Button("Open Markdown…", action: openFile)
+            HStack(alignment: .center, spacing: 10) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Cardify").font(.system(size: 25, weight: .bold))
+                    Text("Write, connect, and print your notes.").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 12)
+                Menu("File") {
+                    Button("New Card") {
+                        fileURL = nil; savedMarkdownSnapshot = nil; branchSaveFolder = nil
+                        if cardMode == "habits" { setTracker(HabitTracker()); status = "New draft." }
+                        else { text = ""; if idMode != .titleOnly { _ = ensureID() } else { status = "New draft." } }
+                    }
+                    Button("Open Markdown…", action: openFile)
+                    Divider()
+                    Button("Export PDF…", action: exportPDF)
+                    Divider()
+                    Button("Choose Save Folder…", action: chooseFolder)
+                    Button("Choose Notes Folder…", action: chooseNotesFolder)
+                }
                 Button("Save…") { _ = saveMarkdown() }.keyboardShortcut("s")
-                Button("Export PDF…", action: exportPDF)
                 Button("Print…", action: printCards).keyboardShortcut("p")
                 Button("Save & Print…") { if saveMarkdown() { printCards() } }.buttonStyle(.borderedProminent)
             }
             Divider()
-            HStack {
-                Picker("Layout", selection: $portrait) { Text("Landscape (5 × 3)").tag(false); Text("Portrait (3 × 5)").tag(true) }.frame(width: 240)
-                Text("Text size")
-                Slider(value: $fontSize, in: 7...18, step: 1).frame(width: 120).help("Text size")
-                Text("\(Int(fontSize)) pt").monospacedDigit().frame(width: 45)
-                Spacer()
-                Menu("Design") { Toggle("Dot grid", isOn: $dotGrid) }
-                Menu("Templates") {
-                    Button("Idea Card") { insertTemplate(.idea) }
-                    Button("Reading Card") { insertTemplate(.reading) }
-                    Button("Index Card") { insertTemplate(.index) }
-                    Divider()
-                    Button("Choose ID / Notes Folder…", action: chooseNotesFolder)
-                    Divider()
-                    Button("Research Card…") { research = ResearchClip() }
-                    Button("Weekly Habit Tracker") { fileURL = nil; cardMode = "habits" }
-                }
-                Button("Add Source…") { showZotero = true }.disabled(cardMode == "habits")
-                Button("Save Folder…", action: chooseFolder)
-                Button("New Card") {
-                    fileURL = nil; savedMarkdownSnapshot = nil; branchSaveFolder = nil
-                    if cardMode == "habits" { setTracker(HabitTracker()); status = "New draft." }
-                    else { text = ""; if idMode != .titleOnly { _ = ensureID() } else { status = "New draft." } }
-                }
-            }
             HSplitView {
                 VStack(alignment: .leading) {
-                    Picker("Card type", selection: Binding(get: { cardMode }, set: { cardMode = $0; fileURL = nil })) {
-                        Text("Markdown").tag("markdown"); Text("Habits").tag("habits")
-                    }.pickerStyle(.segmented)
+                    HStack(spacing: 8) {
+                        Picker("Card type", selection: Binding(get: { cardMode }, set: { cardMode = $0; fileURL = nil })) {
+                            Text("Markdown").tag("markdown"); Text("Habits").tag("habits")
+                        }.pickerStyle(.segmented).labelsHidden().frame(maxWidth: 220)
+                        Spacer(minLength: 4)
+                        Menu("Templates") {
+                            Button("Idea Card") { insertTemplate(.idea) }
+                            Button("Reading Card") { insertTemplate(.reading) }
+                            Button("Index Card") { insertTemplate(.index) }
+                            Divider()
+                            Button("Research Card…") { research = ResearchClip() }
+                            Button("Weekly Habit Tracker") { fileURL = nil; cardMode = "habits" }
+                        }
+                    }
                     if cardMode == "habits" {
                         HabitTrackerEditor(tracker: Binding(get: { tracker }, set: { setTracker($0) }))
                     } else {
@@ -252,24 +252,45 @@ struct ContentView: View {
                         Button("H2") { editor.prefix("## ") }.help("Subheading")
                         Button("• List") { editor.prefix("- ") }.help("Bullet list")
                         Button("☐ Task") { editor.prefix("- [ ] ") }.help("Task")
-                        Spacer()
-                        Button("Link Note…") { showNotes = true }.help("Search your notes folder")
+                        Spacer(minLength: 0)
                     }.buttonStyle(.bordered)
+                    HStack(spacing: 8) {
+                        Button("Link Note…") { showNotes = true }.help("Search your notes folder")
+                        Button("Add Zotero Source…") { showZotero = true }.help("Find a source in Zotero")
+                        Spacer(minLength: 0)
+                    }
                     MarkdownEditor(text: $text, editor: editor).border(Color.secondary.opacity(0.2))
                     }
                 }.frame(minWidth: 300)
                 VStack(alignment: .leading) {
-                    HStack { Text("Preview").fontWeight(.semibold); Spacer(); Text("\(pageCount) \(pageCount == 1 ? "card" : "cards")").foregroundStyle(.secondary) }
+                    HStack {
+                        Text("Preview").fontWeight(.semibold)
+                        Spacer()
+                        Text("\(pageCount) \(pageCount == 1 ? "card" : "cards")").font(.caption).foregroundStyle(.secondary)
+                    }
+                    HStack(spacing: 8) {
+                        Picker("Orientation", selection: $portrait) {
+                            Text("Landscape · 5 × 3").tag(false)
+                            Text("Portrait · 3 × 5").tag(true)
+                        }.labelsHidden().frame(maxWidth: 190)
+                        Spacer(minLength: 0)
+                        Menu("Design") { Toggle("Dot grid", isOn: $dotGrid) }
+                    }
+                    HStack(spacing: 8) {
+                        Text("Text size").font(.caption).foregroundStyle(.secondary)
+                        Slider(value: $fontSize, in: 7...18, step: 1).help("Text size")
+                        Text("\(Int(fontSize)) pt").font(.caption).monospacedDigit().frame(width: 38, alignment: .trailing)
+                    }
                     if let data = activePDF {
                         PDFPreview(data: data).border(Color.secondary.opacity(0.2))
                     } else {
                         Text(cardMode == "habits" ? "The heading is too long to fit. Shorten it to preview and print." : "Could not create the preview.")
                             .foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
+                    Text("3 × 5 in · ⅜ in inset · Print at 100% scale")
+                        .font(.caption).foregroundStyle(.secondary)
                 }.frame(minWidth: 320)
             }
-            Text("3 × 5-inch stock · ⅜-inch inset · Long notes continue onto more cards. Select 100% scale and the matching paper size in the print dialog.")
-                .font(.caption).foregroundStyle(.secondary)
             Text(status).font(.caption).foregroundStyle(.secondary)
         }.padding(24).frame(minWidth: 850, minHeight: 600)
         .onAppear {
