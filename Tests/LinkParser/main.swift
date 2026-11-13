@@ -1,0 +1,20 @@
+import Foundation
+func check(_ ok: @autoclosure () -> Bool, _ message: String) { if !ok() { fatalError(message) } }
+let s = "😀 [[Folder/Note#Section|A label]] and [a site](https://example.com/hello_(there)) followed by https://example.org/page.\n`[[code]] https://code.invalid`\n```md\n[[fenced]] https://no.invalid\n```\n![image](https://image.invalid/a.png)\nSource: zotero://select/library/items/ABC123\n\\[[escaped]]"
+let links = CardLinkParser.links(in: s)
+check(links.count == 4, "wanted four links, got \(links.map { $0.target })")
+check(links[0].target == .wiki("Folder/Note#Section|A label"), "wiki target")
+check((s as NSString).substring(with: links[0].labelRange) == "A label", "wiki alias")
+check(links[1].target == .url("https://example.com/hello_(there)"), "parenthesized url")
+check((s as NSString).substring(with: links[1].labelRange) == "a site", "markdown label")
+check(links[2].target == .url("https://example.org/page"), "bare URL punctuation")
+check(links[3].target == .url("zotero://select/library/items/ABC123"), "bare Zotero")
+check(CardLinkParser.link(in: s, atUTF16: links[0].range.location + 2)?.target == links[0].target, "UTF16 point lookup")
+check(CardLinkParser.link(in: s, atUTF16: 0) == nil, "unlinked location")
+let relative = CardLinkParser.links(in: "[A](folder/A.md#part) and [https://example.com]")
+check(relative.count == 2 && relative[0].target == .url("folder/A.md#part") && relative[1].target == .url("https://example.com"), "relative and bracketed bare URL")
+print("Clickable-link parser checks passed")
+check(CardLinkParser.links(in: "    https://code.invalid\n\t[[not a link]]\nvisible [[yes]]").map { $0.target } == [.wiki("yes")], "indented code")
+check(CardLinkParser.links(in: "✨https://例え.example/path").first?.target == .url("https://例え.example/path"), "unicode before and inside URL")
+check(CardLinkParser.links(in: "[Read](<https://example.com/a%20b> \"title\")").first?.target == .url("https://example.com/a%20b"), "angle destination with title")
+print("Indented code, Unicode and Markdown titles passed")

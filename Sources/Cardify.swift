@@ -10,7 +10,7 @@ struct CardDocument {
     var dotGrid: Bool = false
     var pageSize: CGSize { portrait ? CGSize(width: 216, height: 360) : CGSize(width: 360, height: 216) }
 
-    func pdf() -> Data? {
+    func pdf(includeLinks: Bool = false) -> Data? {
         let size = pageSize
         let inset: CGFloat = 27 // 3/8 inch, in PDF points
         let body = CGRect(x: inset, y: inset, width: size.width - 2 * inset, height: size.height - 2 * inset)
@@ -39,6 +39,8 @@ struct CardDocument {
         var media = CGRect(origin: .zero, size: size)
         guard let context = CGContext(consumer: consumer, mediaBox: &media, nil) else { return nil }
         var location = 0
+        var pageIndex = 0
+        var linkHits: [CardPreviewLinks.Hit] = []
         repeat {
             context.beginPDFPage(nil)
             context.setFillColor(NSColor.white.cgColor)
@@ -71,8 +73,10 @@ struct CardDocument {
                         let line = CTTypesetterCreateLine(typesetter, CFRange(location: location, length: count))
                         var ascent: CGFloat = 0, descent: CGFloat = 0, leading: CGFloat = 0
                         CTLineGetTypographicBounds(line, &ascent, &descent, &leading)
-                        context.textPosition = CGPoint(x: body.minX, y: body.maxY - ascent)
+                        let origin = CGPoint(x: body.minX, y: body.maxY - ascent)
+                        context.textPosition = origin
                         CTLineDraw(line, context)
+                        if includeLinks { CardPreviewLinks.collect(line: line, origin: origin, page: pageIndex, into: &linkHits) }
                         consumed = count
                         textBody.size.height -= max(9, ceil(ascent + descent + leading + 1.5))
                     } else {
@@ -87,22 +91,34 @@ struct CardDocument {
                 let path = CGPath(rect: textBody, transform: nil)
                 let frame = CTFramesetterCreateFrame(framesetter, CFRange(location: location + consumed, length: 0), path, nil)
                 CTFrameDraw(frame, context)
+                if includeLinks { CardPreviewLinks.collect(frame: frame, page: pageIndex, into: &linkHits) }
                 consumed += CTFrameGetVisibleStringRange(frame).length
             }
             context.restoreGState()
             context.endPDFPage()
             guard consumed > 0 else { context.closePDF(); return nil }
             location += consumed
+            pageIndex += 1
         } while location < attributed.length
         context.closePDF()
-        return data as Data
+        return includeLinks ? CardPreviewLinks.add(to: data as Data, hits: linkHits) : data as Data
     }
 }
 
 struct PDFPreview: NSViewRepresentable {
     let data: Data?
-    func makeNSView(context: Context) -> PDFView { let view = PDFView(); view.autoScales = true; view.displayMode = .singlePageContinuous; view.backgroundColor = NSColor.windowBackgroundColor; return view }
-    func updateNSView(_ view: PDFView, context: Context) { if let data { view.document = PDFDocument(data: data) } }
+    let onFollowLink: (CardLinkTarget) -> Void
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+    func makeNSView(context: Context) -> PDFView { let view = PDFView(); view.autoScales = true; view.displayMode = .singlePageContinuous; view.backgroundColor = NSColor.windowBackgroundColor; view.delegate = context.coordinator; return view }
+    func updateNSView(_ view: PDFView, context: Context) { context.coordinator.parent = self; if let data { view.document = PDFDocument(data: data) } }
+    final class Coordinator: NSObject, PDFViewDelegate {
+        var parent: PDFPreview
+        init(_ parent: PDFPreview) { self.parent = parent }
+        func pdfViewWillClick(onLink sender: PDFView, with url: URL) {
+            guard let target = CardPreviewLinks.target(from: url) else { return }
+            parent.onFollowLink(target)
+        }
+    }
 }
 
 struct ZoteroCreator: Decodable {
@@ -195,11 +211,13 @@ struct ContentView: View {
     @State private var showNotes = false
     @State private var showLibrary = false
     @State private var showSettings = false
+    @State private var linkRequestID = UUID()
     @State private var research: ResearchClip?
     @State private var status = "Draft saved on this Mac."
     var card: CardDocument { CardDocument(text: text, portrait: portrait, fontSize: fontSize, dotGrid: dotGrid) }
     var idMode: IDMode { IDMode(rawValue: storedIDMode) ?? (autoTimestampID ? .timestamp : .titleOnly) }
     var activePDF: Data? { cardMode == "habits" ? tracker.pdf(portrait: portrait, dotGrid: dotGrid, fontSize: fontSize) : card.pdf() }
+    var previewPDF: Data? { cardMode == "habits" ? activePDF : card.pdf(includeLinks: true) }
     func setTracker(_ value: HabitTracker) {
         tracker = value
         if let data = try? JSONEncoder().encode(value), let encoded = String(data: data, encoding: .utf8) { habitDraft = encoded }
@@ -281,6 +299,7 @@ struct ContentView: View {
                             })).frame(width: 145).help("Edit the card ID; existing files are not automatically renamed.")
                         }
                         Spacer()
+                        Text("⌘-click links to open").font(.caption).foregroundStyle(.secondary)
                     }
                     if idMode != .titleOnly {
                         HStack {
@@ -304,7 +323,7 @@ struct ContentView: View {
                         Button("Add Zotero Source…") { showZotero = true }.help("Find a source in Zotero")
                         Spacer(minLength: 0)
                     }
-                    MarkdownEditor(text: $text, editor: editor).border(Color.secondary.opacity(0.2))
+                    MarkdownEditor(text: $text, editor: editor, onFollowLink: followLink).border(Color.secondary.opacity(0.2))
                     }
                 }.frame(minWidth: 300)
                 VStack(alignment: .leading) {
@@ -326,8 +345,8 @@ struct ContentView: View {
                         Slider(value: $fontSize, in: 7...18, step: 1).help("Text size")
                         Text("\(Int(fontSize)) pt").font(.caption).monospacedDigit().frame(width: 38, alignment: .trailing)
                     }
-                    if let data = activePDF {
-                        PDFPreview(data: data).border(Color.secondary.opacity(0.2))
+                    if let data = previewPDF {
+                        PDFPreview(data: data, onFollowLink: followLink).border(Color.secondary.opacity(0.2)).help("Click an underlined link to open it.")
                     } else {
                         Text(cardMode == "habits" ? "The heading is too long to fit. Shorten it to preview and print." : "Could not create the preview.")
                             .foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -369,6 +388,48 @@ struct ContentView: View {
     func chooseNotesFolder() {
         let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true
         if panel.runModal() == .OK, let url = panel.url { notesFolder = url.path; status = "ID and notes folder: \(url.path)" }
+    }
+    func followLink(_ target: CardLinkTarget) {
+        let folderPath = notesFolder.isEmpty ? saveFolder : notesFolder
+        let folder = folderPath.isEmpty ? nil : URL(fileURLWithPath: folderPath, isDirectory: true)
+        let sourceFile = fileURL
+        let sourceText = text
+        let requestID = UUID(); linkRequestID = requestID
+        status = "Opening link…"
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = CardLinkNavigation.resolve(target, folder: folder, currentFile: sourceFile)
+            DispatchQueue.main.async {
+                guard requestID == linkRequestID, cardMode == "markdown", fileURL == sourceFile,
+                      (notesFolder.isEmpty ? saveFolder : notesFolder) == folderPath else { return }
+                guard text == sourceText else { status = "Link not opened because the card changed."; return }
+                switch result {
+                case .failure(let message): linkError(message)
+                case .external(let url):
+                    if NSWorkspace.shared.open(url) { status = "Opened link." }
+                    else { linkError("Could not open this link.") }
+                case .current(let fragment): showHeading(fragment)
+                case .note(let url, let fragment):
+                    if sourceFile?.standardizedFileURL != url.standardizedFileURL {
+                        editor.clearPendingSelection()
+                        guard loadFile(url) else { return }
+                    }
+                    if let fragment {
+                        guard cardMode == "markdown" else { linkError("Heading links are not available in habit cards."); return }
+                        showHeading(fragment)
+                    }
+                    else { status = "Opened \(url.lastPathComponent)." }
+                }
+            }
+        }
+    }
+    func showHeading(_ fragment: String) {
+        guard let range = CardLinkNavigation.headingRange(fragment, in: text) else { linkError("The linked heading was not found."); return }
+        editor.selectWhenReady(range: range, text: text)
+        status = "Opened heading: \(fragment)."
+    }
+    func linkError(_ message: String) {
+        status = message
+        let alert = NSAlert(); alert.messageText = "Can't open link"; alert.informativeText = message; alert.addButton(withTitle: "OK"); alert.runModal()
     }
     func scanRoots(for file: URL? = nil) -> [URL] {
         var roots: [URL] = []
@@ -504,7 +565,8 @@ struct ContentView: View {
         let panel = NSOpenPanel(); panel.allowedContentTypes = [.plainText]; panel.allowsMultipleSelection = false
         if panel.runModal() == .OK, let url = panel.url { loadFile(url) }
     }
-    func loadFile(_ url: URL) {
+    @discardableResult
+    func loadFile(_ url: URL) -> Bool {
         var previousMode = cardMode, previousURL = fileURL, previousBranch = branchSaveFolder
         var loaded = false
         defer {
@@ -514,14 +576,14 @@ struct ContentView: View {
             // Check readability before prompting. Read again after each save so the
             // selected file cannot be replaced with stale pre-save contents.
             _ = try String(contentsOf: url, encoding: .utf8)
-            guard confirmReplaceDraft() else { return }
+            guard confirmReplaceDraft() else { return false }
             previousMode = cardMode; previousURL = fileURL; previousBranch = branchSaveFolder
             var contents = try String(contentsOf: url, encoding: .utf8)
             var savedHabit = HabitTracker.fromMarkdown(contents)
             let targetMode = savedHabit == nil ? "markdown" : "habits"
             if targetMode != previousMode {
                 cardMode = targetMode; fileURL = nil; branchSaveFolder = nil
-                guard confirmReplaceDraft(hidden: true) else { return }
+                guard confirmReplaceDraft(hidden: true) else { return false }
                 cardMode = previousMode; fileURL = previousURL; branchSaveFolder = previousBranch
                 contents = try String(contentsOf: url, encoding: .utf8)
                 savedHabit = HabitTracker.fromMarkdown(contents)
@@ -532,7 +594,8 @@ struct ContentView: View {
             } else { text = contents; savedMarkdownSnapshot = contents }
             fileURL = url; branchSaveFolder = nil; status = "Opened \(url.lastPathComponent)."
             loaded = true
-        } catch { status = "Could not open file: \(error.localizedDescription)" }
+            return true
+        } catch { status = "Could not open file: \(error.localizedDescription)"; return false }
     }
     func chooseFolder() {
         let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true

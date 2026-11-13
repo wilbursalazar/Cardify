@@ -9,6 +9,10 @@ swiftc "${SWIFT_FLAGS[@]}" "${COMMON[@]}" "$ROOT/Tests/Library/main.swift" -o "$
 "$TEMP_DIR/library"
 swiftc "${SWIFT_FLAGS[@]}" "${COMMON[@]}" "$ROOT/Sources/InlineTemplates.swift" "$ROOT/Sources/WorkflowSettings.swift" "$ROOT/Tests/Workflow/main.swift" -o "$TEMP_DIR/workflow"
 "$TEMP_DIR/workflow"
+swiftc "${SWIFT_FLAGS[@]}" "$ROOT/Sources/LinkNavigation.swift" "$ROOT/Sources/CardLinks.swift" "$ROOT/Tests/LinkParser/main.swift" -o "$TEMP_DIR/link-parser"
+"$TEMP_DIR/link-parser"
+swiftc "${SWIFT_FLAGS[@]}" "$ROOT/Sources/LinkNavigation.swift" "$ROOT/Tests/LinkNavigation/main.swift" -o "$TEMP_DIR/link-navigation"
+"$TEMP_DIR/link-navigation"
 swiftc "${SWIFT_FLAGS[@]}" -parse-as-library "$ROOT/Sources/CuratedIndex.swift" "$ROOT/Tests/IndexMetadata/IndexChecks.swift" -o "$TEMP_DIR/index"
 "$TEMP_DIR/index"
 python3 - "$ROOT/Sources/Cardify.swift" "$ROOT/Tests/Draft/DraftChecks.swift.in" "$TEMP_DIR/DraftChecks.swift" <<'PY'

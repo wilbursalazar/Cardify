@@ -113,6 +113,10 @@ Before saving an ID-bearing note, Cardify checks the selected notes folder and t
 
 In a Markdown card, type `[[` to search the selected notes folder by filename and insert a link. Use the arrow keys to choose a suggestion, Return or Tab to insert it, and Escape to dismiss the list. You can also click **Link Note…** and search for a note. Cardify inserts a path-based link such as `[[Research/Memory and archives]]`; it does not change the linked file.
 
+To follow a link, **Command-click** it in the Markdown editor, or click the underlined link in the card preview. `[[Note]]`, `[[Folder/Note|label]]`, and heading links such as `[[Note#Heading]]` open Markdown cards in Cardify; web links open in your browser. Links to Zotero items open in Zotero. Cardify asks about unsaved changes before opening another card.
+
+Choose the vault root with **File → Choose Notes Folder…** so note links resolve against your vault. If a filename is ambiguous or a target cannot be found, Cardify tells you instead of opening a different note. Heading links support Markdown headings; Obsidian block links are not supported yet. Preview links are interactive only inside Cardify; Cardify does not add its internal link actions to exported or printed PDFs. The Zotero open-source line is hidden in the printed preview, but you can Command-click it in the editor.
+
 Add a few words explaining a link when they will help you later, for example:
 
 ```md
@@ -168,7 +172,7 @@ On macOS, install the Apple Command Line Tools, then run:
 open build/Cardify.app
 ```
 
-The script builds a universal app targeting macOS 13 and later and signs it ad hoc. The result is not notarized. Run `./scripts/test.sh` for library, index, workflow, and draft-protection checks, and `./scripts/test-printed-id.sh` for PDF layout checks.
+The script builds a universal app targeting macOS 13 and later and signs it ad hoc. The result is not notarized. Run `./scripts/test.sh` for library, index, workflow, and draft-protection checks, `./scripts/test-printed-id.sh` for PDF layout checks, and `./scripts/test-preview-links.sh` for clickable-preview checks.
 
 ## Further reading
 

@@ -5,7 +5,7 @@ APP="$ROOT/build/Cardify.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$ROOT/build/module-cache"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
-SOURCES=("$ROOT/Sources/Cardify.swift" "$ROOT/Sources/MarkdownEditor.swift" "$ROOT/Sources/MarkdownRendering.swift" "$ROOT/Sources/NotePicker.swift" "$ROOT/Sources/HabitTracker.swift" "$ROOT/Sources/ZoteroSearch.swift" "$ROOT/Sources/Zettelkasten.swift" "$ROOT/Sources/BranchIDs.swift" "$ROOT/Sources/InlineTemplates.swift" "$ROOT/Sources/NoteEditing.swift" "$ROOT/Sources/IDModes.swift" "$ROOT/Sources/CardLibrary.swift" "$ROOT/Sources/CuratedIndex.swift" "$ROOT/Sources/WorkflowSettings.swift")
+SOURCES=("$ROOT/Sources/Cardify.swift" "$ROOT/Sources/MarkdownEditor.swift" "$ROOT/Sources/MarkdownRendering.swift" "$ROOT/Sources/NotePicker.swift" "$ROOT/Sources/HabitTracker.swift" "$ROOT/Sources/ZoteroSearch.swift" "$ROOT/Sources/Zettelkasten.swift" "$ROOT/Sources/BranchIDs.swift" "$ROOT/Sources/InlineTemplates.swift" "$ROOT/Sources/NoteEditing.swift" "$ROOT/Sources/IDModes.swift" "$ROOT/Sources/CardLibrary.swift" "$ROOT/Sources/CuratedIndex.swift" "$ROOT/Sources/WorkflowSettings.swift" "$ROOT/Sources/CardLinks.swift" "$ROOT/Sources/LinkNavigation.swift" "$ROOT/Sources/PDFLinkSupport.swift")
 for ARCH in arm64 x86_64; do
     swiftc -target "$ARCH-apple-macos13.0" -module-cache-path "$ROOT/build/module-cache" -parse-as-library -O "${SOURCES[@]}" -o "$ROOT/build/Cardify-$ARCH"
 done

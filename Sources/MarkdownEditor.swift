@@ -50,6 +50,24 @@ struct LinkCompletionContext: Equatable {
 
 final class EditorState: ObservableObject {
     weak var view: NSTextView?
+    private var pendingSelection: (range: NSRange, text: String)?
+    func selectWhenReady(range: NSRange, text: String) {
+        pendingSelection = (range, text)
+        applyPendingSelection()
+    }
+    func clearPendingSelection() { pendingSelection = nil }
+    func editorTextDidChange(_ view: NSTextView) {
+        guard let pending = pendingSelection else { return }
+        if view.string == pending.text { applyPendingSelection() } else { pendingSelection = nil }
+    }
+    func applyPendingSelection() {
+        guard let view, let pending = pendingSelection, view.string == pending.text else { return }
+        pendingSelection = nil
+        guard pending.range.location != NSNotFound, NSMaxRange(pending.range) <= (view.string as NSString).length else { return }
+        view.setSelectedRange(pending.range)
+        view.scrollRangeToVisible(pending.range)
+        view.window?.makeFirstResponder(view)
+    }
     func insert(_ content: String) {
         guard let view else { return }
         view.insertText(content, replacementRange: view.selectedRange())
@@ -75,6 +93,23 @@ final class EditorState: ObservableObject {
 
 final class LinkCompletionTextView: NSTextView {
     var handleCompletionKey: ((NSEvent) -> Bool)?
+    var followLink: ((CardLinkTarget) -> Void)?
+    override func mouseDown(with event: NSEvent) {
+        if event.modifierFlags.contains(.command), let manager = layoutManager, let container = textContainer, manager.numberOfGlyphs > 0 {
+            var point = convert(event.locationInWindow, from: nil)
+            point.x -= textContainerOrigin.x; point.y -= textContainerOrigin.y
+            let glyph = manager.glyphIndex(for: point, in: container)
+            if glyph < manager.numberOfGlyphs,
+               manager.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: container).contains(point) {
+                let location = manager.characterIndexForGlyph(at: glyph)
+                if let link = CardLinkParser.link(in: string, atUTF16: location) {
+                    followLink?(link.target)
+                    return
+                }
+            }
+        }
+        super.mouseDown(with: event)
+    }
     override func keyDown(with event: NSEvent) {
         if handleCompletionKey?(event) == true { return }
         super.keyDown(with: event)
@@ -186,10 +221,11 @@ final class LinkCompletionState: ObservableObject {
 struct MarkdownEditor: View {
     @Binding var text: String
     let editor: EditorState
+    let onFollowLink: (CardLinkTarget) -> Void
     @StateObject private var completion = LinkCompletionState()
     var body: some View {
         VStack(spacing: 0) {
-            MarkdownTextView(text: $text, editor: editor, completion: completion)
+            MarkdownTextView(text: $text, editor: editor, completion: completion, onFollowLink: onFollowLink)
             if completion.visible {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
@@ -224,6 +260,7 @@ private struct MarkdownTextView: NSViewRepresentable {
     @Binding var text: String
     let editor: EditorState
     @ObservedObject var completion: LinkCompletionState
+    let onFollowLink: (CardLinkTarget) -> Void
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSScrollView()
@@ -239,7 +276,9 @@ private struct MarkdownTextView: NSViewRepresentable {
         view.isRichText = false; view.isAutomaticQuoteSubstitutionEnabled = false; view.isAutomaticDashSubstitutionEnabled = false; view.isAutomaticTextReplacementEnabled = false
         view.allowsUndo = true; view.delegate = context.coordinator; view.string = text; view.textContainerInset = NSSize(width: 10, height: 10)
         view.handleCompletionKey = { [weak coordinator = context.coordinator] event in coordinator?.parent.completion.handleKey(event) ?? false }
+        view.followLink = { [weak coordinator = context.coordinator] target in coordinator?.parent.onFollowLink(target) }
         scroll.documentView = view; editor.view = view; completion.view = view
+        editor.applyPendingSelection()
         return scroll
     }
     func updateNSView(_ scroll: NSScrollView, context: Context) {
@@ -247,12 +286,14 @@ private struct MarkdownTextView: NSViewRepresentable {
         guard let view = scroll.documentView as? NSTextView else { return }
         if view.string != text { view.string = text; completion.close() }
         editor.view = view; completion.view = view
+        editor.applyPendingSelection()
     }
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: MarkdownTextView
         init(_ parent: MarkdownTextView) { self.parent = parent }
         func textDidChange(_ notification: Notification) {
             guard let view = notification.object as? NSTextView else { return }
+            parent.editor.editorTextDidChange(view)
             parent.text = view.string
             DispatchQueue.main.async { [weak self, weak view] in if let view { self?.parent.completion.refresh(in: view) } }
         }
