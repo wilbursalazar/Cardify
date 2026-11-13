@@ -35,6 +35,9 @@ check(DebateIDs.suggestChild(parentID: "AFF-01", role: .reply, existing: ["AFF-0
 let linked = DebateNotes.setPrimary("AFF-01 Argument", explanation: "", in: DebateNotes.setRole(.objection, in: "Point\n")!)!
 let linkedPrepared = DebateIDs.prepareChild(linked, parentID: "AFF-01", existing: ["AFF-01-OB-01"])!
 check(CardMetadata.parse(linkedPrepared).id == "AFF-01-OB-02" && DebateNotes.parse(linkedPrepared).primary != nil, "child gets ID and retains primary parent")
+let titledChild = NoteEditing.setTitle("A clear counterargument", in: linkedPrepared)
+check(CardMetadata.parse(titledChild).id == "AFF-01-OB-02", "editing a title preserves the navigation ID")
+check(NoteEditing.filename(id: CardMetadata.parse(titledChild).id, title: NoteEditing.title(in: titledChild)) == "AFF-01-OB-02 A clear counterargument.md", "new debate filename includes both ID and readable title")
 check(DebateIDs.prepareChild("# no parent\n", parentID: "AFF-01", existing: []) == nil, "unlinked child fails safely")
 let withCustomID = NoteEditing.addID("Custom", to: linked)!
 check(DebateIDs.prepareChild(withCustomID, parentID: "AFF-01", existing: []) == withCustomID, "existing child ID is never rewritten")

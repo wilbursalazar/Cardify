@@ -42,8 +42,8 @@ struct DebatePanel: View {
                 Button("Argument map…") { showBrowser = true }
                 Menu("New") {
                     Button("Resolution") { newRole(.project) }
-                    Button("AFF Parent") { newRole(.aff) }
-                    Button("DEF Parent") { newRole(.def) }
+                    Button("Unassigned AFF point") { newRole(.aff) }
+                    Button("Unassigned DEF point") { newRole(.def) }
                 }
                 Menu("Mark as") {
                     Button("Resolution") { mark(.project) }
@@ -153,6 +153,13 @@ private struct DebateBrowser: View {
         return hierarchy.visibleCards.filter { LibrarySearch.matches($0, query: term) }
     }
     private func samePath(_ a: String, _ b: String) -> Bool { a.caseInsensitiveCompare(b) == .orderedSame }
+    private func parentLabel(_ path: String) -> String {
+        let matches = snapshot.cards.filter {
+            path.contains("/") ? samePath($0.path, path) : samePath(($0.path as NSString).lastPathComponent, path)
+        }
+        guard (path.contains("/") || snapshot.unreadable == 0), matches.count == 1, let card = matches.first else { return path }
+        return DebateHierarchy.displayName(card)
+    }
     private func roleName(_ role: DebateRole?) -> String {
         switch role {
         case .project: return "Resolution"
@@ -192,13 +199,13 @@ private struct DebateBrowser: View {
                     projectPath = path; selected = path; query = ""
                 })) {
                     Text("Unassigned").tag(Optional<String>.none)
-                    ForEach(projects) { project in Text(project.title).tag(Optional(project.path)) }
+                    ForEach(projects) { project in Text(DebateHierarchy.displayName(project)).tag(Optional(project.path)) }
                 }.frame(maxWidth: 320)
                 TextField("Search this map", text: $query).frame(maxWidth: 220)
                 if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Menu("\(searchResults.count) results") {
                         ForEach(searchResults.prefix(100)) { card in
-                            Button(card.title) { selected = card.path }
+                            Button(DebateHierarchy.displayName(card)) { selected = card.path }
                         }
                     }.disabled(searchResults.isEmpty)
                 }
@@ -215,9 +222,14 @@ private struct DebateBrowser: View {
                     if let card = current {
                         let parsed = DebateNotes.parse(card.content)
                         VStack(alignment: .leading, spacing: 12) {
-                            Text(roleName(parsed.role)).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                            Text(card.title).font(.headline)
-                            Text(card.path).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(roleName(parsed.role)).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                                Spacer()
+                                if let id = card.cardID, !id.isEmpty {
+                                    Text(id).font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+                                }
+                            }
+                            Text(card.title).font(.headline).help(card.path)
                             Button("Open card") { open(card) }.buttonStyle(.borderedProminent)
                             if !linkable(card) {
                                 Text("A connection cannot be safely resolved. Check the filename, duplicate note names, and whether all notes are readable.").font(.caption).foregroundStyle(.secondary)
@@ -229,31 +241,43 @@ private struct DebateBrowser: View {
                                     Button("New AFF") { newParent(.aff, project: card) }.disabled(!linkable(card))
                                     Button("New DEF") { newParent(.def, project: card) }.disabled(!linkable(card))
                                 }
-                                Button("Add current parent to resolution") { changeProject(card) }
-                                    .disabled(!canUse(card) || !currentInfo.valid || (currentInfo.role != .aff && currentInfo.role != .def))
+                                DisclosureGroup("Link the current AFF or DEF draft") {
+                                    Button("Add current point to this resolution") { changeProject(card) }
+                                        .disabled(!canUse(card) || !currentInfo.valid || (currentInfo.role != .aff && currentInfo.role != .def))
+                                }
                             } else if parsed.role == .aff || parsed.role == .def || parsed.primary != nil {
                                 if let parent = parsed.primary {
-                                    Text("Primary parent: \(parent.path)").font(.caption).foregroundStyle(.secondary)
+                                    Text("Parent: \(parentLabel(parent.path))").font(.caption).foregroundStyle(.secondary)
+                                } else if let project = hierarchy.project {
+                                    Text("Resolution: \(DebateHierarchy.displayName(project))").font(.caption).foregroundStyle(.secondary)
+                                } else {
+                                    Text(parsed.projects.isEmpty ? "No resolution assigned" : "Resolution unavailable")
+                                        .font(.caption).foregroundStyle(.secondary)
                                 }
                                 Divider()
                                 Text("Develop this point").font(.subheadline.bold())
-                                Menu("New connected card") {
-                                    Button("Evidence") { newChild(card, role: .evidence) }
-                                    Button("Objection") { newChild(card, role: .objection) }
-                                    Button("Argument") { newChild(card, role: .argument) }
-                                    Button("Reply") { newChild(card, role: .reply) }
-                                    Divider()
-                                    Button("Other note") { newChild(card, role: nil) }
+                                Text("Create a card connected to this one.").font(.caption).foregroundStyle(.secondary)
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Button("Add objection or counterargument") { newChild(card, role: .objection) }
+                                    Button("Add supporting evidence") { newChild(card, role: .evidence) }
+                                    Button("Add response") { newChild(card, role: .reply) }
+                                    Button("Add supporting argument") { newChild(card, role: .argument) }
                                 }.disabled(!linkable(card))
-                                TextField("Connection (optional)", text: $explanation)
-                                Button("Set as primary parent") { setPrimary(card) }
-                                    .disabled(!canUse(card) || !currentInfo.valid || currentInfo.role == .project || currentInfo.role == .aff || currentInfo.role == .def)
-                                Button("Add related parent") { addRelated(card) }
-                                    .disabled(!canUse(card) || !currentInfo.valid || currentInfo.primary == nil || currentInfo.role == .project)
-                                    .help("Choose a primary parent before adding related parents.")
+                                DisclosureGroup("More options") {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Button("Add another kind of note") { newChild(card, role: nil) }.disabled(!linkable(card))
+                                        Text("Link the current draft to this card:").font(.caption).foregroundStyle(.secondary)
+                                        TextField("Connection explanation (optional)", text: $explanation)
+                                        Button("Use this as its primary parent") { setPrimary(card) }
+                                            .disabled(!canUse(card) || !currentInfo.valid || currentInfo.role == .project || currentInfo.role == .aff || currentInfo.role == .def)
+                                        Button("Link as a related parent") { addRelated(card) }
+                                            .disabled(!canUse(card) || !currentInfo.valid || currentInfo.primary == nil || currentInfo.role == .project)
+                                            .help("Choose a primary parent before adding related parents.")
+                                    }.padding(.top, 4)
+                                }
                             } else {
                                 if let parent = parsed.primary {
-                                    Text("Primary parent: \(parent.path)").font(.caption).foregroundStyle(.secondary)
+                                    Text("Parent: \(parentLabel(parent.path))").font(.caption).foregroundStyle(.secondary)
                                 }
                                 if !parsed.related.isEmpty {
                                     Text("Related to \(parsed.related.count) other point\(parsed.related.count == 1 ? "" : "s")").font(.caption).foregroundStyle(.secondary)
@@ -262,7 +286,7 @@ private struct DebateBrowser: View {
                             }
                         }.frame(maxWidth: .infinity, alignment: .leading).padding(14)
                     } else {
-                        Text("Select a resolution, AFF or DEF point, or connected card.")
+                        Text("Select a card on the map to open it or add to its argument.")
                             .foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity).padding()
                     }
                 }.frame(minWidth: 260, idealWidth: 280, maxWidth: 340)
@@ -321,6 +345,10 @@ private struct DebateBrowser: View {
         if onNew(draft, reference) { dismiss() }
     }
     private func newParent(_ role: DebateRole, project: LibraryCard) {
+        guard linkable(project) else {
+            message = "This resolution cannot be linked safely. Check duplicate names and unreadable notes, then refresh."
+            return
+        }
         guard safe(project, requireRole: true) else { return }
         guard let marked = DebateNotes.setRole(role, in: DebateTemplates.body(for: role)),
               let draft = DebateNotes.addProject(project.path, in: marked) else { message = "Could not create a parent in this resolution."; return }

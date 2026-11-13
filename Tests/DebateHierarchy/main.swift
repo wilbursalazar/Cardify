@@ -16,6 +16,16 @@ func card(_ path: String, _ text: String) -> LibraryCard {
 func check(_ result: @autoclosure () -> Bool, _ message: String) {
     if !result() { fputs("FAIL: \(message)\n", stderr); exit(1) }
 }
+let nameURL = URL(fileURLWithPath: "/test/note.md")
+func named(_ title: String, _ id: String?) -> LibraryCard {
+    LibraryCard(url: nameURL, path: "note", title: title, cardID: id, content: "")
+}
+check(DebateHierarchy.displayName(named("A readable point", "AFF-01")) == "AFF-01 · A readable point", "IDs accompany readable titles")
+check(DebateHierarchy.displayName(named("AFF-01 A readable point", "AFF-01")) == "AFF-01 A readable point", "filename titles do not repeat their IDs")
+check(DebateHierarchy.displayName(named("aff-01", "AFF-01")) == "AFF-01", "ID-only filenames are not doubled")
+check(DebateHierarchy.displayName(named("Readable without ID", nil)) == "Readable without ID", "titles without IDs remain readable")
+check(DebateHierarchy.displayName(named("", "DEF-01")) == "DEF-01", "untitled cards retain their ID")
+
 let project1 = card("Debates/Resolution", "# Resolution\n<!-- cardify:debate=project -->\n")
 let project2 = card("Debates/Other", "# Other\n<!-- cardify:debate=project -->\n")
 let aff = card("Points/AFF", "# Affirmative\n<!-- cardify:debate=aff -->\nDebate project: [[Debates/Resolution]]\nDebate project: [[Debates/Other]]\n")

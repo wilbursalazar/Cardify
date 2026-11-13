@@ -46,6 +46,17 @@ private struct DebateLookup {
 }
 
 struct DebateHierarchy {
+    // Show an address alongside the readable title without repeating an ID
+    // already present in an imported filename or heading.
+    static func displayName(_ card: LibraryCard) -> String {
+        let title = card.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let value = card.cardID?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return title }
+        guard !title.isEmpty, title.caseInsensitiveCompare(value) != .orderedSame else { return value }
+        let lowered = title.lowercased(), prefix = value.lowercased()
+        if lowered.hasPrefix(prefix + " ") || lowered.hasPrefix(prefix + " · ") || lowered.hasPrefix(prefix + " — ") { return title }
+        return value + " · " + title
+    }
+
     let project: LibraryCard?
     let aff: [DebateBranch]
     let def: [DebateBranch]

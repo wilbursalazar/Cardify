@@ -80,14 +80,15 @@ struct DebateHierarchyView: View {
                 Text(label).font(.caption.weight(.bold)).foregroundStyle(tint)
                 Text("\(branches.count)").font(.caption).foregroundStyle(.secondary)
                 Spacer(minLength: 0)
+                if let project = hierarchy.project {
+                    Button("Add \(label)") { onNewPoint(label == "AFF" ? .aff : .def, project) }
+                        .help("Add another \(label) point to this resolution")
+                }
             }.frame(maxWidth: .infinity, alignment: .leading)
             if branches.isEmpty {
                 VStack(spacing: 7) {
                     Text(label == "AFF" && hierarchy.project != nil ? "Add an AFF point to begin." : "No \(label) points yet.")
                         .font(.caption).foregroundStyle(.secondary)
-                    if let project = hierarchy.project {
-                        Button("Add \(label) point") { onNewPoint(label == "AFF" ? .aff : .def, project) }
-                    }
                 }
                 .padding(10).frame(maxWidth: .infinity, minHeight: 58)
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(lineColor, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
