@@ -62,7 +62,7 @@ Use the local depth control to show one or two steps, or choose **Whole vault**.
 
 ## Set your starting workflow
 
-Choose **File → Settings…** for **System, Light, or Dark** appearance and to select defaults for new Research cards. **As configured** keeps your current behavior. **Luhmann-inspired** starts an Idea Card with a Luhmann-style ID; **Eco-inspired** starts a Reading Card with a title-only filename; **Obsidian-style** starts a blank Markdown card with a title-only filename. Choose a different ID style or template whenever you want.
+Choose **File → Settings…** for **System, Light, Dark, or Charcoal** appearance and to select defaults for new Research cards. **As configured** keeps your current behavior. **Luhmann-inspired** starts an Idea Card with a Luhmann-style ID; **Eco-inspired** starts a Reading Card with a title-only filename; **Obsidian-style** starts a blank Markdown card with a title-only filename. Choose a different ID style or template whenever you want.
 
 The setting takes effect when you create a new Markdown card. It does not change the open draft, existing files, IDs, or folder locations. Every workflow keeps the same tools for links, Zotero, the library, and printing. These are optional starting points, not rules you must follow.
 

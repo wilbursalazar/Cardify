@@ -232,7 +232,7 @@ private struct DebateBrowser: View {
                     Text("Choose a notes folder").font(.headline)
                     Text("Cardify uses this folder to save and connect your debate cards as Markdown.")
                         .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                    Button("Choose Notes Folder…", action: chooseFolder).buttonStyle(.borderedProminent)
+                    Button("Choose Notes Folder…", action: chooseFolder).buttonStyle(.borderedProminent).modifier(CharcoalPrimaryTint())
                 }.frame(maxWidth: .infinity, maxHeight: .infinity).padding()
             } else if !hasLoaded {
                 VStack(spacing: 10) {
@@ -288,7 +288,7 @@ private struct DebateBrowser: View {
                                 }
                             }
                             Text(card.title).font(.headline).help(card.path)
-                            Button("Open card") { open(card) }.buttonStyle(.borderedProminent)
+                            Button("Open card") { open(card) }.buttonStyle(.borderedProminent).modifier(CharcoalPrimaryTint())
                             Button(focusMode ? "Show full map" : "Focus on this branch") { focusMode.toggle() }
                                 .help(focusMode ? "Return to all arguments in this resolution." : "See this card's path and directly connected cards.")
                             Text(focusMode ? "Following this card's path and direct connections." : "Focus shows this card's path and direct connections.")

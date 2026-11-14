@@ -12,6 +12,7 @@ struct CardSidebar: View {
     let onNew: () -> Void
     let onChooseFolder: () -> Void
 
+    @AppStorage("cardifyAppearance") private var appearance = AppearancePreference.system.rawValue
     @State private var query = ""
     @State private var snapshot = LibrarySnapshot(cards: [], outgoing: [:], incoming: [:], unreadable: 0)
     @State private var loading = false
@@ -28,6 +29,7 @@ struct CardSidebar: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Text("Notes").font(.headline)
+                    .foregroundColor(appearance == AppearancePreference.charcoal.rawValue ? AppearancePreference.charcoalText : nil)
                 Spacer(minLength: 0)
                 Button(action: onChooseFolder) { Image(systemName: "folder") }
                     .help("Choose Notes Folder").accessibilityLabel("Choose Notes Folder")
@@ -71,7 +73,7 @@ struct CardSidebar: View {
                                     }
                                     .padding(.horizontal, 9).padding(.vertical, 7)
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(isCurrent(card) ? Color.accentColor.opacity(0.16) : Color.clear,
+                                    .background(isCurrent(card) ? (AppearancePreference.accent(for: appearance) ?? Color.accentColor).opacity(0.22) : Color.clear,
                                                 in: RoundedRectangle(cornerRadius: 6))
                                     .contentShape(Rectangle())
                                 }

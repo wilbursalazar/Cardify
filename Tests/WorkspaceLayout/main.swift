@@ -24,6 +24,7 @@ struct Probe: NSViewRepresentable {
 final class Model: ObservableObject {
     @Published var arrangement: WorkspaceArrangement = .editorLeft
     @Published var showSidebar = true
+    @Published var appearance = AppearancePreference.system.rawValue
 }
 struct TestView: View {
     @ObservedObject var model: Model
@@ -38,6 +39,10 @@ struct TestView: View {
                 Probe(counter: preview)
             }
         }
+        .background(AppearancePreference.background(for: model.appearance))
+        .accentColor(AppearancePreference.accent(for: model.appearance))
+        .tint(AppearancePreference.tint(for: model.appearance))
+        .preferredColorScheme(AppearancePreference.colorScheme(for: model.appearance))
     }
 }
 
@@ -98,8 +103,17 @@ struct TestView: View {
             precondition(window.firstResponder === oldEditor && oldEditor.selectedRange() == NSRange(location: 1, length: 0) && manager.canUndo,
                          "showing or hiding the sidebar must preserve focus, selection, and undo")
         }
+        for appearance in ["charcoal", "light", "dark", "system", "charcoal"] {
+            model.appearance = appearance
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.1))
+            hosting.layoutSubtreeIfNeeded()
+            precondition(editor.view === oldEditor && preview.view === oldPreview && editor.creations == 1 && preview.creations == 1,
+                         "switching appearance must preserve both native views")
+            precondition(window.firstResponder === oldEditor && oldEditor.selectedRange() == NSRange(location: 1, length: 0) && manager.canUndo,
+                         "switching appearance must preserve focus, selection, and undo")
+        }
         manager.undo()
-        precondition(oldEditor.string == "A", "undo must remain functional after layout changes and sidebar toggles")
-        print("Workspace arrangements, narrow sizing, and native view identity passed")
+        precondition(oldEditor.string == "A", "undo must remain functional after layout, sidebar, and appearance changes")
+        print("Workspace arrangements, theme switching, narrow sizing, and native view identity passed")
     }
 }

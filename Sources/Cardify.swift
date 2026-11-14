@@ -321,7 +321,7 @@ struct ResearchEditor: View {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Append to Draft") { if onUse(clip.markdown, true) { dismiss() } }
-                Button("Replace Draft") { if onUse(clip.markdown, false) { dismiss() } }.buttonStyle(.borderedProminent)
+                Button("Replace Draft") { if onUse(clip.markdown, false) { dismiss() } }.buttonStyle(.borderedProminent).modifier(CharcoalPrimaryTint())
             }
         }.padding(22).frame(width: 560, height: 390)
     }
@@ -427,6 +427,7 @@ struct ContentView: View {
                     .help(showNotesSidebar ? "Hide notes sidebar" : "Show notes sidebar")
                     .accessibilityLabel(showNotesSidebar ? "Hide notes sidebar" : "Show notes sidebar")
                 Text("Cardify").font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(storedAppearance == AppearancePreference.charcoal.rawValue ? AppearancePreference.charcoalText : nil)
                 Button { navigateHistory(back: true) } label: { Image(systemName: "chevron.left") }
                     .help("Back to the previous card").keyboardShortcut("[", modifiers: .command).disabled(history.backTarget == nil)
                 Button { navigateHistory(back: false) } label: { Image(systemName: "chevron.right") }
@@ -463,7 +464,11 @@ struct ContentView: View {
                 }
                 Button("Save") { _ = saveMarkdown() }.fixedSize().keyboardShortcut("s")
                 Button("Print", action: printCards).fixedSize().keyboardShortcut("p")
-                Button("Save & Print") { if saveMarkdown() { printCards() } }.fixedSize().buttonStyle(.borderedProminent)
+                if storedAppearance == AppearancePreference.charcoal.rawValue {
+                    Button("Save & Print") { if saveMarkdown() { printCards() } }.fixedSize().buttonStyle(CharcoalPrimaryButtonStyle())
+                } else {
+                    Button("Save & Print") { if saveMarkdown() { printCards() } }.fixedSize().buttonStyle(.borderedProminent)
+                }
             }
             Divider()
             HStack(alignment: .top, spacing: 0) {
@@ -669,7 +674,9 @@ struct ContentView: View {
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
             Text(status).font(.caption).foregroundStyle(.secondary)
         }.padding(.horizontal, 20).padding(.vertical, 18).frame(minWidth: 850, minHeight: 600)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(AppearancePreference.background(for: storedAppearance))
+        .accentColor(AppearancePreference.accent(for: storedAppearance))
+        .tint(AppearancePreference.tint(for: storedAppearance))
         .preferredColorScheme(AppearancePreference.colorScheme(for: storedAppearance))
         .onAppear {
             if storedIDMode.isEmpty { storedIDMode = (autoTimestampID ? IDMode.timestamp : IDMode.titleOnly).rawValue }

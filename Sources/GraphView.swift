@@ -158,6 +158,9 @@ struct GraphView: View {
                 }.frame(minWidth: 420)
             }
         }.padding(20).frame(minWidth: 800, minHeight: 540)
+        .background(AppearancePreference.background(for: appearance))
+        .accentColor(AppearancePreference.accent(for: appearance))
+        .tint(AppearancePreference.tint(for: appearance))
         .preferredColorScheme(AppearancePreference.colorScheme(for: appearance))
         .onAppear { if !folder.isEmpty { load() } }
         .onChange(of: folder) { _ in load() }
