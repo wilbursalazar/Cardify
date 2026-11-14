@@ -186,4 +186,38 @@ set("No metadata 🗂"); view.selectAll(nil)
 precondition(view.selectedRange() == NSRange(location: 0, length: (view.string as NSString).length), "notes without metadata must retain normal Select All")
 undo.beginUndoGrouping(); view.deleteBackward(nil); undo.endUndoGrouping()
 precondition(view.string.isEmpty, "Select All and Delete must work without metadata")
+
+// The floating toolbar uses the same text view, source ranges and undo stack.
+let formatted = header + "Alpha 🗂\r\nBeta\r\n"
+set(formatted); view.setFrontmatterHidden(true)
+let firstRange = (view.string as NSString).range(of: "Alpha 🗂")
+view.setSelectedRange(firstRange)
+undo.beginUndoGrouping(); precondition(view.formatSelection(.bold, range: firstRange, expectedText: Data(view.string.utf8))); undo.endUndoGrouping()
+precondition(view.string == header + "**Alpha 🗂**\r\nBeta\r\n")
+undo.undo(); precondition(view.string == formatted, "formatting must undo in one step")
+undo.redo(); precondition(view.string == header + "**Alpha 🗂**\r\nBeta\r\n")
+
+set(formatted); view.setFrontmatterHidden(true)
+let allBody = NSRange(location: (header as NSString).length, length: (formatted as NSString).length - (header as NSString).length)
+view.setSelectedRange(allBody)
+undo.beginUndoGrouping(); precondition(view.formatSelection(.bullet, range: allBody, expectedText: Data(view.string.utf8))); undo.endUndoGrouping()
+precondition(view.string == header + "- Alpha 🗂\r\n- Beta\r\n", "list conversion must preserve CRLF and metadata")
+undo.undo(); precondition(view.string == formatted)
+
+set(formatted); view.setFrontmatterHidden(true); view.setSelectedRange(firstRange)
+undo.beginUndoGrouping(); precondition(view.formatSelection(.link, range: firstRange, expectedText: Data(view.string.utf8))); undo.endUndoGrouping()
+precondition(view.string == header + "[[Alpha 🗂]]\r\nBeta\r\n")
+undo.undo(); precondition(view.string == formatted)
+view.setSelectedRange(allBody)
+precondition(!view.formatSelection(.link, range: allBody, expectedText: Data(view.string.utf8)), "multiline text cannot form a wiki link")
+precondition(!view.formatSelection(.bold, range: allBody, expectedText: Data("stale".utf8)), "a stale toolbar action must not edit a new draft")
+precondition(view.string == formatted)
+
+let tasks = "  - [x] Complete\r\n  - Pending\r\n"
+set(tasks); let taskRange = NSRange(location: 0, length: (tasks as NSString).length); view.setSelectedRange(taskRange)
+precondition(!view.formatSelection(.heading, range: taskRange, expectedText: Data(view.string.utf8)) && view.string == tasks,
+             "heading formatting must not discard list markers or completed-task state")
+undo.beginUndoGrouping(); precondition(view.formatSelection(.task, range: taskRange, expectedText: Data(view.string.utf8))); undo.endUndoGrouping()
+precondition(view.string == "  - [x] Complete\r\n  - [ ] Pending\r\n", "task conversion must retain nested indentation and completed tasks")
+undo.undo(); precondition(view.string == tasks)
 print("Metadata conceal/reveal, CRLF, selection, undo, protection, and nested list continuation passed")

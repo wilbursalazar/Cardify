@@ -195,6 +195,98 @@ final class LinkCompletionTextView: NSTextView {
         setSelectedRange(NSRange(location: start, length: (string as NSString).length - start))
     }
 
+    enum SelectionFormat { case bold, italic, heading, bullet, task, link }
+
+    // One replacement keeps each toolbar action as an ordinary text edit, so
+    // AppKit's undo and UTF-16 selections continue to work as they do while typing.
+    @discardableResult func formatSelection(_ format: SelectionFormat, range: NSRange, expectedText: Data) -> Bool {
+        let source = string as NSString
+        guard !hasMarkedText(), range.location != NSNotFound, range.length > 0,
+              NSMaxRange(range) <= source.length, selectedRange() == range,
+              Data(string.utf8) == expectedText else { return false }
+        if let metadata = Self.frontmatterRange(in: string), NSIntersectionRange(metadata, range).length > 0 { return false }
+        let selected = source.substring(with: range)
+        var replaceRange = range
+        var replacement = ""
+        var nextSelection = range
+        switch format {
+        case .bold, .italic, .link:
+            let prefix = format == .bold ? "**" : format == .italic ? "*" : "[["
+            let suffix = format == .link ? "]]" : prefix
+            if format == .link && selected.contains(where: { "[]\r\n".contains($0) }) { return false }
+            let before = (prefix as NSString).length, after = (suffix as NSString).length
+            if range.location >= before, NSMaxRange(range) + after <= source.length,
+               source.substring(with: NSRange(location: range.location - before, length: before)) == prefix,
+               source.substring(with: NSRange(location: NSMaxRange(range), length: after)) == suffix {
+                replaceRange = NSRange(location: range.location - before, length: before + range.length + after)
+                replacement = selected
+                nextSelection = NSRange(location: replaceRange.location, length: range.length)
+            } else {
+                replacement = prefix + selected + suffix
+                nextSelection = NSRange(location: range.location + before, length: range.length)
+            }
+        case .heading, .bullet, .task:
+            let first = source.lineRange(for: NSRange(location: range.location, length: 0))
+            let last = source.lineRange(for: NSRange(location: NSMaxRange(range) - 1, length: 0))
+            replaceRange = NSRange(location: first.location, length: NSMaxRange(last) - first.location)
+            if let metadata = Self.frontmatterRange(in: string), NSIntersectionRange(metadata, replaceRange).length > 0 { return false }
+            let full = source.substring(with: replaceRange) as NSString
+            var lines: [(String, String)] = []
+            var offset = 0
+            while offset < full.length {
+                let line = full.lineRange(for: NSRange(location: offset, length: 0))
+                var end = NSMaxRange(line)
+                while end > line.location && [10, 13].contains(Int(full.character(at: end - 1))) { end -= 1 }
+                lines.append((full.substring(with: NSRange(location: line.location, length: end - line.location)),
+                              full.substring(with: NSRange(location: end, length: NSMaxRange(line) - end))))
+                offset = NSMaxRange(line)
+            }
+            let nonblank = lines.map(\.0).filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            guard !nonblank.isEmpty else { return false }
+            let listPattern = try! NSRegularExpression(pattern: #"^([ \t]*)([-+*])([ \t]+)(?:\[([ xX])\]([ \t]+|$))?"#)
+            func parts(_ line: String) -> (indent: String, bullet: String?, task: Bool, body: String) {
+                let value = line as NSString
+                if let match = listPattern.firstMatch(in: line, range: NSRange(location: 0, length: value.length)) {
+                    return (value.substring(with: match.range(at: 1)), value.substring(with: match.range(at: 2)) + value.substring(with: match.range(at: 3)),
+                            match.range(at: 4).location != NSNotFound, value.substring(from: NSMaxRange(match.range)))
+                }
+                let indent = String(line.prefix { $0 == " " || $0 == "\t" })
+                return (indent, nil, false, String(line.dropFirst(indent.count)))
+            }
+            // Replacing a list marker with a heading would discard task state.
+            // Leave list lines untouched until their list formatting is removed.
+            if format == .heading && nonblank.contains(where: { parts($0).bullet != nil }) { return false }
+            let remove: Bool
+            if format == .heading { remove = nonblank.allSatisfy { parts($0).body.hasPrefix("# ") } }
+            else if format == .bullet { remove = nonblank.allSatisfy { parts($0).bullet != nil && !parts($0).task } }
+            else { remove = nonblank.allSatisfy { parts($0).task } }
+            replacement = lines.map { line, ending in
+                guard !line.trimmingCharacters(in: .whitespaces).isEmpty else { return line + ending }
+                let item = parts(line)
+                if format == .heading {
+                    if remove { return item.indent + String(item.body.dropFirst(2)) + ending }
+                    return item.indent + (item.body.hasPrefix("# ") ? "" : "# ") + item.body + ending
+                }
+                if format == .bullet {
+                    if remove { return item.indent + item.body + ending }
+                    return item.indent + (item.bullet ?? "- ") + item.body + ending
+                }
+                if remove { return item.indent + (item.bullet ?? "- ") + item.body + ending }
+                if item.task { return line + ending }
+                return item.indent + (item.bullet ?? "- ") + "[ ] " + item.body + ending
+            }.joined()
+            nextSelection = NSRange(location: replaceRange.location, length: (replacement as NSString).length)
+        }
+        let original = Data(string.utf8)
+        breakUndoCoalescing()
+        insertText(replacement, replacementRange: replaceRange)
+        guard Data(string.utf8) != original else { return false }
+        setSelectedRange(nextSelection)
+        breakUndoCoalescing()
+        window?.makeFirstResponder(self)
+        return true
+    }
+
     override func shouldChangeText(in affectedCharRange: NSRange, replacementString: String?) -> Bool {
         if let hidden = hiddenFrontmatterRange, affectedCharRange.location < NSMaxRange(hidden) {
             if undoManager?.isUndoing == true || undoManager?.isRedoing == true {
@@ -301,6 +393,7 @@ final class LinkCompletionTextView: NSTextView {
     }
 
     var handleCompletionKey: ((NSEvent) -> Bool)?
+    var handleToolbarKey: ((NSEvent) -> Bool)?
     var followLink: ((CardLinkTarget) -> Void)?
     override func mouseDown(with event: NSEvent) {
         if event.modifierFlags.contains(.command), let manager = layoutManager, let container = textContainer, manager.numberOfGlyphs > 0 {
@@ -320,6 +413,7 @@ final class LinkCompletionTextView: NSTextView {
     }
     override func keyDown(with event: NSEvent) {
         if handleCompletionKey?(event) == true { return }
+        if handleToolbarKey?(event) == true { return }
         super.keyDown(with: event)
     }
 }
@@ -426,11 +520,101 @@ final class LinkCompletionState: ObservableObject {
     }
 }
 
+// Position is measured in the scroll view; no text or selection is changed
+// merely by showing the toolbar.
+private final class SelectionToolbarState: ObservableObject {
+    @Published private(set) var anchor: CGPoint?
+    @Published private(set) var canLink = false
+    @Published private(set) var canHeading = false
+    private var range = NSRange(location: NSNotFound, length: 0)
+    private var expectedText = Data()
+    private var dismissedRange: NSRange?
+    private var dismissedText = Data()
+    weak var view: LinkCompletionTextView?
+
+    func clear(resetDismissal: Bool = true) {
+        anchor = nil; range = NSRange(location: NSNotFound, length: 0); view = nil
+        if resetDismissal { dismissedRange = nil }
+    }
+
+    func dismiss() {
+        dismissedRange = range; dismissedText = expectedText
+        clear(resetDismissal: false)
+    }
+
+    func refresh(_ view: LinkCompletionTextView, in scroll: NSScrollView) {
+        let selected = view.selectedRange()
+        let source = view.string as NSString
+        guard selected.location != NSNotFound, selected.length > 0, NSMaxRange(selected) <= source.length,
+              !view.hasMarkedText(), let window = view.window, window.firstResponder === view else { clear(); return }
+        let bytes = Data(view.string.utf8)
+        if dismissedRange == selected && dismissedText == bytes { clear(resetDismissal: false); return }
+        dismissedRange = nil
+        if let metadata = LinkCompletionTextView.frontmatterRange(in: view.string), NSIntersectionRange(metadata, selected).length > 0 { clear(); return }
+        let screenRect = view.firstRect(forCharacterRange: NSRange(location: selected.location, length: min(1, selected.length)), actualRange: nil)
+        let local = scroll.convert(window.convertFromScreen(screenRect), from: nil)
+        guard local.intersects(scroll.bounds) else { clear(); return }
+        let top = scroll.isFlipped ? local.minY : scroll.bounds.height - local.maxY
+        self.view = view; range = selected; expectedText = bytes
+        canLink = !source.substring(with: selected).contains(where: { "[]\r\n".contains($0) })
+        let first = source.lineRange(for: NSRange(location: selected.location, length: 0))
+        let last = source.lineRange(for: NSRange(location: NSMaxRange(selected) - 1, length: 0))
+        let selectedLines = source.substring(with: NSRange(location: first.location, length: NSMaxRange(last) - first.location))
+        let listPattern = try! NSRegularExpression(pattern: #"^[ \t]*[-+*][ \t]+"#, options: [.anchorsMatchLines])
+        canHeading = listPattern.firstMatch(in: selectedLines, range: NSRange(location: 0, length: (selectedLines as NSString).length)) == nil
+        anchor = CGPoint(x: local.midX, y: top)
+    }
+
+    func apply(_ format: LinkCompletionTextView.SelectionFormat) {
+        guard let view, anchor != nil else { return }
+        guard view.formatSelection(format, range: range, expectedText: expectedText) else { clear(); return }
+        if let scroll = view.enclosingScrollView { refresh(view, in: scroll) } else { clear() }
+    }
+}
+
+// A mouse click on a formatting button must not steal the text selection
+// between mouse-down and mouse-up.
+private final class SelectionToolbarNSButton: NSButton {
+    override var acceptsFirstResponder: Bool { false }
+}
+
+private struct SelectionToolbarButton: NSViewRepresentable {
+    let title: String
+    var symbol: String? = nil
+    var font: NSFont = .systemFont(ofSize: 12)
+    let help: String
+    var enabled = true
+    let action: () -> Void
+    func makeCoordinator() -> Coordinator { Coordinator(action) }
+    func makeNSView(context: Context) -> SelectionToolbarNSButton {
+        let button = SelectionToolbarNSButton()
+        button.isBordered = false
+        button.target = context.coordinator
+        button.action = #selector(Coordinator.buttonPressed)
+        return button
+    }
+    func updateNSView(_ button: SelectionToolbarNSButton, context: Context) {
+        context.coordinator.action = action
+        button.font = font; button.toolTip = help; button.isEnabled = enabled
+        if let symbol {
+            button.title = ""; button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: help)
+            button.imagePosition = .imageOnly
+        } else { button.image = nil; button.title = title }
+        button.setAccessibilityLabel(help)
+    }
+    final class Coordinator: NSObject {
+        var action: () -> Void
+        init(_ action: @escaping () -> Void) { self.action = action }
+        @objc func buttonPressed() { action() }
+    }
+}
+
 struct MarkdownEditor: View {
     @Binding var text: String
     let editor: EditorState
     let onFollowLink: (CardLinkTarget) -> Void
     @StateObject private var completion = LinkCompletionState()
+    @StateObject private var selectionToolbar = SelectionToolbarState()
     @AppStorage("hideEditorFrontmatter") private var hideFrontmatter = true
     @State private var hiddenCustomHeader: String?
     var body: some View {
@@ -453,7 +637,16 @@ struct MarkdownEditor: View {
                 }.padding(.horizontal, 12).padding(.vertical, 6)
                 Divider()
             }
-            MarkdownTextView(text: $text, editor: editor, completion: completion, hideFrontmatter: isHidden, onFollowLink: onFollowLink)
+            MarkdownTextView(text: $text, editor: editor, completion: completion, selectionToolbar: selectionToolbar, hideFrontmatter: isHidden, onFollowLink: onFollowLink)
+                .overlay(alignment: .topLeading) {
+                    GeometryReader { geometry in
+                        if let anchor = selectionToolbar.anchor {
+                            selectionToolbarView
+                                .position(x: min(max(anchor.x, 108), max(108, geometry.size.width - 108)),
+                                          y: anchor.y >= 38 ? anchor.y - 19 : min(geometry.size.height - 18, anchor.y + 38))
+                        }
+                    }
+                }
             if completion.visible {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
@@ -482,18 +675,37 @@ struct MarkdownEditor: View {
             }
         }
     }
+
+    private var selectionToolbarView: some View {
+        HStack(spacing: 0) {
+            SelectionToolbarButton(title: "B", font: .boldSystemFont(ofSize: 12), help: "Bold") { selectionToolbar.apply(.bold) }.frame(width: 36, height: 28)
+            SelectionToolbarButton(title: "I", font: NSFontManager.shared.convert(.systemFont(ofSize: 12), toHaveTrait: .italicFontMask), help: "Italic") { selectionToolbar.apply(.italic) }.frame(width: 36, height: 28)
+            SelectionToolbarButton(title: "H1", font: .boldSystemFont(ofSize: 11), help: selectionToolbar.canHeading ? "Heading" : "Remove list formatting first", enabled: selectionToolbar.canHeading) { selectionToolbar.apply(.heading) }.frame(width: 36, height: 28)
+            SelectionToolbarButton(title: "", symbol: "list.bullet", help: "Bullet list") { selectionToolbar.apply(.bullet) }.frame(width: 36, height: 28)
+            SelectionToolbarButton(title: "", symbol: "checklist", help: "Task list") { selectionToolbar.apply(.task) }.frame(width: 36, height: 28)
+            SelectionToolbarButton(title: "", symbol: "link", help: "Wrap selection in a note link", enabled: selectionToolbar.canLink) { selectionToolbar.apply(.link) }.frame(width: 36, height: 28)
+        }
+        .frame(width: 216, height: 32)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 7))
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.secondary.opacity(0.25)))
+        .shadow(color: .black.opacity(0.18), radius: 5, y: 2)
+    }
 }
 
 private struct MarkdownTextView: NSViewRepresentable {
     @Binding var text: String
     let editor: EditorState
     @ObservedObject var completion: LinkCompletionState
+    @ObservedObject var selectionToolbar: SelectionToolbarState
     let hideFrontmatter: Bool
     let onFollowLink: (CardLinkTarget) -> Void
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSScrollView()
         scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.borderType = .noBorder
+        scroll.contentView.postsBoundsChangedNotifications = true
+        context.coordinator.scroll = scroll
+        NotificationCenter.default.addObserver(context.coordinator, selector: #selector(Coordinator.scrolled), name: NSView.boundsDidChangeNotification, object: scroll.contentView)
         let contentSize = scroll.contentSize
         let view = LinkCompletionTextView(frame: NSRect(origin: .zero, size: contentSize))
         view.minSize = NSSize(width: 0, height: contentSize.height)
@@ -505,6 +717,10 @@ private struct MarkdownTextView: NSViewRepresentable {
         view.isRichText = false; view.isAutomaticQuoteSubstitutionEnabled = false; view.isAutomaticDashSubstitutionEnabled = false; view.isAutomaticTextReplacementEnabled = false
         view.allowsUndo = true; view.delegate = context.coordinator; view.string = text; view.textContainerInset = NSSize(width: 16, height: 16)
         view.handleCompletionKey = { [weak coordinator = context.coordinator] event in coordinator?.parent.completion.handleKey(event) ?? false }
+        view.handleToolbarKey = { [weak coordinator = context.coordinator] event in
+            guard event.keyCode == 53, let selection = coordinator?.parent.selectionToolbar, selection.anchor != nil else { return false }
+            selection.dismiss(); return true
+        }
         view.followLink = { [weak coordinator = context.coordinator] target in coordinator?.parent.onFollowLink(target) }
         scroll.documentView = view; editor.view = view; completion.view = view
         view.setFrontmatterHidden(hideFrontmatter)
@@ -514,7 +730,7 @@ private struct MarkdownTextView: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         context.coordinator.parent = self
         guard let view = scroll.documentView as? LinkCompletionTextView else { return }
-        if view.string != text { view.replaceEditorText(text); completion.close() }
+        if view.string != text { selectionToolbar.clear(); view.replaceEditorText(text); completion.close() }
         view.setFrontmatterHidden(hideFrontmatter)
         editor.view = view; completion.view = view
         editor.applyPendingSelection()
@@ -524,22 +740,38 @@ private struct MarkdownTextView: NSViewRepresentable {
         view.discardEditorUndo()
         view.delegate = nil
         view.handleCompletionKey = nil
+        view.handleToolbarKey = nil
         view.followLink = nil
+        NotificationCenter.default.removeObserver(coordinator)
+        coordinator.parent.selectionToolbar.clear()
         if coordinator.parent.editor.view === view { coordinator.parent.editor.view = nil }
         if coordinator.parent.completion.view === view { coordinator.parent.completion.view = nil }
     }
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: MarkdownTextView
+        weak var scroll: NSScrollView?
         init(_ parent: MarkdownTextView) { self.parent = parent }
+        @objc func scrolled() {
+            guard let scroll, let view = scroll.documentView as? LinkCompletionTextView else { return }
+            parent.selectionToolbar.refresh(view, in: scroll)
+        }
+        private func updateToolbar(_ view: NSTextView) {
+            guard let view = view as? LinkCompletionTextView, let scroll else { parent.selectionToolbar.clear(); return }
+            parent.selectionToolbar.refresh(view, in: scroll)
+        }
         func textDidChange(_ notification: Notification) {
             guard let view = notification.object as? NSTextView else { return }
             parent.editor.editorTextDidChange(view)
             parent.text = view.string
-            DispatchQueue.main.async { [weak self, weak view] in if let view { self?.parent.completion.refresh(in: view) } }
+            DispatchQueue.main.async { [weak self, weak view] in if let view { self?.parent.completion.refresh(in: view); self?.updateToolbar(view) } }
         }
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let view = notification.object as? NSTextView else { return }
-            DispatchQueue.main.async { [weak self, weak view] in if let view { self?.parent.completion.refresh(in: view) } }
+            DispatchQueue.main.async { [weak self, weak view] in if let view { self?.parent.completion.refresh(in: view); self?.updateToolbar(view) } }
+        }
+        func textDidEndEditing(_ notification: Notification) {
+            guard let view = notification.object as? NSTextView else { return }
+            DispatchQueue.main.async { [weak self, weak view] in if let view { self?.updateToolbar(view) } }
         }
     }
 }
