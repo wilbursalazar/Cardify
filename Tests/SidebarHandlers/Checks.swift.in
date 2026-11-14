@@ -13,6 +13,10 @@ final class NSAlert {
     func addButton(withTitle: String) {}
     @discardableResult func runModal() -> Int { Self.run?(self) ?? 1 }
 }
+struct LinkedCardTab {
+    let id = UUID()
+    var url: URL
+}
 
 final class Harness {
     var notesFolder: String, saveFolder = "", status = "", cardMode = "markdown"
@@ -20,6 +24,7 @@ final class Harness {
     var text = "", saved: String?, flushCount = 0, scheduleCount = 0, clearCount = 0
     var autosaveTask: Task<Void, Never>?, history = CardHistory()
     var linkRequestID = UUID(), sidebarRefreshToken = UUID()
+    var linkedTabs: [LinkedCardTab] = []
     var trashDirectory: URL, trashShouldFail = false
     init(root: URL) { notesFolder = root.path; trashDirectory = root.appendingPathComponent("trash", isDirectory: true) }
     var fileURL: URL? {
@@ -43,6 +48,7 @@ final class Harness {
         clearCount += 1; fileURLs.removeValue(forKey: mode); diskSnapshots.removeValue(forKey: mode)
         text = ""; saved = nil
     }
+    func closeLinkedTab(_ id: UUID) { linkedTabs.removeAll(where: { $0.id == id }) }
     func fakeTrash(_ url: URL) throws {
         if trashShouldFail { throw NSError(domain: "test", code: 1) }
         try FileManager.default.createDirectory(at: trashDirectory, withIntermediateDirectories: true)
@@ -74,17 +80,21 @@ final class Harness {
 
         let (renaming, original) = try fixture("original.md", draft: "# Edited\n")
         let renamed = root.appendingPathComponent("renamed.md")
+        renaming.linkedTabs = [LinkedCardTab(url: original)]
         respond(1, rename: "renamed.md"); renaming.renameSidebarNote(original)
         precondition(renaming.flushCount == 1 && renaming.fileURL == renamed && data(renamed) == Data("# Edited\n".utf8))
+        precondition(renaming.linkedTabs.first?.url == renamed)
         precondition(data(original) == nil && renaming.diskSnapshots["markdown"] == Data("# Edited\n".utf8) && renaming.history.current == renamed)
 
         let folder = root.appendingPathComponent("Moved", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
         let (moving, source) = try fixture("move.md", draft: "# Saved before move\n")
+        moving.linkedTabs = [LinkedCardTab(url: source)]
         moving.moveSidebarNote(source, to: folder)
         let moved = folder.appendingPathComponent("move.md")
         precondition(moving.fileURL == moved && moving.history.current == moved && moving.flushCount == 1)
         precondition(data(source) == nil && data(moved) == Data("# Saved before move\n".utf8))
+        precondition(moving.linkedTabs.first?.url == moved)
         let (occupiedMove, occupiedSource) = try fixture("occupied-move.md")
         let occupiedTarget = folder.appendingPathComponent(occupiedSource.lastPathComponent)
         try Data("another note".utf8).write(to: occupiedTarget)
@@ -117,8 +127,10 @@ final class Harness {
         precondition(modeRace.fileURLs["markdown"] == modeFile && data(root.appendingPathComponent("mode-renamed.md")) == nil)
 
         let (trash, trashFile) = try fixture("trash-me.md", draft: "# Saved before trash\n")
+        trash.linkedTabs = [LinkedCardTab(url: trashFile)]
         respond(1); trash.trashSidebarNote(trashFile)
         precondition(trash.fileURL == nil && trash.clearCount == 1 && data(trashFile) == nil)
+        precondition(trash.linkedTabs.isEmpty)
         precondition(data(trash.trashDirectory.appendingPathComponent("trash-me.md")) == Data("# Saved before trash\n".utf8))
 
         let (trashCancel, trashCancelFile) = try fixture("trash-cancel.md")

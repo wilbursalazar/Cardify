@@ -377,7 +377,7 @@ private struct EditorHeaderHeightKey: PreferenceKey {
 
 struct LinkedCardTab: Identifiable {
     let id = UUID()
-    let url: URL
+    var url: URL
     let content: String
     var title: String {
         let heading = NoteEditing.title(in: content).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1584,6 +1584,7 @@ struct ContentView: View {
             if mutation.activeMode != nil { autosaveTask?.cancel() }
             let renamed = try SidebarFileActions.rename(mutation.snapshot, filename: field.stringValue, openURLs: otherURLs)
             if mutation.activeMode != nil { fileURL = renamed; linkRequestID = UUID() }
+            for index in linkedTabs.indices where linkedTabs[index].url.standardizedFileURL == url.standardizedFileURL { linkedTabs[index].url = renamed }
             history.rename(url, to: renamed); sidebarRefreshToken = UUID(); status = "Renamed to \(renamed.lastPathComponent)."
         } catch { scheduleAutosave(); sidebarError(error) }
     }
@@ -1595,6 +1596,7 @@ struct ContentView: View {
             if mutation.activeMode != nil { autosaveTask?.cancel() }
             let moved = try SidebarFileActions.move(mutation.snapshot, to: folder, openURLs: otherURLs)
             if mutation.activeMode != nil { fileURL = moved; linkRequestID = UUID() }
+            for index in linkedTabs.indices where linkedTabs[index].url.standardizedFileURL == url.standardizedFileURL { linkedTabs[index].url = moved }
             history.rename(url, to: moved)
             sidebarRefreshToken = UUID()
             status = moved == url ? "This note is already in that folder." : "Moved \(url.lastPathComponent) to \(folder.lastPathComponent). Links using its old folder path may need updating."
@@ -1612,6 +1614,7 @@ struct ContentView: View {
             if mutation.activeMode != nil { autosaveTask?.cancel() }
             try FileManager.default.trashItem(at: mutation.snapshot.url, resultingItemURL: nil)
             if let mode = mutation.activeMode { clearDiscardedDraft(mode); history.detach(); linkRequestID = UUID() }
+            for tab in linkedTabs where tab.url.standardizedFileURL == url.standardizedFileURL { closeLinkedTab(tab.id) }
             history.remove(url); sidebarRefreshToken = UUID(); status = "Moved \(url.lastPathComponent) to Trash."
         } catch { scheduleAutosave(); sidebarError(error) }
     }
