@@ -16,6 +16,7 @@ final class NSAlert {
 final class Harness {
     var text = "", status = "", cardMode = "markdown", storedIDMode = IDMode.timestamp.rawValue
     var showDebate = false, autoTimestampID = false
+    var timestampDateStyle = TimestampDateStyle.sortable.rawValue, timestampIncludeTime = true
     var notesFolder = "", saveFolder = ""
     var fileURL: URL?
     var idMode: IDMode { IDMode(rawValue: storedIDMode) ?? (autoTimestampID ? .timestamp : .titleOnly) }

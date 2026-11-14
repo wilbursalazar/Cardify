@@ -5,6 +5,8 @@ import AppKit
 // the editor's existing unsaved-draft guard; the sidebar never writes files.
 struct CardSidebar: View {
     let currentURL: URL?
+    let draftTitle: String
+    let draftID: String?
     let notesFolder: String
     let saveFolder: String
     let refreshToken: UUID
@@ -29,7 +31,7 @@ struct CardSidebar: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Text("Notes").font(.headline)
-                    .foregroundColor(appearance == AppearancePreference.charcoal.rawValue ? AppearancePreference.charcoalText : nil)
+                    .foregroundColor(AppearancePreference.foreground(for: appearance))
                 Spacer(minLength: 0)
                 Button(action: onChooseFolder) { Image(systemName: "folder") }
                     .help("Choose Notes Folder").accessibilityLabel("Choose Notes Folder")
@@ -39,6 +41,19 @@ struct CardSidebar: View {
             .buttonStyle(.borderless)
             Button("New Card", action: onNew)
                 .frame(maxWidth: .infinity, alignment: .leading)
+            if currentURL == nil {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(draftTitle).font(.system(size: 13, weight: .medium)).lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Text(draftID.map { "Draft · \($0)" } ?? "Draft").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                .padding(.horizontal, 9).padding(.vertical, 7)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background((AppearancePreference.accent(for: appearance) ?? Color.accentColor).opacity(0.22), in: RoundedRectangle(cornerRadius: 6))
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Current unsaved draft, \(draftTitle)")
+                .accessibilityAddTraits(.isSelected)
+            }
             if folder.isEmpty {
                 Text("Choose a notes folder to see your cards here.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)

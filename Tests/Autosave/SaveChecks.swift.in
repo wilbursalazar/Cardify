@@ -1,0 +1,104 @@
+import Foundation
+import UniformTypeIdentifiers
+
+enum ModalResult { case OK, cancel }
+final class NSSavePanel {
+    static var nextURL: URL?
+    static var shown = 0
+    var directoryURL: URL?
+    var allowedContentTypes: [UTType] = []
+    var nameFieldStringValue = ""
+    var url: URL? { Self.nextURL }
+    func runModal() -> ModalResult { Self.shown += 1; return Self.nextURL == nil ? .cancel : .OK }
+}
+final class NSAlert {
+    static var shown = 0
+    var messageText = "", informativeText = ""
+    @discardableResult func runModal() -> Int { Self.shown += 1; return 1 }
+}
+enum IDMode { case titleOnly, timestamp }
+struct HabitTracker { var markdown = "" }
+struct TodoList { var markdown = "", title = "" }
+struct OutlineDocument { var markdown = "", title = "" }
+enum CardMetadata {
+    static func parse(_ value: String) -> (id: String?, body: String) {
+        let id = value.components(separatedBy: "\n").first(where: { $0.hasPrefix("card_id: ") }).map { String($0.dropFirst(9)).trimmingCharacters(in: .whitespacesAndNewlines) }
+        return (id, value)
+    }
+    static func hasNonemptyID(_ value: String) -> Bool { false }
+}
+enum DebateRole { case aff, def }
+struct DebateInfo { var role: DebateRole?; var primary: String? }
+enum DebateNotes { static func parse(_ value: String) -> DebateInfo { DebateInfo(role: nil, primary: nil) } }
+enum NoteEditing {
+    static func filename(id: String?, title: String) -> String { "test.md" }
+    static func title(in text: String) -> String { "Test" }
+}
+enum CardIDIndex {
+    static var onScan: (() -> Void)?
+    static var duplicate: (String, URL)?
+    static func ids(in root: URL, excluding target: URL?) throws -> [(String, URL)] {
+        let callback = onScan; onScan = nil; callback?()
+        return duplicate.map { [$0] } ?? []
+    }
+}
+struct History { mutating func saveCurrent(_ url: URL) {} }
+final class Harness {
+    var cardMode = "markdown", text = "", tracker = HabitTracker(), todo = TodoList(), outline = OutlineDocument()
+    var idMode = IDMode.titleOnly, fileURL: URL?, branchSaveFolder: URL?, saveFolder = "", notesFolder = "", status = ""
+    var diskSnapshots: [String: Data] = [:], newDraftBaselines: [String: Data] = [:]
+    var savedMarkdownSnapshot: String?, savedHabitSnapshot: String?, savedTodoSnapshot: String?, savedOutlineSnapshot: String?
+    var autosaveTask: Task<Void, Never>?, history = History(), suppressHistorySave = false, sidebarRefreshToken = UUID()
+    func ensureID() -> Bool { true }
+    func currentDraftSnapshot() -> String? { cardMode == "habits" ? savedHabitSnapshot : cardMode == "todos" ? savedTodoSnapshot : cardMode == "outline" ? savedOutlineSnapshot : savedMarkdownSnapshot }
+    // SAVE_METHODS
+}
+@main struct Checks {
+    static func main() throws {
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("cardify-autosave-tests-" + UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let existing = temporary.appendingPathComponent("existing.md")
+        let old = "# Old\n"; try Data(old.utf8).write(to: existing)
+        let update = Harness(); update.fileURL = existing; update.diskSnapshots["markdown"] = Data(old.utf8); update.savedMarkdownSnapshot = old; update.text = "# New\n"
+        NSSavePanel.shown = 0; NSAlert.shown = 0
+        precondition(update.saveMarkdown() && NSSavePanel.shown == 0 && NSAlert.shown == 0)
+        let savedData = try Data(contentsOf: existing)
+        precondition(savedData == Data("# New\n".utf8))
+        let composed = "# Caf\u{00e9}\n", decomposed = "# Cafe\u{0301}\n"
+        precondition(composed == decomposed && Data(composed.utf8) != Data(decomposed.utf8))
+        try Data(decomposed.utf8).write(to: existing)
+        let conflict = Harness(); conflict.fileURL = existing; conflict.diskSnapshots["markdown"] = Data(composed.utf8); conflict.savedMarkdownSnapshot = composed; conflict.text = "# My edit\n"
+        NSAlert.shown = 0; precondition(!conflict.saveMarkdown(automatic: true) && NSAlert.shown == 0)
+        let conflictData = try Data(contentsOf: existing)
+        precondition(conflict.status.contains("Autosave paused") && conflictData == Data(decomposed.utf8))
+        let bom = Data([0xef, 0xbb, 0xbf, 0x23, 0x20, 0x41, 0x0d, 0x0a])
+        let decodedBOM = try conflict.decodeMarkdown(bom)
+        precondition(Data(decodedBOM.utf8) == bom)
+        precondition((try? conflict.decodeMarkdown(Data([0xff]))) == nil)
+        let missing = temporary.appendingPathComponent("missing.md")
+        let gone = Harness(); gone.fileURL = missing; gone.diskSnapshots["markdown"] = Data(old.utf8); gone.savedMarkdownSnapshot = old; gone.text = "# Edit"
+        precondition(!gone.saveMarkdown(automatic: true) && !FileManager.default.fileExists(atPath: missing.path))
+        let created = temporary.appendingPathComponent("created.md")
+        let draft = Harness(); draft.text = "# Draft\n"; NSSavePanel.nextURL = created; NSSavePanel.shown = 0
+        precondition(draft.saveMarkdown() && NSSavePanel.shown == 1)
+        let createdData = try Data(contentsOf: created)
+        precondition(createdData == Data(draft.text.utf8))
+        let race = temporary.appendingPathComponent("race.md")
+        let raceOld = "card_id: 7\n# Old\n", raceExternal = "# External update\n"
+        try Data(raceOld.utf8).write(to: race)
+        let racing = Harness(); racing.fileURL = race; racing.notesFolder = temporary.path; racing.text = "card_id: 7\n# My edit\n"; racing.savedMarkdownSnapshot = raceOld; racing.diskSnapshots["markdown"] = Data(raceOld.utf8)
+        CardIDIndex.onScan = { try! Data(raceExternal.utf8).write(to: race) }
+        precondition(!racing.saveMarkdown(automatic: true))
+        let racedData = try Data(contentsOf: race)
+        precondition(racedData == Data(raceExternal.utf8))
+        let habitFile = temporary.appendingPathComponent("habit.md")
+        let habitDisk = "# Week\r\n\r\n| Habit | Mon |\r\n", habitOriginal = "# Week\n\n| Habit | Mon |\n", habitEdit = "# Week\n\n| Habit | Tue |\n"
+        try Data(habitDisk.utf8).write(to: habitFile)
+        let habit = Harness(); habit.cardMode = "habits"; habit.fileURL = habitFile; habit.savedHabitSnapshot = habitOriginal; habit.diskSnapshots["habits"] = Data(habitDisk.utf8); habit.tracker.markdown = habitEdit
+        precondition(habit.saveMarkdown(automatic: true))
+        let savedHabitData = try Data(contentsOf: habitFile)
+        precondition(savedHabitData == Data(habitEdit.replacingOccurrences(of: "\n", with: "\r\n").utf8))
+        print("Direct saves, conflict guards, BOM, CRLF, missing files, and new destinations passed")
+    }
+}

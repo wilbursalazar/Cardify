@@ -20,9 +20,9 @@ enum CardIDs {
         }
     }
 
-    static func newID(mode: IDMode, existing: Set<String>, at date: Date = Date(), timeZone: TimeZone = .current) -> String? {
+    static func newID(mode: IDMode, existing: Set<String>, at date: Date = Date(), timeZone: TimeZone = .current, timestampStyle: TimestampDateStyle = .sortable, timestampIncludeTime: Bool = true) -> String? {
         switch mode {
-        case .timestamp: return BranchIDs.timestamp(at: date, timeZone: timeZone, existing: existing)
+        case .timestamp: return BranchIDs.timestamp(at: date, timeZone: timeZone, existing: existing, style: timestampStyle, includeTime: timestampIncludeTime)
         case .titleOnly: return nil
         case .luhmann:
             // Avoid assigning a missing root when a descendant, e.g. 1a or 1/2, already exists.

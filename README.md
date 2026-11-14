@@ -16,25 +16,25 @@ Cardify requires **macOS 13 or later** and includes code for both Apple silicon 
 
 ## Your first card
 
-1. Open Cardify. Use the card-type menu above the writing area to choose **Research**, **Habit**, **To Do**, or **Debate**.
+1. Open Cardify. Use the card-type menu above the writing area to choose **Research**, **Habit**, **To Do**, **Outline**, or **Debate**.
 2. Optional: choose **File → Choose Save Folder…** to set the folder offered when you save a new note or export a PDF. To work with an Obsidian vault, you can choose a folder inside your vault.
 3. Optional: choose **File → Choose Notes Folder…** and select your vault or notes folder. For Obsidian, select the vault root so inserted paths are relative to the vault. Cardify searches this folder for notes to link and for existing card IDs. It can be the same folder as your save folder.
 4. Enter a title and write, or choose **Templates → Idea Card**, **Reading Card**, or **Index Card**. Templates insert editable Markdown at the cursor; they do not replace your draft.
 5. Check the preview. Use the controls beside it to change orientation or text size. To add a dot grid, open **Settings → Appearance**. Then choose **Save**, **Print**, or **Save & Print**.
 
-Before New Card, opening a different card, or replacing a research clip overwrites an unsaved draft, Cardify offers **Save**, **Discard**, or **Cancel**. **Save** opens a dialog to save a `.md` file. **Print** opens the printer dialog. **Save & Print** saves first and starts printing only if the save succeeds. **File → Export PDF…** saves a PDF for review or printing later. Longer notes can continue onto more than one card.
+When you leave a new, edited card, Cardify offers **Save**, **Discard**, or **Cancel**. **Save** opens a dialog to save a `.md` file. After a file is saved or opened, Cardify saves edits automatically; ordinary **Save** updates that same file. If the file changes outside Cardify, autosave stops and your draft stays open so you can resolve the conflict. **Print** opens the printer dialog. **Save & Print** saves first and starts printing only if the save succeeds. **File → Export PDF…** saves a PDF for review or printing later. Longer notes can continue onto more than one card.
 
 > Save folder and notes folder have different jobs: the first is a default destination; the second is the collection Cardify searches. If no notes folder is selected, note suggestions fall back to the save folder. Saving still lets you choose a destination.
 
 ## Navigate between cards
 
-The notes sidebar shows Markdown cards from your notes folder, or your save folder if no notes folder is set. Search or select a card to open it; use the folder and refresh controls at the top to change or rescan the folder. **New Card** starts a draft in the selected card type. Use the sidebar button in the top ribbon, or **Layout → Show notes sidebar**, to hide or show it.
+The notes sidebar shows Markdown cards from your notes folder, or your save folder if no notes folder is set. A new card also appears there as an unsaved draft. Search or select a card to open it; use the folder and refresh controls at the top to change or rescan the folder. **New Card** starts a draft in the selected card type. Use the sidebar button in the top ribbon, or **Layout → Show notes sidebar**, to hide or show it.
 
 Use the **back** and **forward** arrows in the top ribbon to revisit cards opened during the current session. The buttons follow browsing history, not the card-number sequence. You can also use **⌘[** and **⌘]**. Opening a different card after going back starts a new path through your history.
 
 Choose **Layout** in the top ribbon to put writing on the left, preview on the left, or writing above preview. Drag the divider to resize the areas; select the divider and use arrow keys to adjust it with the keyboard. Cardify remembers the arrangement. The formatting controls use one row when it fits and two rows when the writing area is narrower. If the controls above the editor need more space, scroll that area to see them all.
 
-Cardify asks about unsaved changes before replacing a draft. If you save a new draft before going back, you can return to the saved card with Forward. A discarded unsaved draft cannot be recovered through history. Research, Habit, and To Do each retain their own current draft and file association while you switch between them.
+Cardify asks before leaving a changed, unsaved draft. If you save it before going back, you can return to the saved card with Forward. A discarded unsaved draft cannot be recovered through history.
 
 ## Find and connect cards
 
@@ -62,7 +62,7 @@ Use the local depth control to show one or two steps, or choose **Whole vault**.
 
 ## Set your starting workflow
 
-Choose **File → Settings…** for **System, Light, Dark, or Charcoal** appearance and to select defaults for new Research cards. **As configured** keeps your current behavior. **Luhmann-inspired** starts an Idea Card with a Luhmann-style ID; **Eco-inspired** starts a Reading Card with a title-only filename; **Obsidian-style** starts a blank Markdown card with a title-only filename. Choose a different ID style or template whenever you want.
+Choose **File → Settings…** for **System, Light, Dark, Charcoal, or Slate** appearance and to select defaults for new Research cards. **As configured** keeps your current behavior. **Luhmann-inspired** starts an Idea Card with a Luhmann-style ID; **Eco-inspired** starts a Reading Card with a title-only filename; **Obsidian-style** starts a blank Markdown card with a title-only filename. Choose a different ID style or template whenever you want.
 
 The setting takes effect when you create a new Markdown card. It does not change the open draft, existing files, IDs, or folder locations. Every workflow keeps the same tools for links, Zotero, the library, and printing. These are optional starting points, not rules you must follow.
 
@@ -125,7 +125,11 @@ The **ID style** selector sits above the writing area. IDs are optional and edit
 
 With Timestamp or Luhmann selected, a new note's suggested filename combines its ID and title. For example, a card titled `Ways of remembering` might be suggested as `202611122145 Ways of remembering.md`. Title only suggests a title-based filename. If an unsaved Research card already has an ID when you choose Luhmann, Cardify checks the notes or save folder and shows the current and suggested IDs. Choose **Replace ID** to use the new one, or **Keep Current ID** to leave the ID and style unchanged. Saved card IDs and filenames are not changed automatically, and Debate cards keep their own IDs. You can also edit the ID field yourself.
 
+In **Settings**, choose year–month–day, day–month–year, or month–day–year for new timestamp IDs. Turn **Include hours and minutes** on or off. For example, day–month–year can produce `13-11-26` or `13-11-26-1437`. Changing this setting does not rename existing notes or change their IDs.
+
 Before saving an ID-bearing note, Cardify checks the selected notes folder and the destination folder, including their subfolders, for duplicate IDs it recognizes. If the check cannot be completed, Cardify stops the save instead of assuming the ID is unique. These checks apply only to the folders searched and cannot prevent simultaneous changes by another app.
+
+If an externally edited file causes a save conflict, you can use **File → Save As** to preserve your draft separately. If the original is still inside a folder being checked and both copies have the same card ID, change the draft's ID before saving the copy; Cardify does not silently create duplicate IDs.
 
 ## Link and format notes
 
@@ -143,6 +147,14 @@ Related: [[Research/Memory and archives]] — connects this idea to how archives
 
 Use the buttons above the editor for **bold**, *italic*, headings, bullet lists, and tasks. Markdown and wiki-link labels appear in the card preview and print output. Cardify renders a subset of Markdown; it does not promise every Obsidian or Markdown feature will print exactly as it appears in another app.
 
+For notes with YAML frontmatter, use **Show Metadata** or **Hide Metadata** in the editor to reveal or conceal it without removing it from the file. Markdown syntax in the body remains visible while editing. Press Return on a bullet or task to continue the list; press Return on an empty item to finish it.
+
+## Outline ideas
+
+Choose **Outline** from the card-type menu to organize an argument or a chapter plan as nested points. Add points with **+**, use the indent controls to nest or unnest a point, and drag a point to move its whole branch. The link button attaches an existing note to a point. Save and print the outline like other cards.
+
+Outlines are Markdown files with a Cardify marker. If a file contains material that the structured editor cannot safely represent, Cardify opens it as a Research note instead of discarding it.
+
 ## Add a Zotero source
 
 1. Open Zotero. In Zotero, enable **Settings → Advanced → Allow other applications on this computer to communicate with Zotero**.
@@ -153,7 +165,7 @@ You can choose your personal library or an available group, search more fields, 
 
 ## Weekly habit cards
 
-Choose **Habit** or **Templates → Weekly Habit Tracker**. Edit the heading, add a row for each habit, and click the weekday boxes to add or remove an X. You can also leave the boxes empty and mark the printed card by hand.
+Choose **Habit**, then **Templates → Weekly Habit Tracker** if you want a fresh tracker. Edit the heading, add a row for each habit, and click the weekday boxes to add or remove an X. You can also leave the boxes empty and mark the printed card by hand.
 
 Use the preview's **Text size** control to change the tracker font. Seven standard rows fit on a landscape card at the default size; larger text, long habit names, or more rows can continue onto additional cards. Saving produces a Markdown table. Opening a table saved by Cardify restores it in the habit editor.
 

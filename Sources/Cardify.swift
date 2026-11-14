@@ -340,12 +340,16 @@ struct ContentView: View {
     @AppStorage("cardMode") private var cardMode = "markdown"
     @AppStorage("habitDraft") private var habitDraft = ""
     @AppStorage("todoDraft") private var todoDraft = ""
+    @AppStorage("outlineDraft") private var outlineDraft = ""
     @State private var tracker = HabitTracker()
     @State private var todo = TodoList()
+    @State private var outline = OutlineDocument()
     @AppStorage("saveFolder") private var saveFolder = ""
     @AppStorage("notesFolder") private var notesFolder = ""
     @AppStorage("autoTimestampID") private var autoTimestampID = false
     @AppStorage("idMode") private var storedIDMode = ""
+    @AppStorage("timestampDateStyle") private var timestampDateStyle = TimestampDateStyle.sortable.rawValue
+    @AppStorage("timestampIncludeTime") private var timestampIncludeTime = true
     @AppStorage("newCardWorkflow") private var newCardWorkflow = WorkflowPreference.configured.rawValue
     @AppStorage("cardifyAppearance") private var storedAppearance = AppearancePreference.system.rawValue
     @AppStorage("workspaceArrangement") private var storedWorkspaceArrangement = WorkspaceArrangement.editorLeft.rawValue
@@ -356,12 +360,19 @@ struct ContentView: View {
     @State private var savedMarkdownSnapshot: String?
     @State private var savedHabitSnapshot: String?
     @State private var savedTodoSnapshot: String?
+    @State private var savedOutlineSnapshot: String?
+    // Exact bytes-as-text read from disk, independent of a structured editor's canonical Markdown.
+    @State private var diskSnapshots: [String: Data] = [:]
+    @State private var newDraftBaselines: [String: Data] = [:]
+    @State private var autosaveTask: Task<Void, Never>?
     @State private var history = CardHistory()
     @State private var traversingHistory = false
     @State private var suppressHistorySave = false
     @State private var branchSaveFolders: [String: URL] = [:]
     @State private var showZotero = false
     @State private var showNotes = false
+    @State private var showOutlineNotes = false
+    @State private var outlineLinkCompletion: ((String) -> Void)?
     @State private var showLibrary = false
     @State private var showDebate = false
     @State private var showDebateBrowser = false
@@ -373,7 +384,10 @@ struct ContentView: View {
     @State private var editorHeaderHeight: CGFloat = 100
     var fileURL: URL? {
         get { fileURLs[cardMode] }
-        nonmutating set { fileURLs[cardMode] = newValue }
+        nonmutating set {
+            fileURLs[cardMode] = newValue
+            if newValue == nil { diskSnapshots.removeValue(forKey: cardMode); newDraftBaselines.removeValue(forKey: cardMode) }
+        }
     }
     var branchSaveFolder: URL? {
         get { branchSaveFolders[cardMode] }
@@ -381,17 +395,28 @@ struct ContentView: View {
     }
     var card: CardDocument { CardDocument(text: text, portrait: portrait, fontSize: fontSize, dotGrid: dotGrid) }
     var idMode: IDMode { IDMode(rawValue: storedIDMode) ?? (autoTimestampID ? .timestamp : .titleOnly) }
+    var outlineCard: CardDocument? {
+        let source = outline.markdown
+        let metadata = CardMetadata.parse(source)
+        guard metadata.id != nil || !CardMetadata.hasNonemptyID(source) else { return nil }
+        return CardDocument(text: outline.printMarkdown(cardID: metadata.id), portrait: portrait, fontSize: fontSize, dotGrid: dotGrid)
+    }
     var activePDF: Data? {
         if cardMode == "habits" { return tracker.pdf(portrait: portrait, dotGrid: dotGrid, fontSize: fontSize) }
         if cardMode == "todos" { return CardDocument(text: todo.printMarkdown, portrait: portrait, fontSize: fontSize, dotGrid: dotGrid).pdf() }
+        if cardMode == "outline" { return outlineCard?.pdf() }
         return card.pdf()
     }
-    var previewPDF: Data? { cardMode == "markdown" ? card.pdf(includeLinks: true) : activePDF }
+    var previewPDF: Data? {
+        if cardMode == "markdown" { return card.pdf(includeLinks: true) }
+        if cardMode == "outline" { return outlineCard?.pdf(includeLinks: true) }
+        return activePDF
+    }
     var previewRevision: PDFPreviewRevision {
-        PDFPreviewRevision(mode: cardMode, content: cardMode == "habits" ? tracker.markdown : cardMode == "todos" ? todo.printMarkdown : text, portrait: portrait, fontSize: fontSize, dotGrid: dotGrid, filePath: fileURL?.standardizedFileURL.path)
+        PDFPreviewRevision(mode: cardMode, content: cardMode == "habits" ? tracker.markdown : cardMode == "todos" ? todo.printMarkdown : cardMode == "outline" ? outline.markdown : text, portrait: portrait, fontSize: fontSize, dotGrid: dotGrid, filePath: fileURL?.standardizedFileURL.path)
     }
     var currentCardTitle: String {
-        let title = cardMode == "habits" ? tracker.title : cardMode == "todos" ? todo.title : NoteEditing.title(in: text)
+        let title = cardMode == "habits" ? tracker.title : cardMode == "todos" ? todo.title : cardMode == "outline" ? outline.title : NoteEditing.title(in: text)
         return title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? (fileURL?.deletingPathExtension().lastPathComponent ?? "Untitled card") : title
     }
     var titlePlaceholder: String {
@@ -415,8 +440,15 @@ struct ContentView: View {
         todo = value
         if let data = try? JSONEncoder().encode(value), let encoded = String(data: data, encoding: .utf8) { todoDraft = encoded }
     }
+    func setOutline(_ value: OutlineDocument) {
+        outline = value
+        if let data = try? JSONEncoder().encode(value), let encoded = String(data: data, encoding: .utf8) { outlineDraft = encoded }
+    }
     func switchMode(to mode: String) {
         guard mode != cardMode else { return }
+        var discarded: [String] = []
+        guard confirmReplaceDrafts([cardMode], discarded: &discarded) else { return }
+        for discardedMode in discarded { clearDiscardedDraft(discardedMode) }
         cardMode = mode
         if let fileURL { history.visit(fileURL) } else { history.detach() }
     }
@@ -427,7 +459,7 @@ struct ContentView: View {
                     .help(showNotesSidebar ? "Hide notes sidebar" : "Show notes sidebar")
                     .accessibilityLabel(showNotesSidebar ? "Hide notes sidebar" : "Show notes sidebar")
                 Text("Cardify").font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(storedAppearance == AppearancePreference.charcoal.rawValue ? AppearancePreference.charcoalText : nil)
+                    .foregroundColor(AppearancePreference.foreground(for: storedAppearance))
                 Button { navigateHistory(back: true) } label: { Image(systemName: "chevron.left") }
                     .help("Back to the previous card").keyboardShortcut("[", modifiers: .command).disabled(history.backTarget == nil)
                 Button { navigateHistory(back: false) } label: { Image(systemName: "chevron.right") }
@@ -454,6 +486,7 @@ struct ContentView: View {
                 Menu("File") {
                     Button("New Card", action: newCard)
                     Button("Open Markdown…", action: openFile)
+                    Button("Save As…") { _ = saveMarkdown(saveAs: true) }
                     Divider()
                     Button("Export PDF…", action: exportPDF)
                     Divider()
@@ -466,6 +499,8 @@ struct ContentView: View {
                 Button("Print", action: printCards).fixedSize().keyboardShortcut("p")
                 if storedAppearance == AppearancePreference.charcoal.rawValue {
                     Button("Save & Print") { if saveMarkdown() { printCards() } }.fixedSize().buttonStyle(CharcoalPrimaryButtonStyle())
+                } else if storedAppearance == AppearancePreference.slate.rawValue {
+                    Button("Save & Print") { if saveMarkdown() { printCards() } }.fixedSize().buttonStyle(SlatePrimaryButtonStyle())
                 } else {
                     Button("Save & Print") { if saveMarkdown() { printCards() } }.fixedSize().buttonStyle(.borderedProminent)
                 }
@@ -473,7 +508,8 @@ struct ContentView: View {
             Divider()
             HStack(alignment: .top, spacing: 0) {
                 if showNotesSidebar {
-                    CardSidebar(currentURL: fileURL, notesFolder: notesFolder, saveFolder: saveFolder,
+                    CardSidebar(currentURL: fileURL, draftTitle: currentCardTitle, draftID: cardMode == "markdown" ? CardMetadata.parse(text).id : cardMode == "outline" ? CardMetadata.parse(outline.markdown).id : nil,
+                                notesFolder: notesFolder, saveFolder: saveFolder,
                                 refreshToken: sidebarRefreshToken, onOpen: { url in
                                     let folder = notesFolder.isEmpty ? saveFolder : notesFolder
                                     guard !folder.isEmpty else { status = "Choose a notes folder before opening a sidebar note."; return false }
@@ -490,11 +526,16 @@ struct ContentView: View {
                     VStack(alignment: .leading) {
                     HStack(spacing: 8) {
                         Picker("Card type", selection: Binding(get: { cardMode == "markdown" && showDebate ? "debate" : cardMode }, set: { mode in
-                            if mode == "debate" { showDebate = true; switchMode(to: "markdown") }
-                            else { if mode == "markdown" { showDebate = false }; switchMode(to: mode) }
+                            if mode == "debate" {
+                                switchMode(to: "markdown")
+                                if cardMode == "markdown" { showDebate = true }
+                            } else {
+                                switchMode(to: mode)
+                                if mode == "markdown" && cardMode == "markdown" { showDebate = false }
+                            }
                         })) {
-                            Text("Research").tag("markdown"); Text("Habit").tag("habits"); Text("To Do").tag("todos"); Text("Debate").tag("debate")
-                        }.pickerStyle(.menu).labelsHidden().fixedSize().help("Choose Research, Habit, To Do, or Debate")
+                            Text("Research").tag("markdown"); Text("Habit").tag("habits"); Text("To Do").tag("todos"); Text("Outline").tag("outline"); Text("Debate").tag("debate")
+                        }.pickerStyle(.menu).labelsHidden().fixedSize().help("Choose Research, Habit, To Do, Outline, or Debate")
                         Spacer(minLength: 4)
                         Menu("Templates") {
                             if showDebate && cardMode == "markdown" {
@@ -504,6 +545,12 @@ struct ContentView: View {
                                 Button("Objection prompts") { editor.insert(DebateTemplates.body(for: .objection)) }
                                 Button("Argument prompts") { editor.insert(DebateTemplates.body(for: .argument)) }
                                 Button("Reply prompts") { editor.insert(DebateTemplates.body(for: .reply)) }
+                            } else if cardMode == "habits" {
+                                Button("Weekly Habit Tracker") { newCard() }
+                            } else if cardMode == "todos" {
+                                Button("New To Do List") { newCard() }
+                            } else if cardMode == "outline" {
+                                Button("New Outline") { newCard() }
                             } else {
                                 Button("Idea Card") { insertTemplate(.idea) }
                                 Button("Reading Card") { insertTemplate(.reading) }
@@ -513,7 +560,6 @@ struct ContentView: View {
                                 Button("New Idea from This Card…") { ideaFromCurrent() }.disabled(cardMode != "markdown")
                                 Divider()
                                 Button("Research Card…") { research = ResearchClip() }
-                                Button("Weekly Habit Tracker") { switchMode(to: "habits") }
                             }
                         }
                     }
@@ -625,6 +671,10 @@ struct ContentView: View {
                         HabitTrackerEditor(tracker: Binding(get: { tracker }, set: { setTracker($0) }))
                     } else if cardMode == "todos" {
                         TodoListEditor(list: Binding(get: { todo }, set: { setTodo($0) }))
+                    } else if cardMode == "outline" {
+                        OutlineEditor(outline: Binding(get: { outline }, set: { setOutline($0) }), onRequestLink: { completion in
+                            outlineLinkCompletion = completion; showOutlineNotes = true
+                        })
                     } else {
                     VStack(spacing: 0) {
                         AdaptiveFormattingToolbar(editor: editor, onLinkNote: { showNotes = true }, onZotero: { showZotero = true })
@@ -682,8 +732,13 @@ struct ContentView: View {
             if storedIDMode.isEmpty { storedIDMode = (autoTimestampID ? IDMode.timestamp : IDMode.titleOnly).rawValue }
             if let data = habitDraft.data(using: .utf8), let saved = try? JSONDecoder().decode(HabitTracker.self, from: data) { tracker = saved }
             if let data = todoDraft.data(using: .utf8), let saved = try? JSONDecoder().decode(TodoList.self, from: data) { todo = saved }
+            if let data = outlineDraft.data(using: .utf8), let saved = try? JSONDecoder().decode(OutlineDocument.self, from: data) { outline = saved }
         }
-        .onDisappear { graphWindow.close() }
+        .onChange(of: text) { _ in if cardMode == "markdown" { scheduleAutosave() } }
+        .onChange(of: habitDraft) { _ in if cardMode == "habits" { scheduleAutosave() } }
+        .onChange(of: todoDraft) { _ in if cardMode == "todos" { scheduleAutosave() } }
+        .onChange(of: outlineDraft) { _ in if cardMode == "outline" { scheduleAutosave() } }
+        .onDisappear { _ = flushExistingDraft(automatic: true); graphWindow.close() }
         .onReceive(EditorWindowCoordinator.shared.$pendingURL) { incomingURL in
             guard let url = incomingURL else { return }
             if let clip = ResearchClip.from(url) { research = clip }
@@ -702,6 +757,9 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showNotes) {
             NotePicker { link in editor.insert(link); status = "Note link inserted." }
+        }
+        .sheet(isPresented: $showOutlineNotes, onDismiss: { outlineLinkCompletion = nil }) {
+            NotePicker { link in let completion = outlineLinkCompletion; outlineLinkCompletion = nil; completion?(link); status = "Note link inserted." }
         }
         .sheet(isPresented: $showLibrary) {
             CardLibrary(currentURL: fileURL, allowInsert: cardMode == "markdown", onOpen: { url in loadFile(url) }, onInsert: { link in editor.insert(link); status = "Note link inserted." })
@@ -723,7 +781,7 @@ struct ContentView: View {
         let editorWindow = NSApplication.shared.keyWindow
         graphWindow.show(currentURL: fileURL) { [weak editorWindow] url in
             guard let editorWindow else { return }
-            guard research == nil && !showNotes && !showLibrary && !showDebateBrowser && !showSettings && !showZotero else {
+            guard research == nil && !showNotes && !showOutlineNotes && !showLibrary && !showDebateBrowser && !showSettings && !showZotero else {
                 graphError("Finish the open dialog before opening a card from the graph.")
                 return
             }
@@ -744,7 +802,9 @@ struct ContentView: View {
         let folderPath = configuredFolder.isEmpty && showDebate ? (fileURL?.deletingLastPathComponent().path ?? "") : configuredFolder
         let folder = folderPath.isEmpty ? nil : URL(fileURLWithPath: folderPath, isDirectory: true)
         let sourceFile = fileURL
-        let sourceText = text
+        let sourceMode = cardMode
+        guard sourceMode == "markdown" || sourceMode == "outline" else { return }
+        let sourceText = currentDraftContents()
         let requestID = UUID(); linkRequestID = requestID
         status = "Opening link…"
         DispatchQueue.global(qos: .userInitiated).async {
@@ -752,22 +812,24 @@ struct ContentView: View {
             DispatchQueue.main.async {
                 let currentFolder = notesFolder.isEmpty ? saveFolder : notesFolder
                 let activeFolder = currentFolder.isEmpty && showDebate ? (fileURL?.deletingLastPathComponent().path ?? "") : currentFolder
-                guard requestID == linkRequestID, cardMode == "markdown", !showDebateBrowser, fileURL == sourceFile,
+                guard requestID == linkRequestID, cardMode == sourceMode, !showDebateBrowser, fileURL == sourceFile,
                       activeFolder == folderPath else { return }
-                guard text == sourceText else { status = "Link not opened because the card changed."; return }
+                guard Data(currentDraftContents().utf8) == Data(sourceText.utf8) else { status = "Link not opened because the card changed."; return }
                 switch result {
                 case .failure(let message): linkError(message)
                 case .external(let url):
                     if NSWorkspace.shared.open(url) { status = "Opened link." }
                     else { linkError("Could not open this link.") }
-                case .current(let fragment): showHeading(fragment)
+                case .current(let fragment):
+                    guard cardMode == "markdown" else { linkError("Heading links are not available in the outline editor."); return }
+                    showHeading(fragment)
                 case .note(let url, let fragment):
                     if sourceFile?.standardizedFileURL != url.standardizedFileURL {
                         editor.clearPendingSelection()
                         guard loadFile(url) else { return }
                     }
                     if let fragment {
-                        guard cardMode == "markdown" else { linkError("Heading links are not available in habit cards."); return }
+                        guard cardMode == "markdown" else { linkError("Heading links are available in Research notes."); return }
                         showHeading(fragment)
                     }
                     else { status = "Opened \(url.lastPathComponent)." }
@@ -853,7 +915,7 @@ struct ContentView: View {
         }
         do {
             let existing = try BranchIDs.existing(in: scanRoots(for: fileURL))
-            guard let id = CardIDs.newID(mode: idMode, existing: existing) else { return true }
+            guard let id = CardIDs.newID(mode: idMode, existing: existing, timestampStyle: TimestampDateStyle(rawValue: timestampDateStyle) ?? .sortable, timestampIncludeTime: timestampIncludeTime) else { return true }
             guard let updated = NoteEditing.addID(id, to: text) else { status = "Could not add ID to the existing metadata."; return false }
             text = updated; status = "Card ID added: \(id)."; return true
         } catch { status = "Could not check existing IDs: \(error.localizedDescription)"; return false }
@@ -882,12 +944,12 @@ struct ContentView: View {
         status = "Marked as an index card. Save to update the library."
     }
     func ideaFromCurrent() {
-        if fileURL == nil || savedMarkdownSnapshot != text || !(fileURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false) {
+        if fileURL == nil {
             let alert = NSAlert(); alert.messageText = "Save this card before creating an idea?"
             alert.informativeText = "The new idea links to the saved card."
             alert.addButton(withTitle: "Save…"); alert.addButton(withTitle: "Cancel")
             guard alert.runModal() == .alertFirstButtonReturn, saveMarkdown() else { return }
-        }
+        } else if !flushExistingDraft() { return }
         guard let parentURL = fileURL else { return }
         let root = notesFolder.isEmpty ? nil : URL(fileURLWithPath: notesFolder, isDirectory: true).standardizedFileURL.path
         let path = parentURL.deletingPathExtension().standardizedFileURL.path
@@ -896,7 +958,7 @@ struct ContentView: View {
         do {
             let newID: String?
             if idMode == .titleOnly { newID = nil }
-            else { newID = CardIDs.newID(mode: idMode, existing: try BranchIDs.existing(in: scanRoots(for: parentURL))) }
+            else { newID = CardIDs.newID(mode: idMode, existing: try BranchIDs.existing(in: scanRoots(for: parentURL)), timestampStyle: TimestampDateStyle(rawValue: timestampDateStyle) ?? .sortable, timestampIncludeTime: timestampIncludeTime) }
             editor.discardUndoHistory()
             text = CardMetadata.frontmatter(newID ?? "") + "# Idea\n\n\n\n## Related cards\n\n- [[\(link)]] — develops this card.\n"
             branchSaveFolder = parentURL.deletingLastPathComponent(); fileURL = nil; savedMarkdownSnapshot = nil; history.detach()
@@ -908,12 +970,12 @@ struct ContentView: View {
         guard let parentID = CardMetadata.parse(text).id ?? fileURL.flatMap({ BranchIDs.filenameID(for: $0) }) else {
             status = "Add a card ID before branching."; return
         }
-        if fileURL == nil || savedMarkdownSnapshot != text || !(fileURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false) {
+        if fileURL == nil {
             let alert = NSAlert(); alert.messageText = "Save this card before branching?"
             alert.informativeText = "The new card links to the saved parent, so save your current changes first."
             alert.addButton(withTitle: "Save…"); alert.addButton(withTitle: "Cancel")
             guard alert.runModal() == .alertFirstButtonReturn, saveMarkdown() else { return }
-        }
+        } else if !flushExistingDraft() { return }
         guard let parentURL = fileURL else { return }
         do {
             let existing = try BranchIDs.existing(in: scanRoots(for: parentURL))
@@ -932,42 +994,94 @@ struct ContentView: View {
     var pageCount: Int { activePDF.flatMap { PDFDocument(data: $0)?.pageCount } ?? 0 }
     // Check the active draft before any action that replaces it.
     func confirmReplaceDraft(hidden: Bool = false) -> Bool {
-        let current = cardMode == "habits" ? tracker.markdown : cardMode == "todos" ? todo.markdown : text
-        let snapshot = cardMode == "habits" ? savedHabitSnapshot : cardMode == "todos" ? savedTodoSnapshot : savedMarkdownSnapshot
-        let initial = cardMode == "habits" ? HabitTracker().markdown : cardMode == "todos" ? TodoList().markdown : ""
-        guard current != (snapshot ?? initial) else { return true }
-        let kind = cardMode == "habits" ? "habit" : cardMode == "todos" ? "to-do" : "research"
+        var discarded: [String] = []
+        return confirmReplaceDrafts([cardMode], hidden: hidden, discarded: &discarded)
+    }
+    func currentDraftContents() -> String {
+        cardMode == "habits" ? tracker.markdown : cardMode == "todos" ? todo.markdown : cardMode == "outline" ? outline.markdown : text
+    }
+    func currentDraftSnapshot() -> String? {
+        cardMode == "habits" ? savedHabitSnapshot : cardMode == "todos" ? savedTodoSnapshot : cardMode == "outline" ? savedOutlineSnapshot : savedMarkdownSnapshot
+    }
+    func currentDraftInitial() -> String {
+        cardMode == "habits" ? HabitTracker().markdown : cardMode == "todos" ? TodoList().markdown : cardMode == "outline" ? OutlineDocument().markdown : ""
+    }
+    func flushExistingDraft(automatic: Bool = false) -> Bool {
+        guard fileURL != nil else { return true }
+        guard Data(currentDraftContents().utf8) != Data((currentDraftSnapshot() ?? currentDraftInitial()).utf8) else { return true }
+        return automatic ? saveMarkdown(automatic: true) : saveMarkdown()
+    }
+    // When opening a different card type, both drafts can be unsaved. Ask
+    // once and apply the same Save/Discard/Cancel choice to both.
+    func confirmReplaceDrafts(_ modes: [String], hidden: Bool = false, discarded: inout [String]) -> Bool {
+        discarded = []
+        let originalMode = cardMode
+        defer { cardMode = originalMode }
+        var unique: [String] = []
+        for mode in modes where !unique.contains(mode) { unique.append(mode) }
+        var unsaved: [String] = []
+        for mode in unique {
+            cardMode = mode
+            let baseline = currentDraftSnapshot().map { Data($0.utf8) } ?? newDraftBaselines[mode] ?? Data(currentDraftInitial().utf8)
+            guard Data(currentDraftContents().utf8) != baseline else { continue }
+            if fileURL != nil {
+                let wasSuppressed = suppressHistorySave
+                if mode != originalMode { suppressHistorySave = true }
+                let ok = saveMarkdown()
+                suppressHistorySave = wasSuppressed
+                guard ok else { return false }
+            } else { unsaved.append(mode) }
+        }
+        guard !unsaved.isEmpty else { return true }
         let alert = NSAlert()
-        alert.messageText = "Save changes to your \(kind) draft?"
-        alert.informativeText = hidden ? "The existing \(kind) draft will be replaced." : "Your current draft will be replaced or left behind."
+        if unsaved.count == 1 {
+            let kind = unsaved[0] == "habits" ? "habit" : unsaved[0] == "todos" ? "to-do" : unsaved[0] == "outline" ? "outline" : "research"
+            alert.messageText = "Save changes to your \(kind) draft?"
+            alert.informativeText = hidden ? "The existing \(kind) draft will be replaced." : "Your current draft will be replaced or left behind."
+        } else {
+            alert.messageText = "Save changes to your drafts?"
+            alert.informativeText = "There are \(unsaved.count) unsaved drafts involved. Save or discard them before opening this card."
+        }
         alert.addButton(withTitle: "Save…")
         alert.addButton(withTitle: "Discard")
         alert.addButton(withTitle: "Cancel")
         switch alert.runModal() {
         case .alertFirstButtonReturn:
-            if hidden {
-                let wasSuppressed = suppressHistorySave; suppressHistorySave = true
-                defer { suppressHistorySave = wasSuppressed }
-                return saveMarkdown()
+            for mode in unsaved {
+                cardMode = mode
+                let wasSuppressed = suppressHistorySave
+                if mode != originalMode || hidden { suppressHistorySave = true }
+                let ok = saveMarkdown()
+                suppressHistorySave = wasSuppressed
+                guard ok else { return false }
             }
-            return saveMarkdown()
-        case .alertSecondButtonReturn: return true
+            return true
+        case .alertSecondButtonReturn: discarded = unsaved; return true
         default: return false
         }
     }
+    func clearDiscardedDraft(_ mode: String) {
+        let previousMode = cardMode
+        cardMode = mode
+        if mode == "habits" { setTracker(HabitTracker()); savedHabitSnapshot = nil }
+        else if mode == "todos" { setTodo(TodoList()); savedTodoSnapshot = nil }
+        else if mode == "outline" { setOutline(OutlineDocument()); savedOutlineSnapshot = nil }
+        else { editor.discardUndoHistory(); text = ""; savedMarkdownSnapshot = nil }
+        fileURL = nil; branchSaveFolder = nil
+        cardMode = previousMode
+    }
     func useResearch(_ content: String, append: Bool) -> Bool {
-        let changingMode = cardMode != "markdown"
-        if cardMode == "markdown" {
-            if !append && !confirmReplaceDraft() { return false }
-        } else {
-            guard confirmReplaceDraft() else { return false }
-            let previousMode = cardMode, previousURL = fileURL, previousBranch = branchSaveFolder
-            cardMode = "markdown"
-            if !append && !confirmReplaceDraft(hidden: true) {
-                cardMode = previousMode; fileURL = previousURL; branchSaveFolder = previousBranch
-                return false
-            }
+        let originalMode = cardMode
+        let changingMode = originalMode != "markdown"
+        var discarded: [String] = []
+        if changingMode {
+            let modes = append ? [originalMode] : [originalMode, "markdown"]
+            guard confirmReplaceDrafts(modes, discarded: &discarded) else { return false }
+        } else if !append {
+            guard confirmReplaceDrafts(["markdown"], discarded: &discarded) else { return false }
         }
+        for mode in discarded where mode != "markdown" { clearDiscardedDraft(mode) }
+        cardMode = "markdown"
         if append { text += (text.isEmpty ? "" : "\n\n") + content }
         else { editor.discardUndoHistory(); text = content; fileURL = nil; branchSaveFolder = nil; savedMarkdownSnapshot = nil }
         if !append { history.detach() }
@@ -997,45 +1111,39 @@ struct ContentView: View {
             }
             return true
         }
-        var previousMode = cardMode, previousURL = fileURL, previousBranch = branchSaveFolder
-        var loaded = false
-        defer {
-            if !loaded { cardMode = previousMode; fileURL = previousURL; branchSaveFolder = previousBranch }
-        }
+        let originalMode = cardMode
         do {
-            // Check readability before prompting. Read again after each save so the
-            // selected file cannot be replaced with stale pre-save contents.
             guard targetIsSafe() else { return false }
-            _ = try String(contentsOf: url, encoding: .utf8)
-            guard confirmReplaceDraft() else { return false }
-            previousMode = cardMode; previousURL = fileURL; previousBranch = branchSaveFolder
+            let initial = try decodeMarkdown(Data(contentsOf: url))
+            let initialOutline = OutlineDocument.fromMarkdown(initial)
+            let initialHabit = initialOutline == nil ? HabitTracker.fromMarkdown(initial) : nil
+            let initialTodo = initialOutline == nil && initialHabit == nil ? TodoList.fromMarkdown(initial) : nil
+            let targetMode = initialOutline != nil ? "outline" : initialHabit != nil ? "habits" : initialTodo != nil ? "todos" : "markdown"
+            var discarded: [String] = []
+            let modes = targetMode == originalMode ? [originalMode] : [originalMode, targetMode]
+            guard confirmReplaceDrafts(modes, discarded: &discarded) else { return false }
             guard targetIsSafe() else { return false }
-            var contents = try String(contentsOf: url, encoding: .utf8)
-            var savedHabit = HabitTracker.fromMarkdown(contents)
-            var savedTodo = savedHabit == nil ? TodoList.fromMarkdown(contents) : nil
-            let targetMode = savedHabit != nil ? "habits" : savedTodo != nil ? "todos" : "markdown"
-            if targetMode != previousMode {
-                cardMode = targetMode
-                guard confirmReplaceDraft(hidden: true) else { return false }
-                cardMode = previousMode; fileURL = previousURL; branchSaveFolder = previousBranch
-                guard targetIsSafe() else { return false }
-                contents = try String(contentsOf: url, encoding: .utf8)
-                savedHabit = HabitTracker.fromMarkdown(contents)
-                savedTodo = savedHabit == nil ? TodoList.fromMarkdown(contents) : nil
-            }
-            let finalMode = savedHabit != nil ? "habits" : savedTodo != nil ? "todos" : "markdown"
+            let diskData = try Data(contentsOf: url)
+            let contents = try decodeMarkdown(diskData)
+            let savedOutline = OutlineDocument.fromMarkdown(contents)
+            let savedHabit = savedOutline == nil ? HabitTracker.fromMarkdown(contents) : nil
+            let savedTodo = savedOutline == nil && savedHabit == nil ? TodoList.fromMarkdown(contents) : nil
+            let finalMode = savedOutline != nil ? "outline" : savedHabit != nil ? "habits" : savedTodo != nil ? "todos" : "markdown"
             guard finalMode == targetMode else { status = "The card changed while opening. Try again."; return false }
+            for mode in discarded where mode != finalMode { clearDiscardedDraft(mode) }
             cardMode = finalMode
-            if let savedHabit {
+            if let savedOutline {
+                setOutline(savedOutline); savedOutlineSnapshot = savedOutline.markdown
+            } else if let savedHabit {
                 setTracker(savedHabit); savedHabitSnapshot = savedHabit.markdown
             } else if let savedTodo {
                 setTodo(savedTodo); savedTodoSnapshot = savedTodo.markdown
             } else { editor.discardUndoHistory(); text = contents; savedMarkdownSnapshot = contents }
-            fileURL = url; branchSaveFolder = nil; status = "Opened \(url.lastPathComponent)."
+            fileURL = url; diskSnapshots[finalMode] = diskData; newDraftBaselines.removeValue(forKey: finalMode)
+            branchSaveFolder = nil; status = "Opened \(url.lastPathComponent)."
             if !traversingHistory { history.visit(url) }
-            loaded = true
             return true
-        } catch { status = "Could not open file: \(error.localizedDescription)"; return false }
+        } catch { cardMode = originalMode; status = "Could not open file: \(error.localizedDescription)"; return false }
     }
     func chooseFolder() {
         let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true
@@ -1046,6 +1154,7 @@ struct ContentView: View {
         fileURL = nil; branchSaveFolder = nil; history.detach()
         if cardMode == "habits" { savedHabitSnapshot = nil; setTracker(HabitTracker()); status = "New draft." }
         else if cardMode == "todos" { savedTodoSnapshot = nil; setTodo(TodoList()); status = "New draft." }
+        else if cardMode == "outline" { savedOutlineSnapshot = nil; setOutline(OutlineDocument()); status = "New draft." }
         else {
             editor.discardUndoHistory()
             savedMarkdownSnapshot = nil
@@ -1055,42 +1164,139 @@ struct ContentView: View {
             } else { text = "" }
             if idMode != .titleOnly { _ = ensureID() } else { status = "New draft." }
         }
+        newDraftBaselines[cardMode] = Data(currentDraftContents().utf8)
     }
-    func saveMarkdown() -> Bool {
-        if cardMode == "markdown" && idMode != .titleOnly && !ensureID() { return false }
-        let panel = NSSavePanel()
-        if let folder = branchSaveFolder { panel.directoryURL = folder }
-        else if !saveFolder.isEmpty { panel.directoryURL = URL(fileURLWithPath: saveFolder, isDirectory: true) }
-        panel.allowedContentTypes = [.init(filenameExtension: "md")!]
-        let debate = cardMode == "markdown" ? DebateNotes.parse(text) : nil
-        let useIDInFilename = idMode != .titleOnly || debate?.role == .aff || debate?.role == .def || debate?.primary != nil
-        panel.nameFieldStringValue = fileURL?.lastPathComponent ?? (cardMode == "markdown" ? NoteEditing.filename(id: useIDInFilename ? CardMetadata.parse(text).id : nil, title: NoteEditing.title(in: text)) : cardMode == "todos" ? NoteEditing.filename(id: nil, title: todo.title) : "Weekly Habits.md")
-        if panel.runModal() == .OK, let url = panel.url {
-            let content = cardMode == "habits" ? tracker.markdown : cardMode == "todos" ? todo.markdown : text
+    // A normal Save updates the note already open; Save As is the only path
+    // that presents a destination panel for an existing note.
+    func saveMarkdown(saveAs: Bool = false, automatic: Bool = false) -> Bool {
+        autosaveTask?.cancel()
+        if cardMode == "markdown" && fileURL == nil && idMode != .titleOnly && !ensureID() { return false }
+        let content = cardMode == "habits" ? tracker.markdown : cardMode == "todos" ? todo.markdown : cardMode == "outline" ? outline.markdown : text
+        let currentURL = fileURL
+        var target: URL
+        if !saveAs, let currentURL {
+            target = currentURL
+        } else {
+            guard !automatic else { return false }
+            let panel = NSSavePanel()
+            if let currentURL { panel.directoryURL = currentURL.deletingLastPathComponent() }
+            else if let folder = branchSaveFolder { panel.directoryURL = folder }
+            else if !saveFolder.isEmpty { panel.directoryURL = URL(fileURLWithPath: saveFolder, isDirectory: true) }
+            panel.allowedContentTypes = [.init(filenameExtension: "md")!]
+            let debate = cardMode == "markdown" ? DebateNotes.parse(text) : nil
+            let useIDInFilename = idMode != .titleOnly || debate?.role == .aff || debate?.role == .def || debate?.primary != nil
+            panel.nameFieldStringValue = currentURL?.lastPathComponent ?? (cardMode == "markdown" ? NoteEditing.filename(id: useIDInFilename ? CardMetadata.parse(text).id : nil, title: NoteEditing.title(in: text)) : cardMode == "todos" ? NoteEditing.filename(id: nil, title: todo.title) : cardMode == "outline" ? NoteEditing.filename(id: CardMetadata.parse(outline.markdown).id, title: outline.title) : "Weekly Habits.md")
+            guard panel.runModal() == .OK, let chosen = panel.url else { return false }
+            target = chosen
+        }
+        target = target.standardizedFileURL
+        let sameFile = currentURL.map { $0.resolvingSymlinksInPath().standardizedFileURL == target.resolvingSymlinksInPath().standardizedFileURL } ?? false
+        func fail(_ message: String) -> Bool {
+            status = automatic ? "Autosave paused: " + message : message
+            if !automatic {
+                let alert = NSAlert(); alert.messageText = "Could not save card"; alert.informativeText = message; alert.runModal()
+            }
+            return false
+        }
+        do {
+            let before = try diskContents(at: target)
+            if sameFile {
+                guard let expected = diskSnapshots[cardMode] else { return fail("The saved version could not be verified. Use Save As to preserve this draft.") }
+                guard before == expected else { return fail("This file changed or was removed outside Cardify. Your draft is still open. Use Save As to keep a copy; if it has an ID, change the copy's ID to avoid a duplicate.") }
+            }
             if CardMetadata.parse(content).id == nil && CardMetadata.hasNonemptyID(content) {
-                status = "Could not read card_id metadata. Check its formatting before saving."; return false
+                return fail("Could not read card_id metadata. Check its formatting before saving.")
             }
             if let id = CardMetadata.parse(content).id {
-                guard !id.contains(where: { $0.isNewline || ($0.isASCII && $0.isWhitespace && $0 != " ") }) else { status = "Card IDs must be a single line."; return false }
-                var roots = [url.deletingLastPathComponent().standardizedFileURL]
+                guard !id.contains(where: { $0.isNewline || ($0.isASCII && $0.isWhitespace && $0 != " ") }) else { return fail("Card IDs must be a single line.") }
+                var roots = [target.deletingLastPathComponent().resolvingSymlinksInPath().standardizedFileURL]
                 if !notesFolder.isEmpty {
-                    let folder = URL(fileURLWithPath: notesFolder, isDirectory: true).standardizedFileURL
+                    let folder = URL(fileURLWithPath: notesFolder, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL
                     if roots[0].path == folder.path || roots[0].path.hasPrefix(folder.path + "/") { roots = [folder] }
                     else { roots.append(folder) }
                 }
-                do {
-                    for root in roots {
-                        if let duplicate = try CardIDIndex.ids(in: root, excluding: url).first(where: { $0.0.caseInsensitiveCompare(id) == .orderedSame }) {
-                            let alert = NSAlert(); alert.messageText = "This card ID is already in use"; alert.informativeText = "\(id) is used by \(duplicate.1.lastPathComponent). Change the ID before saving."; alert.runModal()
-                            status = "Duplicate card ID: \(id)."; return false
-                        }
+                for root in roots {
+                    if let duplicate = try CardIDIndex.ids(in: root, excluding: target.resolvingSymlinksInPath().standardizedFileURL).first(where: { $0.0.caseInsensitiveCompare(id) == .orderedSame }) {
+                        return fail("Card ID \(id) is already used by \(duplicate.1.lastPathComponent). Change the ID before saving.")
                     }
-                } catch { status = "Could not verify card IDs: \(error.localizedDescription)"; return false }
+                }
             }
-            do { try content.write(to: url, atomically: true, encoding: .utf8); fileURL = url; if cardMode == "habits" { savedHabitSnapshot = content } else if cardMode == "todos" { savedTodoSnapshot = content } else { savedMarkdownSnapshot = content }; if !suppressHistorySave { history.saveCurrent(url) }; branchSaveFolder = nil; sidebarRefreshToken = UUID(); status = "Saved \(url.lastPathComponent)."; return true }
-            catch { status = "Could not save: \(error.localizedDescription)" }
+            guard try diskContents(at: target) == before else { return fail("The destination changed while saving. Your draft is still open; try Save As.") }
+            // Structured habit/to-do editors serialize canonical LF. Preserve an
+            // imported file's existing newline style when updating its rows.
+            var output = content
+            if sameFile, let before, cardMode == "habits" || cardMode == "todos" {
+                let original = try decodeMarkdown(before)
+                let withoutCRLF = original.replacingOccurrences(of: "\r\n", with: "")
+                if original.contains("\r\n") && !withoutCRLF.contains("\n") && !withoutCRLF.contains("\r") {
+                    output = content.replacingOccurrences(of: "\n", with: "\r\n")
+                } else if original.contains("\r") && !original.contains("\n") {
+                    output = content.replacingOccurrences(of: "\n", with: "\r")
+                }
+            }
+            let outputData = Data(output.utf8)
+            if sameFile, let saved = currentDraftSnapshot(), Data(saved.utf8) == Data(content.utf8), let before {
+                // No edit: don't normalize an imported file's formatting.
+                fileURL = target; diskSnapshots[cardMode] = before
+                status = automatic ? "Changes saved." : "Saved \(target.lastPathComponent)."
+                return true
+            }
+            if before == nil {
+                // Link a fully written temporary file into place. linkItem refuses
+                // an existing destination, including one created after the panel.
+                let temporary = target.deletingLastPathComponent().appendingPathComponent(".cardify-\(UUID().uuidString).tmp")
+                defer { try? FileManager.default.removeItem(at: temporary) }
+                try outputData.write(to: temporary, options: .withoutOverwriting)
+                try FileManager.default.linkItem(at: temporary, to: target)
+            } else {
+                try outputData.write(to: target, options: .atomic)
+            }
+            fileURL = target; diskSnapshots[cardMode] = outputData; newDraftBaselines.removeValue(forKey: cardMode)
+            if cardMode == "habits" { savedHabitSnapshot = content }
+            else if cardMode == "todos" { savedTodoSnapshot = content }
+            else if cardMode == "outline" { savedOutlineSnapshot = content }
+            else { savedMarkdownSnapshot = content }
+            if !suppressHistorySave { history.saveCurrent(target) }
+            branchSaveFolder = nil; sidebarRefreshToken = UUID()
+            status = automatic ? "Changes saved." : "Saved \(target.lastPathComponent)."
+            return true
+        } catch { return fail("Could not verify or write the destination: \(error.localizedDescription)") }
+    }
+
+    // An inaccessible file is an error, not an absent destination. Never
+    // follow a file symlink when deciding what may be overwritten.
+    func diskContents(at url: URL) throws -> Data? {
+        let attributes: [FileAttributeKey: Any]
+        do { attributes = try FileManager.default.attributesOfItem(atPath: url.path) }
+        catch let error as NSError where error.domain == NSCocoaErrorDomain && (error.code == NSFileNoSuchFileError || error.code == NSFileReadNoSuchFileError) { return nil }
+        guard attributes[.type] as? FileAttributeType == .typeRegular else {
+            throw NSError(domain: NSCocoaErrorDomain, code: NSFileWriteInvalidFileNameError, userInfo: [NSLocalizedDescriptionKey: "The destination is not a regular file."])
         }
-        return false
+        return try Data(contentsOf: url)
+    }
+    func decodeMarkdown(_ data: Data) throws -> String {
+        let decoded = String(decoding: data, as: UTF8.self)
+        guard Data(decoded.utf8) == data else {
+            throw NSError(domain: NSCocoaErrorDomain, code: NSFileReadInapplicableStringEncodingError,
+                          userInfo: [NSLocalizedDescriptionKey: "This file is not valid UTF-8 Markdown."])
+        }
+        return decoded
+    }
+
+    func scheduleAutosave() {
+        autosaveTask?.cancel()
+        let mode = cardMode
+        guard let target = fileURL else { return }
+        let current = mode == "habits" ? tracker.markdown : mode == "todos" ? todo.markdown : mode == "outline" ? outline.markdown : text
+        let saved = mode == "habits" ? savedHabitSnapshot : mode == "todos" ? savedTodoSnapshot : mode == "outline" ? savedOutlineSnapshot : savedMarkdownSnapshot
+        guard let saved, Data(current.utf8) != Data(saved.utf8) else { return }
+        autosaveTask = Task { @MainActor in
+            do { try await Task.sleep(nanoseconds: 800_000_000) } catch { return }
+            guard !Task.isCancelled, cardMode == mode, fileURL == target else { return }
+            let latest = mode == "habits" ? tracker.markdown : mode == "todos" ? todo.markdown : mode == "outline" ? outline.markdown : text
+            guard Data(latest.utf8) == Data(current.utf8) else { return }
+            _ = saveMarkdown(automatic: true)
+        }
     }
     func exportPDF() {
         guard let data = activePDF else { status = cardMode == "habits" ? "Shorten the heading to create a PDF." : "Could not create PDF."; return }

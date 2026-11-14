@@ -44,6 +44,8 @@ struct WorkflowSettings: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("newCardWorkflow") private var storedWorkflow = WorkflowPreference.configured.rawValue
     @AppStorage("dotGrid") private var dotGrid = false
+    @AppStorage("timestampDateStyle") private var timestampDateStyle = TimestampDateStyle.sortable.rawValue
+    @AppStorage("timestampIncludeTime") private var timestampIncludeTime = true
     private var preference: WorkflowPreference { WorkflowPreference(rawValue: storedWorkflow) ?? .configured }
 
     var body: some View {
@@ -58,10 +60,16 @@ struct WorkflowSettings: View {
                 ForEach(WorkflowPreference.allCases) { choice in Text(choice.name).tag(choice) }
             }
             Text(preference.description).foregroundStyle(.secondary)
+            Picker("Timestamp date", selection: Binding(get: { TimestampDateStyle(rawValue: timestampDateStyle) ?? .sortable }, set: { timestampDateStyle = $0.rawValue })) {
+                ForEach(TimestampDateStyle.allCases) { choice in Text(choice.title).tag(choice) }
+            }
+            Toggle("Include hours and minutes in timestamp", isOn: $timestampIncludeTime)
+            Text("Examples: 20261113, 13-11-26, or 11-13-26. Time adds hours and minutes. Existing IDs stay the same.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Text("These are starting defaults for New Card. You can still use any template, ID style, source, or link. Existing cards and the current draft are not changed.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Spacer()
             HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
-        }.padding(24).frame(width: 500, height: 370)
+        }.padding(24).frame(width: 540, height: 470)
     }
 }

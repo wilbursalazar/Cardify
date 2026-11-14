@@ -1,5 +1,17 @@
 import Foundation
 
+enum TimestampDateStyle: String, CaseIterable, Identifiable {
+    case sortable, dayFirst, monthFirst
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .sortable: return "Year–month–day"
+        case .dayFirst: return "Day–month–year"
+        case .monthFirst: return "Month–day–year"
+        }
+    }
+}
+
 // Timestamp-based root IDs and alternating letter/number branch markers.
 enum BranchIDs {
     enum BranchError: LocalizedError {
@@ -7,12 +19,16 @@ enum BranchIDs {
         var errorDescription: String? { "Add a card ID to the current card before creating a branch." }
     }
 
-    static func timestamp(at date: Date = Date(), timeZone: TimeZone = .current, existing: Set<String>) -> String {
+    static func timestamp(at date: Date = Date(), timeZone: TimeZone = .current, existing: Set<String>, style: TimestampDateStyle = .sortable, includeTime: Bool = true) -> String {
         let format = DateFormatter()
         format.locale = Locale(identifier: "en_US_POSIX")
         format.calendar = Calendar(identifier: .gregorian)
         format.timeZone = timeZone
-        format.dateFormat = "yyyyMMddHHmm"
+        switch style {
+        case .sortable: format.dateFormat = includeTime ? "yyyyMMddHHmm" : "yyyyMMdd"
+        case .dayFirst: format.dateFormat = includeTime ? "dd-MM-yy-HHmm" : "dd-MM-yy"
+        case .monthFirst: format.dateFormat = includeTime ? "MM-dd-yy-HHmm" : "MM-dd-yy"
+        }
         let base = format.string(from: date)
         let used = Set(existing.map { $0.lowercased() })
         guard used.contains(base.lowercased()) else { return base }
@@ -53,7 +69,7 @@ enum BranchIDs {
     static func filenameID(for file: URL) -> String? {
         guard file.pathExtension.lowercased() == "md" else { return nil }
         let name = file.deletingPathExtension().lastPathComponent
-        let pattern = try! NSRegularExpression(pattern: #"^([0-9]{12}(?:-[0-9]{2,})?(?:[A-Za-z]+[0-9]*)*)(?=$|[ _-])"#)
+        let pattern = try! NSRegularExpression(pattern: #"^((?:[0-9]{12}|[0-9]{8}|[0-9]{2}-[0-9]{2}-[0-9]{2}(?:-[0-9]{4})?)(?:-[0-9]{2,})?(?:[A-Za-z]+[0-9]*)*)(?=$|[ _-])"#)
         guard let match = pattern.firstMatch(in: name, range: NSRange(name.startIndex..., in: name)), let range = Range(match.range(at: 1), in: name) else { return nil }
         return String(name[range])
     }

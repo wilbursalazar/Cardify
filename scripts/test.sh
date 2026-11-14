@@ -7,6 +7,8 @@ SWIFT_FLAGS=(-target "$(uname -m)-apple-macos13.0" -module-cache-path "$TEMP_DIR
 COMMON=("$ROOT/Sources/CardLibrary.swift" "$ROOT/Sources/CuratedIndex.swift" "$ROOT/Sources/NotePicker.swift" "$ROOT/Sources/Zettelkasten.swift" "$ROOT/Sources/NoteEditing.swift" "$ROOT/Sources/BranchIDs.swift" "$ROOT/Sources/IDModes.swift")
 swiftc "${SWIFT_FLAGS[@]}" "${COMMON[@]}" "$ROOT/Tests/Library/main.swift" -o "$TEMP_DIR/library"
 "$TEMP_DIR/library"
+swiftc "${SWIFT_FLAGS[@]}" "${COMMON[@]}" "$ROOT/Tests/Timestamp/main.swift" -o "$TEMP_DIR/timestamp"
+"$TEMP_DIR/timestamp"
 swiftc "${SWIFT_FLAGS[@]}" "${COMMON[@]}" "$ROOT/Sources/InlineTemplates.swift" "$ROOT/Sources/AppearanceSettings.swift" "$ROOT/Sources/WorkflowSettings.swift" "$ROOT/Tests/Workflow/main.swift" -o "$TEMP_DIR/workflow"
 "$TEMP_DIR/workflow"
 swiftc "${SWIFT_FLAGS[@]}" "$ROOT/Tests/CRLFEditor/main.swift" -o "$TEMP_DIR/crlf-editor"
@@ -26,6 +28,10 @@ swiftc "${SWIFT_FLAGS[@]}" "$ROOT/Sources/TodoList.swift" "$ROOT/Tests/TodoList/
 "$TEMP_DIR/todo"
 swiftc "${SWIFT_FLAGS[@]}" "$ROOT/Sources/AppearanceSettings.swift" "$ROOT/Tests/Appearance/main.swift" -o "$TEMP_DIR/appearance"
 "$TEMP_DIR/appearance"
+swiftc "${SWIFT_FLAGS[@]}" "$ROOT/Sources/Outline.swift" "$ROOT/Tests/Outline/main.swift" -o "$TEMP_DIR/outline"
+"$TEMP_DIR/outline"
+"$ROOT/scripts/test-editor-structure.sh"
+"$ROOT/scripts/test-autosave.sh"
 swiftc "${SWIFT_FLAGS[@]}" "$ROOT/Sources/GraphMotion.swift" "$ROOT/Tests/GraphMotion/main.swift" -o "$TEMP_DIR/graph-motion"
 "$TEMP_DIR/graph-motion"
 swiftc "${SWIFT_FLAGS[@]}" "${COMMON[@]}" "$ROOT/Sources/CardLinks.swift" "$ROOT/Sources/LinkNavigation.swift" "$ROOT/Sources/CardGraph.swift" "$ROOT/Tests/Graph/main.swift" -o "$TEMP_DIR/graph"
@@ -48,5 +54,5 @@ second = source[source.index('    func loadFile('):source.index('    func choose
 template = Path(sys.argv[2]).read_text()
 Path(sys.argv[3]).write_text(template.replace('    // DRAFT_METHODS\n', switch + first + navigation + second))
 PY
-swiftc "${SWIFT_FLAGS[@]}" -parse-as-library "$ROOT/Sources/CardHistory.swift" "$ROOT/Sources/TodoList.swift" "$TEMP_DIR/DraftChecks.swift" -o "$TEMP_DIR/draft"
+swiftc "${SWIFT_FLAGS[@]}" -parse-as-library "$ROOT/Sources/CardHistory.swift" "$ROOT/Sources/TodoList.swift" "$ROOT/Sources/Outline.swift" "$TEMP_DIR/DraftChecks.swift" -o "$TEMP_DIR/draft"
 "$TEMP_DIR/draft"
