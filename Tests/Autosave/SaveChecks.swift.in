@@ -1,20 +1,31 @@
 import Foundation
 import UniformTypeIdentifiers
 
+extension Int { static let alertFirstButtonReturn = 1 }
+
 enum ModalResult { case OK, cancel }
 final class NSSavePanel {
     static var nextURL: URL?
     static var shown = 0
+    static var lastDirectoryURL: URL?
     var directoryURL: URL?
     var allowedContentTypes: [UTType] = []
     var nameFieldStringValue = ""
     var url: URL? { Self.nextURL }
-    func runModal() -> ModalResult { Self.shown += 1; return Self.nextURL == nil ? .cancel : .OK }
+    func runModal() -> ModalResult { Self.shown += 1; Self.lastDirectoryURL = directoryURL; return Self.nextURL == nil ? .cancel : .OK }
 }
 final class NSAlert {
     static var shown = 0
     var messageText = "", informativeText = ""
+    func addButton(withTitle title: String) {}
     @discardableResult func runModal() -> Int { Self.shown += 1; return 1 }
+}
+final class NSOpenPanel {
+    static var nextURL: URL?
+    static var shown = 0
+    var canChooseFiles = true, canChooseDirectories = false
+    var url: URL? { Self.nextURL }
+    func runModal() -> ModalResult { Self.shown += 1; return Self.nextURL == nil ? .cancel : .OK }
 }
 enum IDMode { case titleOnly, timestamp }
 struct HabitTracker { var markdown = "" }
@@ -45,11 +56,16 @@ enum CardIDIndex {
 struct History { mutating func saveCurrent(_ url: URL) {} }
 final class Harness {
     var cardMode = "markdown", text = "", tracker = HabitTracker(), todo = TodoList(), outline = OutlineDocument()
+    var showDebate = false
     var idMode = IDMode.titleOnly, fileURL: URL?, branchSaveFolder: URL?, saveFolder = "", notesFolder = "", status = ""
     var diskSnapshots: [String: Data] = [:], newDraftBaselines: [String: Data] = [:]
     var savedMarkdownSnapshot: String?, savedHabitSnapshot: String?, savedTodoSnapshot: String?, savedOutlineSnapshot: String?
     var autosaveTask: Task<Void, Never>?, history = History(), suppressHistorySave = false, sidebarRefreshToken = UUID()
     func ensureID() -> Bool { true }
+    func chooseNotesFolder() {
+        let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true
+        if panel.runModal() == .OK, let url = panel.url { notesFolder = url.path }
+    }
     func currentDraftSnapshot() -> String? { cardMode == "habits" ? savedHabitSnapshot : cardMode == "todos" ? savedTodoSnapshot : cardMode == "outline" ? savedOutlineSnapshot : savedMarkdownSnapshot }
     // SAVE_METHODS
 }
@@ -99,6 +115,37 @@ final class Harness {
         precondition(habit.saveMarkdown(automatic: true))
         let savedHabitData = try Data(contentsOf: habitFile)
         precondition(savedHabitData == Data(habitEdit.replacingOccurrences(of: "\n", with: "\r\n").utf8))
-        print("Direct saves, conflict guards, BOM, CRLF, missing files, and new destinations passed")
+        let missingFolder = temporary.appendingPathComponent("moved-notes", isDirectory: true)
+        let recover = Harness(); recover.fileURL = existing; recover.notesFolder = missingFolder.path
+        recover.text = "card_id: 7\n# Recovered\n"; recover.savedMarkdownSnapshot = decomposed
+        recover.diskSnapshots["markdown"] = Data(decomposed.utf8)
+        let unchanged = try Data(contentsOf: existing)
+        NSOpenPanel.nextURL = nil; NSOpenPanel.shown = 0
+        precondition(!recover.saveMarkdown(automatic: true) && NSOpenPanel.shown == 0)
+        let afterBlocked = try Data(contentsOf: existing)
+        precondition(afterBlocked == unchanged)
+        NSOpenPanel.nextURL = temporary; NSAlert.shown = 0
+        precondition(recover.saveMarkdown() && NSOpenPanel.shown == 1 && recover.notesFolder == temporary.path)
+        let afterRecovery = try Data(contentsOf: existing)
+        precondition(afterRecovery == Data(recover.text.utf8))
+        let vault = temporary.appendingPathComponent("vault", isDirectory: true)
+        try FileManager.default.createDirectory(at: vault, withIntermediateDirectories: false)
+        for (mode, debate, folderName) in [("habits", false, "Habit"), ("todos", false, "To Do"), ("markdown", true, "Debate")] {
+            let fresh = Harness(); fresh.cardMode = mode; fresh.showDebate = debate; fresh.notesFolder = vault.path
+            fresh.text = "# Debate\n"; fresh.tracker.markdown = "# Habit\n"; fresh.todo.markdown = "# To Do\n"
+            let expectedFolder = vault.appendingPathComponent(folderName, isDirectory: true)
+            let destination = expectedFolder.appendingPathComponent("New.md")
+            NSSavePanel.nextURL = destination; NSSavePanel.lastDirectoryURL = nil
+            precondition(fresh.saveMarkdown() && NSSavePanel.lastDirectoryURL == expectedFolder && fresh.fileURL == destination)
+            precondition(FileManager.default.fileExists(atPath: destination.path))
+        }
+        let legacy = Harness(); legacy.cardMode = "habits"; legacy.notesFolder = vault.path
+        legacy.fileURL = habitFile; legacy.savedHabitSnapshot = habitEdit; legacy.diskSnapshots["habits"] = Data(savedHabitData)
+        legacy.tracker.markdown = "# Updated in place\n"
+        NSSavePanel.shown = 0
+        precondition(legacy.saveMarkdown() && NSSavePanel.shown == 0 && legacy.fileURL == habitFile)
+        let legacyContents = try Data(contentsOf: habitFile)
+        precondition(legacyContents == Data(legacy.tracker.markdown.replacingOccurrences(of: "\n", with: "\r\n").utf8))
+        print("Direct saves, conflict guards, BOM, CRLF, missing files, and focused mode folders passed")
     }
 }

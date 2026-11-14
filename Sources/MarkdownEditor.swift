@@ -97,6 +97,9 @@ final class EditorState: ObservableObject {
 
 final class LinkCompletionTextView: NSTextView {
     private let textUndoManager = UndoManager()
+    private let bulletDragID = UUID()
+    private var pendingBulletDrag: (location: Int, point: NSPoint)?
+    static let bulletDragType = NSPasteboard.PasteboardType("com.wilbursalazar.cardify.bullet-row")
     // Hiding metadata changes only presentation attributes. The source string,
     // UTF-16 offsets and the text view's undo manager are never replaced.
     private var wantsHiddenFrontmatter = false
@@ -363,6 +366,129 @@ final class LinkCompletionTextView: NSTextView {
             super.insertNewline(sender)
         }
     }
+
+    // Dragging a Markdown bullet moves its whole indented branch. Keeping the
+    // edit inside the text view preserves the source, autosave and native undo.
+    static func bulletMove(in text: String, from sourceLocation: Int, to targetLocation: Int, after: Bool) -> (NSRange, String)? {
+        let value = text as NSString
+        struct Line { let range: NSRange; let content: String; let ending: String; let indent: Int; let isBullet: Bool }
+        let pattern = try! NSRegularExpression(pattern: #"^([ \t]*)([-+*])([ \t]+)"#)
+        var lines: [Line] = []
+        var offset = 0
+        var inFence = false
+        while offset < value.length {
+            let range = value.lineRange(for: NSRange(location: offset, length: 0))
+            var end = NSMaxRange(range)
+            while end > range.location && [10, 13].contains(Int(value.character(at: end - 1))) { end -= 1 }
+            let content = value.substring(with: NSRange(location: range.location, length: end - range.location))
+            let trimmed = content.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") { inFence.toggle() }
+            let match = inFence ? nil : pattern.firstMatch(in: content, range: NSRange(location: 0, length: (content as NSString).length))
+            let indent = match.map { (content as NSString).substring(with: $0.range(at: 1)).reduce(0) { $0 + ($1 == "\t" ? 4 : 1) } } ?? 0
+            lines.append(Line(range: range, content: content,
+                              ending: value.substring(with: NSRange(location: end, length: NSMaxRange(range) - end)),
+                              indent: indent, isBullet: match != nil))
+            offset = NSMaxRange(range)
+        }
+        guard let source = lines.firstIndex(where: { $0.range.location == sourceLocation && $0.isBullet }),
+              let target = lines.firstIndex(where: { $0.range.location == targetLocation && $0.isBullet }),
+              source != target, lines[source].indent == lines[target].indent else { return nil }
+        if let metadata = frontmatterRange(in: text), sourceLocation < NSMaxRange(metadata) || targetLocation < NSMaxRange(metadata) { return nil }
+        var end = source + 1
+        while end < lines.count && lines[end].isBullet && lines[end].indent > lines[source].indent { end += 1 }
+        guard target < source || target >= end else { return nil }
+        // Reordering stays within the same uninterrupted list. This avoids
+        // pulling a bullet across unrelated prose or another list.
+        var targetEnd = target + 1
+        while targetEnd < lines.count && lines[targetEnd].isBullet && lines[targetEnd].indent > lines[target].indent { targetEnd += 1 }
+        let first = min(source, target), last = max(end, targetEnd)
+        guard (first..<last).allSatisfy({ lines[$0].isBullet }) else { return nil }
+        var content = Array(lines[first..<last].map(\.content))
+        let endings = lines[first..<last].map(\.ending)
+        let branch = Array(content[(source - first)..<(end - first)])
+        content.removeSubrange((source - first)..<(end - first))
+        let insertion = (after ? targetEnd : target) - first - (source < target ? branch.count : 0)
+        content.insert(contentsOf: branch, at: insertion)
+        let range = NSRange(location: lines[first].range.location, length: NSMaxRange(lines[last - 1].range) - lines[first].range.location)
+        let replacement = zip(content, endings).map { $0.0 + $0.1 }.joined()
+        return replacement == value.substring(with: range) ? nil : (range, replacement)
+    }
+
+    private func bulletLocation(at event: NSEvent) -> Int? {
+        guard let manager = layoutManager, let container = textContainer, manager.numberOfGlyphs > 0 else { return nil }
+        var point = convert(event.locationInWindow, from: nil)
+        point.x -= textContainerOrigin.x; point.y -= textContainerOrigin.y
+        let glyph = manager.glyphIndex(for: point, in: container)
+        guard glyph < manager.numberOfGlyphs,
+              manager.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: container).contains(point) else { return nil }
+        let location = manager.characterIndexForGlyph(at: glyph)
+        let value = string as NSString
+        let line = value.lineRange(for: NSRange(location: location, length: 0))
+        let content = value.substring(with: line) as NSString
+        let pattern = try! NSRegularExpression(pattern: #"^[ \t]*[-+*](?=[ \t])"#)
+        guard let match = pattern.firstMatch(in: content as String, range: NSRange(location: 0, length: content.length)),
+              location == line.location + NSMaxRange(match.range) - 1,
+              Self.frontmatterRange(in: string).map({ location >= NSMaxRange($0) }) ?? true else { return nil }
+        return line.location
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let pending = pendingBulletDrag else { super.mouseDragged(with: event); return }
+        let point = convert(event.locationInWindow, from: nil)
+        guard hypot(point.x - pending.point.x, point.y - pending.point.y) > 4 else { return }
+        pendingBulletDrag = nil
+        let item = NSPasteboardItem()
+        item.setString("\(bulletDragID.uuidString):\(pending.location)", forType: Self.bulletDragType)
+        let dragging = NSDraggingItem(pasteboardWriter: item)
+        let image = NSImage(size: NSSize(width: 20, height: 20))
+        image.lockFocus(); NSColor.controlBackgroundColor.setFill(); NSRect(x: 0, y: 0, width: 20, height: 20).fill(); NSColor.labelColor.setFill(); NSRect(x: 8, y: 8, width: 4, height: 4).fill(); image.unlockFocus()
+        dragging.setDraggingFrame(NSRect(origin: pending.point, size: image.size), contents: image)
+        beginDraggingSession(with: [dragging], event: event, source: self)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        if let pending = pendingBulletDrag {
+            pendingBulletDrag = nil
+            setSelectedRange(NSRange(location: pending.location, length: 0))
+            window?.makeFirstResponder(self)
+            return
+        }
+        super.mouseUp(with: event)
+    }
+
+    private func bulletDragInfo(_ sender: NSDraggingInfo) -> (Int, Int, Bool)? {
+        guard let raw = sender.draggingPasteboard.string(forType: Self.bulletDragType),
+              raw.hasPrefix(bulletDragID.uuidString + ":"),
+              let source = Int(raw.dropFirst(bulletDragID.uuidString.count + 1)),
+              let manager = layoutManager, let container = textContainer, manager.numberOfGlyphs > 0 else { return nil }
+        var point = convert(sender.draggingLocation, from: nil)
+        point.x -= textContainerOrigin.x; point.y -= textContainerOrigin.y
+        let glyph = manager.glyphIndex(for: point, in: container)
+        guard glyph < manager.numberOfGlyphs else { return nil }
+        let location = manager.characterIndexForGlyph(at: glyph)
+        let target = (string as NSString).lineRange(for: NSRange(location: location, length: 0))
+        let rect = manager.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: container)
+        return (source, target.location, point.y > rect.midY)
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        if let (source, target, after) = bulletDragInfo(sender) { return Self.bulletMove(in: string, from: source, to: target, after: after) == nil ? [] : .move }
+        return super.draggingEntered(sender)
+    }
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        if let (source, target, after) = bulletDragInfo(sender) { return Self.bulletMove(in: string, from: source, to: target, after: after) == nil ? [] : .move }
+        return super.draggingUpdated(sender)
+    }
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard let (source, target, after) = bulletDragInfo(sender) else { return super.performDragOperation(sender) }
+        guard let (range, replacement) = Self.bulletMove(in: string, from: source, to: target, after: after) else { return false }
+        breakUndoCoalescing()
+        insertText(replacement, replacementRange: range)
+        breakUndoCoalescing()
+        window?.makeFirstResponder(self)
+        return true
+    }
+    override func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation { .move }
     override var undoManager: UndoManager? { textUndoManager }
     @objc func undo(_ sender: Any?) { if textUndoManager.canUndo { textUndoManager.undo() } }
     @objc func redo(_ sender: Any?) { if textUndoManager.canRedo { textUndoManager.redo() } }
@@ -396,6 +522,10 @@ final class LinkCompletionTextView: NSTextView {
     var handleToolbarKey: ((NSEvent) -> Bool)?
     var followLink: ((CardLinkTarget) -> Void)?
     override func mouseDown(with event: NSEvent) {
+        if !event.modifierFlags.contains(.command), let location = bulletLocation(at: event) {
+            pendingBulletDrag = (location, convert(event.locationInWindow, from: nil))
+            return
+        }
         if event.modifierFlags.contains(.command), let manager = layoutManager, let container = textContainer, manager.numberOfGlyphs > 0 {
             var point = convert(event.locationInWindow, from: nil)
             point.x -= textContainerOrigin.x; point.y -= textContainerOrigin.y
@@ -716,6 +846,7 @@ private struct MarkdownTextView: NSViewRepresentable {
         view.font = .systemFont(ofSize: 14, weight: .regular)
         view.isRichText = false; view.isAutomaticQuoteSubstitutionEnabled = false; view.isAutomaticDashSubstitutionEnabled = false; view.isAutomaticTextReplacementEnabled = false
         view.allowsUndo = true; view.delegate = context.coordinator; view.string = text; view.textContainerInset = NSSize(width: 16, height: 16)
+        view.registerForDraggedTypes([LinkCompletionTextView.bulletDragType])
         view.handleCompletionKey = { [weak coordinator = context.coordinator] event in coordinator?.parent.completion.handleKey(event) ?? false }
         view.handleToolbarKey = { [weak coordinator = context.coordinator] event in
             guard event.keyCode == 53, let selection = coordinator?.parent.selectionToolbar, selection.anchor != nil else { return false }

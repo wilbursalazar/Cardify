@@ -13,6 +13,22 @@ precondition(snapshot.cardID == "202611131437" && snapshot.bytes == Data(markdow
 func fails(_ action: () throws -> Void) -> Bool {
     do { try action(); return false } catch { return true }
 }
+let destinationFolder = directory.appendingPathComponent("Research")
+try manager.createDirectory(at: destinationFolder, withIntermediateDirectories: false)
+precondition(fails { _ = try SidebarFileActions.move(snapshot, to: destinationFolder, openURLs: [original]) }, "Open notes cannot move through the basic file action")
+let occupiedInFolder = destinationFolder.appendingPathComponent(original.lastPathComponent)
+try Data("different".utf8).write(to: occupiedInFolder)
+precondition(fails { _ = try SidebarFileActions.move(snapshot, to: destinationFolder, openURLs: []) }, "Moving must not overwrite an existing note")
+precondition((try? Data(contentsOf: occupiedInFolder)) == Data("different".utf8))
+try manager.removeItem(at: occupiedInFolder)
+let outsideFolder = manager.temporaryDirectory.appendingPathComponent("outside-\(UUID().uuidString)", isDirectory: true)
+try manager.createDirectory(at: outsideFolder, withIntermediateDirectories: false)
+defer { try? manager.removeItem(at: outsideFolder) }
+precondition(fails { _ = try SidebarFileActions.move(snapshot, to: outsideFolder, openURLs: []) }, "Moving outside the notes root must fail")
+let movedIntoFolder = try SidebarFileActions.move(snapshot, to: destinationFolder, openURLs: [])
+precondition((try? Data(contentsOf: movedIntoFolder)) == snapshot.bytes && !manager.fileExists(atPath: original.path), "Moving keeps the note bytes and removes its old path")
+let movedBack = try SidebarFileActions.move(SidebarFileActions.capture(movedIntoFolder, root: directory), to: directory, openURLs: [])
+precondition(movedBack == original && (try? Data(contentsOf: original)) == snapshot.bytes)
 precondition(fails { _ = try SidebarFileActions.rename(snapshot, filename: "../escape.md", openURLs: []) })
 precondition(fails { _ = try SidebarFileActions.rename(snapshot, filename: "renamed.md", openURLs: [original]) })
 precondition(fails { _ = try SidebarFileActions.duplicate(snapshot, openURLs: [original]) })

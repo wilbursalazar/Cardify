@@ -171,11 +171,24 @@ final class PreviewPagesView: NSView {
     }
 }
 
+final class PreviewZoomScrollView: NSScrollView {
+    var onWheel: ((NSEvent) -> Void)?
+
+    override func scrollWheel(with event: NSEvent) {
+        guard event.scrollingDeltaY != 0, abs(event.scrollingDeltaY) >= abs(event.scrollingDeltaX), let onWheel else {
+            super.scrollWheel(with: event)
+            return
+        }
+        onWheel(event)
+    }
+}
+
 final class StablePDFPreviewView: NSView {
-    let scrollView = NSScrollView()
+    let scrollView = PreviewZoomScrollView()
     let pagesView = PreviewPagesView()
     private var displayedRevision: PDFPreviewRevision?
     private var displayedData: Data?
+    private var zoom: CGFloat = 1
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -186,6 +199,7 @@ final class StablePDFPreviewView: NSView {
         scrollView.autohidesScrollers = true
         scrollView.autoresizingMask = [.width, .height]
         scrollView.documentView = pagesView
+        scrollView.onWheel = { [weak self] event in self?.zoom(with: event) }
         addSubview(scrollView)
     }
     required init?(coder: NSCoder) { nil }
@@ -203,6 +217,7 @@ final class StablePDFPreviewView: NSView {
         }
         guard let document = PDFDocument(data: data) else { pagesView.linksEnabled = false; return }
         let sameCard = displayedData != nil && displayedRevision?.mode == revision?.mode && displayedRevision?.filePath == revision?.filePath
+        if !sameCard { zoom = 1 }
         pagesView.linksEnabled = false
         pagesView.document = document
         displayedData = data; displayedRevision = revision
@@ -211,6 +226,32 @@ final class StablePDFPreviewView: NSView {
         pagesView.linksEnabled = true
     }
     func cancelPending() { pagesView.linksEnabled = false; pagesView.linkHandler = nil }
+
+    private func zoom(with event: NSEvent) {
+        guard !pagesView.pageRects.isEmpty else { return }
+        let delta = max(-25, min(25, event.scrollingDeltaY))
+        let factor = pow(event.hasPreciseScrollingDeltas ? 1.012 : 1.18, delta)
+        let next = min(4, max(0.5, zoom * factor))
+        guard next != zoom else { return }
+        let clip = scrollView.contentView
+        let origin = clip.bounds.origin
+        let point = pagesView.convert(event.locationInWindow, from: nil)
+        let offset = NSPoint(x: point.x - origin.x, y: point.y - origin.y)
+        let page = pagesView.pageRects.firstIndex(where: { $0.contains(point) })
+        let position = page.map { index in
+            let rect = pagesView.pageRects[index]
+            return NSPoint(x: (point.x - rect.minX) / rect.width, y: (point.y - rect.minY) / rect.height)
+        }
+        zoom = next
+        layoutPages()
+        if let page, let position, pagesView.pageRects.indices.contains(page) {
+            let rect = pagesView.pageRects[page]
+            let desired = NSPoint(x: rect.minX + position.x * rect.width - offset.x,
+                                  y: rect.minY + position.y * rect.height - offset.y)
+            clip.scroll(to: clip.constrainBoundsRect(NSRect(origin: desired, size: clip.bounds.size)).origin)
+            scrollView.reflectScrolledClipView(clip)
+        }
+    }
 
     private func layoutPages(resetScroll: Bool = false) {
         let size = scrollView.contentSize
@@ -222,6 +263,7 @@ final class StablePDFPreviewView: NSView {
             let bounds = page.bounds(for: .mediaBox)
             if bounds.height > 0 { width = min(width, max(1, size.height - 20) * bounds.width / bounds.height) }
         }
+        width *= zoom
         var heights: [CGFloat] = []
         if let document = pagesView.document {
             for index in 0..<document.pageCount {
@@ -230,12 +272,13 @@ final class StablePDFPreviewView: NSView {
             }
         }
         let totalHeight = heights.reduce(0, +) + CGFloat(max(0, heights.count - 1)) * 12
+        let documentWidth = max(size.width, width + 20)
         var y = max(10, (size.height - totalHeight) / 2)
         pagesView.pageRects = heights.map { height in
             defer { y += height + 12 }
-            return NSRect(x: (size.width - width) / 2, y: y, width: width, height: height)
+            return NSRect(x: (documentWidth - width) / 2, y: y, width: width, height: height)
         }
-        pagesView.frame = NSRect(x: 0, y: 0, width: size.width, height: max(size.height, totalHeight + 20))
+        pagesView.frame = NSRect(x: 0, y: 0, width: documentWidth, height: max(size.height, totalHeight + 20))
         let desired = resetScroll ? NSPoint.zero : oldOrigin
         let clip = scrollView.contentView
         clip.scroll(to: clip.constrainBoundsRect(NSRect(origin: desired, size: clip.bounds.size)).origin)
@@ -332,6 +375,16 @@ private struct EditorHeaderHeightKey: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
+struct LinkedCardTab: Identifiable {
+    let id = UUID()
+    let url: URL
+    let content: String
+    var title: String {
+        let heading = NoteEditing.title(in: content).trimmingCharacters(in: .whitespacesAndNewlines)
+        return heading.isEmpty ? url.deletingPathExtension().lastPathComponent : heading
+    }
+}
+
 struct ContentView: View {
     @AppStorage("draft") private var text = "# Example Title\n\nMain content area for notes.\n- Keep it concise, or continue onto another card.\n- Use Markdown for Obsidian.\n\nSource: Book Title, p. 42\n\nTags: #quicknote #important"
     @AppStorage("portrait") private var portrait = false
@@ -378,6 +431,8 @@ struct ContentView: View {
     @State private var showDebateBrowser = false
     @State private var showSettings = false
     @State private var linkRequestID = UUID()
+    @State private var linkedTabs: [LinkedCardTab] = []
+    @State private var selectedLinkedTab: UUID?
     @State private var research: ResearchClip?
     @State private var status = "Draft saved on this Mac."
     @State private var sidebarRefreshToken = UUID()
@@ -415,6 +470,7 @@ struct ContentView: View {
     var previewRevision: PDFPreviewRevision {
         PDFPreviewRevision(mode: cardMode, content: cardMode == "habits" ? tracker.markdown : cardMode == "todos" ? todo.printMarkdown : cardMode == "outline" ? outline.markdown : text, portrait: portrait, fontSize: fontSize, dotGrid: dotGrid, filePath: fileURL?.standardizedFileURL.path)
     }
+    var activeLinkedTab: LinkedCardTab? { linkedTabs.first(where: { $0.id == selectedLinkedTab }) }
     var currentCardTitle: String {
         let title = cardMode == "habits" ? tracker.title : cardMode == "todos" ? todo.title : cardMode == "outline" ? outline.title : NoteEditing.title(in: text)
         return title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? (fileURL?.deletingPathExtension().lastPathComponent ?? "Untitled card") : title
@@ -486,6 +542,9 @@ struct ContentView: View {
                 Menu("File") {
                     Button("New Card", action: newCard)
                     Button("Open Markdown…", action: openFile)
+                    Button("Research Clipper…") { research = ResearchClip() }
+                    Button("Mark as Index Card") { markIndexCard() }.disabled(cardMode != "markdown")
+                    Button("New Linked Idea from Current…") { ideaFromCurrent() }.disabled(cardMode != "markdown")
                     Button("Save As…") { _ = saveMarkdown(saveAs: true) }
                     Divider()
                     Button("Export PDF…", action: exportPDF)
@@ -505,7 +564,11 @@ struct ContentView: View {
                     Button("Save & Print") { if saveMarkdown() { printCards() } }.fixedSize().buttonStyle(.borderedProminent)
                 }
             }
-            Divider()
+            Divider().overlay(alignment: .bottom) {
+                if let focus = AppearancePreference.focusAccent(for: storedAppearance, mode: showDebate && cardMode == "markdown" ? "debate" : cardMode) {
+                    Rectangle().fill(focus.opacity(0.75)).frame(height: 2)
+                }
+            }
             HStack(alignment: .top, spacing: 0) {
                 if showNotesSidebar {
                     CardSidebar(currentURL: fileURL, openURLs: Array(fileURLs.values), draftTitle: currentCardTitle, draftID: cardMode == "markdown" ? CardMetadata.parse(text).id : cardMode == "outline" ? CardMetadata.parse(outline.markdown).id : nil,
@@ -515,9 +578,9 @@ struct ContentView: View {
                                     guard !folder.isEmpty else { status = "Choose a notes folder before opening a sidebar note."; return false }
                                     let root = URL(fileURLWithPath: folder, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL
                                     return loadFile(url, validating: { CardGraph.canOpen(url, in: root) })
-                                }, onReveal: revealSidebarNote, onDuplicate: duplicateSidebarNote,
+                                }, onOpenParallel: { url in openLinkedTab(url) }, onReveal: revealSidebarNote, onDuplicate: duplicateSidebarNote,
                                 onRename: renameSidebarNote, onTrash: trashSidebarNote,
-                                onCopyPath: copySidebarPath, onNew: newCard, onChooseFolder: chooseNotesFolder)
+                                onCopyPath: copySidebarPath, onMove: moveSidebarNote, onNew: newCard, onChooseFolder: chooseNotesFolder)
                         .frame(width: 205)
                     Divider().padding(.trailing, 10)
                 }
@@ -536,33 +599,22 @@ struct ContentView: View {
                                 if mode == "markdown" && cardMode == "markdown" { showDebate = false }
                             }
                         })) {
-                            Text("Research").tag("markdown"); Text("Habit").tag("habits"); Text("To Do").tag("todos"); Text("Outline").tag("outline"); Text("Debate").tag("debate")
-                        }.pickerStyle(.menu).labelsHidden().fixedSize().help("Choose Research, Habit, To Do, Outline, or Debate")
+                            Text("Research").tag("markdown"); Text("Habit").tag("habits"); Text("To Do").tag("todos"); Text("Debate").tag("debate")
+                            if cardMode == "outline" { Text("Outline").tag("outline") }
+                        }.pickerStyle(.menu).labelsHidden().fixedSize().help("Choose Research, Habit, To Do, or Debate")
                         Spacer(minLength: 4)
-                        Menu("Templates") {
-                            if showDebate && cardMode == "markdown" {
-                                Button("AFF prompts") { editor.insert(DebateTemplates.body(for: .aff)) }
-                                Button("DEF prompts") { editor.insert(DebateTemplates.body(for: .def)) }
-                                Button("Evidence prompts") { editor.insert(DebateTemplates.body(for: .evidence)) }
-                                Button("Objection prompts") { editor.insert(DebateTemplates.body(for: .objection)) }
-                                Button("Argument prompts") { editor.insert(DebateTemplates.body(for: .argument)) }
-                                Button("Reply prompts") { editor.insert(DebateTemplates.body(for: .reply)) }
-                            } else if cardMode == "habits" {
-                                Button("Weekly Habit Tracker") { newCard() }
-                            } else if cardMode == "todos" {
-                                Button("New To Do List") { newCard() }
-                            } else if cardMode == "outline" {
-                                Button("New Outline") { newCard() }
-                            } else {
-                                Button("Idea Card") { insertTemplate(.idea) }
-                                Button("Reading Card") { insertTemplate(.reading) }
-                                Button("Index Card") { insertTemplate(.index) }
-                                Button("Mark Current Card as Index") { markIndexCard() }.disabled(cardMode != "markdown")
-                                Divider()
-                                Button("New Idea from This Card…") { ideaFromCurrent() }.disabled(cardMode != "markdown")
-                                Divider()
-                                Button("Research Card…") { research = ResearchClip() }
-                            }
+                        if cardMode == "markdown" && !showDebate {
+                        Menu("Start") {
+                                Button { newResearchCard(template: .reading, mode: .titleOnly) } label: {
+                                    Label("Eco reading", systemImage: "books.vertical")
+                                }
+                                Button { newResearchCard(template: .idea, mode: .luhmann) } label: {
+                                    Label("Luhmann idea", systemImage: "arrow.triangle.branch")
+                                }
+                                Button { newResearchCard(template: nil, mode: .titleOnly) } label: {
+                                    Label("Quick note", systemImage: "square.and.pencil")
+                                }
+                        }
                         }
                     }
                     if cardMode == "markdown" && showDebate {
@@ -633,10 +685,10 @@ struct ContentView: View {
                             selectIDMode(mode)
                         })) {
                             ForEach(IDMode.allCases) { mode in Text(mode.rawValue).tag(mode) }
-                        }.labelsHidden().frame(width: 110).accessibilityLabel("ID style").help(showDebate ? "AFF and DEF points use their own IDs; connected cards inherit their parent’s ID. Existing IDs are kept." : "Choose how IDs are suggested for new notes. Existing IDs are kept.")
+                        }.labelsHidden().frame(width: 110).accessibilityLabel("ID style").help(showDebate ? "AFF and DEF points use their own IDs; connected cards inherit their parent’s ID." : "Choose the ID style for this card. Confirm before replacing an existing ID.")
                     }
                     HStack {
-                        Text("Write").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        Text("ID").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                         if showDebate || idMode != .titleOnly || CardMetadata.parse(text).id != nil {
                             TextField("Card ID", text: Binding(get: { CardMetadata.parse(text).id ?? "" }, set: { id in
                                 if let updated = NoteEditing.setID(id, in: text) { text = updated }
@@ -693,8 +745,27 @@ struct ContentView: View {
                     HStack {
                         Text("Preview").fontWeight(.semibold)
                         Spacer()
-                        let count = pageCount
+                        let count = activeLinkedTab == nil ? pageCount : 1
                         Text("\(count) \(count == 1 ? "card" : "cards")").font(.caption).foregroundStyle(.secondary)
+                    }
+                    if !linkedTabs.isEmpty {
+                        ScrollView(.horizontal) {
+                            HStack(spacing: 6) {
+                                Button("Current card") { selectedLinkedTab = nil }
+                                    .buttonStyle(.bordered)
+                                    .opacity(selectedLinkedTab == nil ? 1 : 0.65)
+                                ForEach(linkedTabs) { tab in
+                                    HStack(spacing: 2) {
+                                        Button(tab.title) { selectedLinkedTab = tab.id }
+                                            .lineLimit(1).frame(maxWidth: 160)
+                                        Button { closeLinkedTab(tab.id) } label: { Image(systemName: "xmark") }
+                                            .buttonStyle(.plain).accessibilityLabel("Close \(tab.title)")
+                                    }
+                                    .padding(.horizontal, 6).padding(.vertical, 4)
+                                    .background(tab.id == selectedLinkedTab ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 6))
+                                }
+                            }
+                        }.scrollIndicators(.hidden)
                     }
                     HStack(spacing: 8) {
                         Picker("Orientation", selection: $portrait) {
@@ -708,8 +779,13 @@ struct ContentView: View {
                         Slider(value: $fontSize, in: 7...18, step: 1).help("Text size")
                         Text("\(Int(fontSize)) pt").font(.caption).monospacedDigit().frame(width: 38, alignment: .trailing)
                     }
-                    let previewData = previewPDF
-                    PDFPreview(data: previewData, revision: previewRevision, onFollowLink: followLink)
+                    let linked = activeLinkedTab
+                    let previewData = linked == nil ? previewPDF : linked.flatMap { CardDocument(text: $0.content, portrait: portrait, fontSize: fontSize, dotGrid: dotGrid).pdf(includeLinks: true) }
+                    let revision = linked.map { PDFPreviewRevision(mode: "markdown", content: $0.content, portrait: portrait, fontSize: fontSize, dotGrid: dotGrid, filePath: $0.url.path) } ?? previewRevision
+                    PDFPreview(data: previewData, revision: revision, onFollowLink: { target in
+                        if let linked { followLinkFromTab(target, source: linked) }
+                        else { followLink(target) }
+                    })
                         .border(Color.secondary.opacity(0.2)).help("Click an underlined link to open it.")
                         .allowsHitTesting(previewData != nil)
                         .overlay(alignment: .top) {
@@ -719,6 +795,13 @@ struct ContentView: View {
                                     .background(.regularMaterial).allowsHitTesting(false)
                             }
                         }
+                    if let linked {
+                        HStack {
+                            Text(linked.url.lastPathComponent).lineLimit(1).font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Edit") { _ = loadFile(linked.url) }.font(.caption)
+                        }
+                    }
                     Text("3 × 5 in · ⅜ in inset · Print at 100% scale")
                         .font(.caption).foregroundStyle(.secondary)
                 }.frame(minWidth: 230)
@@ -726,9 +809,9 @@ struct ContentView: View {
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
             Text(status).font(.caption).foregroundStyle(.secondary)
         }.padding(.horizontal, 20).padding(.vertical, 18).frame(minWidth: 850, minHeight: 600)
-        .background(AppearancePreference.background(for: storedAppearance))
-        .accentColor(AppearancePreference.accent(for: storedAppearance))
-        .tint(AppearancePreference.tint(for: storedAppearance))
+        .background(AppearancePreference.backdrop(for: storedAppearance))
+        .accentColor(AppearancePreference.focusAccent(for: storedAppearance, mode: showDebate && cardMode == "markdown" ? "debate" : cardMode) ?? AppearancePreference.accent(for: storedAppearance))
+        .tint(AppearancePreference.focusAccent(for: storedAppearance, mode: showDebate && cardMode == "markdown" ? "debate" : cardMode) ?? AppearancePreference.tint(for: storedAppearance))
         .preferredColorScheme(AppearancePreference.colorScheme(for: storedAppearance))
         .onAppear {
             if storedIDMode.isEmpty { storedIDMode = (autoTimestampID ? IDMode.timestamp : IDMode.titleOnly).rawValue }
@@ -826,17 +909,46 @@ struct ContentView: View {
                     guard cardMode == "markdown" else { linkError("Heading links are not available in the outline editor."); return }
                     showHeading(fragment)
                 case .note(let url, let fragment):
-                    if sourceFile?.standardizedFileURL != url.standardizedFileURL {
-                        editor.clearPendingSelection()
-                        guard loadFile(url) else { return }
-                    }
-                    if let fragment {
-                        guard cardMode == "markdown" else { linkError("Heading links are available in Research notes."); return }
-                        showHeading(fragment)
-                    }
-                    else { status = "Opened \(url.lastPathComponent)." }
+                    if sourceFile?.standardizedFileURL == url.standardizedFileURL, let fragment { showHeading(fragment) }
+                    else { openLinkedTab(url, fragment: fragment) }
                 }
             }
+        }
+    }
+    func openLinkedTab(_ url: URL, fragment: String? = nil) {
+        do {
+            let folderPath = notesFolder.isEmpty ? saveFolder : notesFolder
+            guard !folderPath.isEmpty,
+                  CardGraph.canOpen(url, in: URL(fileURLWithPath: folderPath, isDirectory: true)) else {
+                linkError("This linked note is no longer available in the selected notes folder.")
+                return
+            }
+            let content = try decodeMarkdown(Data(contentsOf: url))
+            if let fragment, CardLinkNavigation.headingRange(fragment, in: content) == nil {
+                linkError("The linked heading was not found.")
+                return
+            }
+            linkedTabs.removeAll(where: { $0.url.standardizedFileURL == url.standardizedFileURL })
+            let tab = LinkedCardTab(url: url, content: content)
+            linkedTabs.append(tab); selectedLinkedTab = tab.id
+            status = "Opened \(tab.title) beside the current card."
+        } catch { linkError("Could not open linked note: \(error.localizedDescription)") }
+    }
+    func closeLinkedTab(_ id: UUID) {
+        linkedTabs.removeAll(where: { $0.id == id })
+        if selectedLinkedTab == id { selectedLinkedTab = linkedTabs.last?.id }
+    }
+    func followLinkFromTab(_ target: CardLinkTarget, source: LinkedCardTab) {
+        let folderPath = notesFolder.isEmpty ? saveFolder : notesFolder
+        let folder = folderPath.isEmpty ? nil : URL(fileURLWithPath: folderPath, isDirectory: true)
+        let result = CardLinkNavigation.resolve(target, folder: folder, currentFile: source.url)
+        switch result {
+        case .failure(let message): linkError(message)
+        case .external(let url):
+            if !NSWorkspace.shared.open(url) { linkError("Could not open this link.") }
+        case .current(let fragment):
+            if CardLinkNavigation.headingRange(fragment, in: source.content) == nil { linkError("The linked heading was not found.") }
+        case .note(let url, let fragment): openLinkedTab(url, fragment: fragment)
         }
     }
     func showHeading(_ fragment: String) {
@@ -861,51 +973,50 @@ struct ContentView: View {
         let currentID = CardMetadata.parse(text).id
         let debate = DebateNotes.parse(text)
         let isDebateCard = showDebate || debate.role != nil || debate.primary != nil || !debate.projects.isEmpty || !debate.related.isEmpty
-        if mode == .luhmann && cardMode == "markdown" && !isDebateCard && fileURL == nil {
-            guard currentID != nil || !CardMetadata.hasNonemptyID(text) else {
-                status = "Fix existing card_id metadata before changing ID style."
-                return
-            }
-            let roots = scanRoots(for: fileURL)
-            guard currentID == nil || !roots.isEmpty else {
-                status = "Choose a notes or save folder before changing the card ID."
-                let alert = NSAlert(); alert.messageText = "Can't check card IDs"; alert.informativeText = status; alert.runModal()
-                return
-            }
-            do {
-                let existing = try BranchIDs.existing(in: roots)
-                guard let proposedID = CardIDs.newID(mode: .luhmann, existing: existing),
-                      let updated = NoteEditing.setID(proposedID, in: text),
-                      CardMetadata.parse(updated).id == proposedID else {
-                    status = "Could not prepare a Luhmann ID. Check the card metadata."
-                    return
-                }
-                if let currentID, proposedID != currentID {
-                    let alert = NSAlert()
-                    alert.messageText = "Replace the current card ID?"
-                    alert.informativeText = "Current ID: \(currentID)\nSuggested Luhmann ID: \(proposedID)\n\nThis changes only the current unsaved draft."
-                    alert.addButton(withTitle: "Replace ID")
-                    alert.addButton(withTitle: "Keep Current ID")
-                    guard alert.runModal() == .alertFirstButtonReturn else {
-                        status = "Kept the current card ID and ID style."
-                        return
-                    }
-                }
-                text = updated; storedIDMode = mode.rawValue
-                status = "Luhmann ID added: \(proposedID)."
-            } catch {
-                status = "Could not check card IDs: \(error.localizedDescription)"
-                let alert = NSAlert(); alert.messageText = "Can't check card IDs"; alert.informativeText = status; alert.runModal()
-            }
+        if mode == .titleOnly { storedIDMode = mode.rawValue; return }
+        if isDebateCard && currentID != nil {
+            storedIDMode = mode.rawValue
+            status = "Debate cards keep their existing IDs."
             return
         }
-        let previousStoredMode = storedIDMode
-        storedIDMode = mode.rawValue
-        if mode != .titleOnly && currentID == nil {
-            if !ensureID() { storedIDMode = previousStoredMode }
+        guard currentID != nil || !CardMetadata.hasNonemptyID(text) else {
+            status = "Fix existing card_id metadata before changing ID style."
+            return
         }
-        else if mode == .luhmann && isDebateCard && currentID != nil { status = "Debate cards keep their existing IDs." }
-        else if mode == .luhmann && fileURL != nil && currentID != nil { status = "Luhmann style selected; the saved card ID was kept." }
+        let roots = scanRoots(for: fileURL)
+        guard currentID == nil || !roots.isEmpty else {
+            status = "Choose a notes or save folder before changing the card ID."
+            let alert = NSAlert(); alert.messageText = "Can't check card IDs"; alert.informativeText = status; alert.runModal()
+            return
+        }
+        do {
+            let existing = try BranchIDs.existing(in: roots, excluding: fileURL)
+            guard let proposedID = CardIDs.newID(mode: mode, existing: existing,
+                                                 timestampStyle: TimestampDateStyle(rawValue: timestampDateStyle) ?? .sortable,
+                                                 timestampIncludeTime: timestampIncludeTime),
+                  let updated = NoteEditing.setID(proposedID, in: text),
+                  CardMetadata.parse(updated).id == proposedID else {
+                status = "Could not prepare a \(mode.rawValue) ID. Check the card metadata."
+                return
+            }
+            if let currentID, proposedID != currentID {
+                let alert = NSAlert()
+                alert.messageText = "Replace the current card ID?"
+                alert.informativeText = "Current ID: \(currentID)\nSuggested \(mode.rawValue) ID: \(proposedID)" +
+                    (fileURL == nil ? "\n\nThis changes the unsaved draft." : "\n\nThe saved file will keep its filename. Links using the old ID may need updating.")
+                alert.addButton(withTitle: "Replace ID")
+                alert.addButton(withTitle: "Keep Current ID")
+                guard alert.runModal() == .alertFirstButtonReturn else {
+                    status = "Kept the current card ID and ID style."
+                    return
+                }
+            }
+            text = updated; storedIDMode = mode.rawValue
+            status = "\(mode.rawValue) ID added: \(proposedID)."
+        } catch {
+            status = "Could not check card IDs: \(error.localizedDescription)"
+            let alert = NSAlert(); alert.messageText = "Can't check card IDs"; alert.informativeText = status; alert.runModal()
+        }
     }
     @discardableResult func ensureID() -> Bool {
         if idMode == .titleOnly { return true }
@@ -1168,10 +1279,38 @@ struct ContentView: View {
         }
         newDraftBaselines[cardMode] = Data(currentDraftContents().utf8)
     }
+    func newResearchCard(template: InlineTemplate?, mode: IDMode) {
+        var discarded: [String] = []
+        let modes = cardMode == "markdown" ? ["markdown"] : [cardMode, "markdown"]
+        guard confirmReplaceDrafts(modes, discarded: &discarded) else { return }
+        for discardedMode in discarded { clearDiscardedDraft(discardedMode) }
+        cardMode = "markdown"
+        fileURL = nil; branchSaveFolder = nil; history.detach()
+        editor.discardUndoHistory(); savedMarkdownSnapshot = nil
+        storedIDMode = mode.rawValue
+        text = template?.markdown ?? ""
+        if mode != .titleOnly { _ = ensureID() } else { status = "New draft." }
+        newDraftBaselines["markdown"] = Data(text.utf8)
+    }
     // A normal Save updates the note already open; Save As is the only path
     // that presents a destination panel for an existing note.
     func saveMarkdown(saveAs: Bool = false, automatic: Bool = false) -> Bool {
         autosaveTask?.cancel()
+        if !notesFolder.isEmpty && (idMode != .titleOnly || CardMetadata.parse(text).id != nil) {
+            var isDirectory = ObjCBool(false)
+            let available = FileManager.default.fileExists(atPath: notesFolder, isDirectory: &isDirectory) &&
+                isDirectory.boolValue && FileManager.default.isReadableFile(atPath: notesFolder)
+            if !available {
+                let message = "The selected notes folder is unavailable: \(notesFolder). Choose its current location to check card IDs."
+                status = automatic ? "Autosave paused: " + message : message
+                guard !automatic else { return false }
+                let alert = NSAlert(); alert.messageText = "Locate notes folder"; alert.informativeText = message
+                alert.addButton(withTitle: "Choose Notes Folder…"); alert.addButton(withTitle: "Cancel")
+                guard alert.runModal() == .alertFirstButtonReturn else { return false }
+                chooseNotesFolder()
+                guard !notesFolder.isEmpty, FileManager.default.isReadableFile(atPath: notesFolder) else { return false }
+            }
+        }
         if cardMode == "markdown" && fileURL == nil && idMode != .titleOnly && !ensureID() { return false }
         let content = cardMode == "habits" ? tracker.markdown : cardMode == "todos" ? todo.markdown : cardMode == "outline" ? outline.markdown : text
         let currentURL = fileURL
@@ -1182,6 +1321,23 @@ struct ContentView: View {
             guard !automatic else { return false }
             let panel = NSSavePanel()
             if let currentURL { panel.directoryURL = currentURL.deletingLastPathComponent() }
+            else if let folderName: String = cardMode == "habits" ? "Habit" : cardMode == "todos" ? "To Do" : cardMode == "markdown" && showDebate ? "Debate" : nil,
+                    !(notesFolder.isEmpty && saveFolder.isEmpty) {
+                do {
+                    let root = URL(fileURLWithPath: notesFolder.isEmpty ? saveFolder : notesFolder, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL
+                    let folder = root.appendingPathComponent(folderName, isDirectory: true)
+                    let manager = FileManager.default
+                    if manager.fileExists(atPath: folder.path) {
+                        let values = try folder.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+                        guard values.isDirectory == true, values.isSymbolicLink != true else { throw CocoaError(.fileWriteInvalidFileName) }
+                    } else { try manager.createDirectory(at: folder, withIntermediateDirectories: false) }
+                    panel.directoryURL = folder
+                } catch {
+                    status = "Could not prepare the \(folderName) folder: \(error.localizedDescription)"
+                    let alert = NSAlert(); alert.messageText = "Could not save card"; alert.informativeText = status; alert.runModal()
+                    return false
+                }
+            }
             else if let folder = branchSaveFolder { panel.directoryURL = folder }
             else if !saveFolder.isEmpty { panel.directoryURL = URL(fileURLWithPath: saveFolder, isDirectory: true) }
             panel.allowedContentTypes = [.init(filenameExtension: "md")!]
@@ -1429,6 +1585,19 @@ struct ContentView: View {
             let renamed = try SidebarFileActions.rename(mutation.snapshot, filename: field.stringValue, openURLs: otherURLs)
             if mutation.activeMode != nil { fileURL = renamed; linkRequestID = UUID() }
             history.rename(url, to: renamed); sidebarRefreshToken = UUID(); status = "Renamed to \(renamed.lastPathComponent)."
+        } catch { scheduleAutosave(); sidebarError(error) }
+    }
+
+    private func moveSidebarNote(_ url: URL, to folder: URL) {
+        do {
+            guard let mutation = try prepareSidebarMutation(url) else { return }
+            let otherURLs = try validateSidebarMutation(mutation)
+            if mutation.activeMode != nil { autosaveTask?.cancel() }
+            let moved = try SidebarFileActions.move(mutation.snapshot, to: folder, openURLs: otherURLs)
+            if mutation.activeMode != nil { fileURL = moved; linkRequestID = UUID() }
+            history.rename(url, to: moved)
+            sidebarRefreshToken = UUID()
+            status = moved == url ? "This note is already in that folder." : "Moved \(url.lastPathComponent) to \(folder.lastPathComponent). Links using its old folder path may need updating."
         } catch { scheduleAutosave(); sidebarError(error) }
     }
 

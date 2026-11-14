@@ -123,7 +123,14 @@ import PDFKit
   preview.update(data: document("# Different note"), revision: key("Different note", "/vault/other.md"))
   precondition(clip.bounds.origin.y < 2, "changing files resets scroll")
   _ = checkRendered(0)
+  let unzoomedWidth = preview.pagesView.pageRects[0].width
+  let wheel = NSEvent(cgEvent: CGEvent(scrollWheelEvent2Source: nil, units: .line,
+                                      wheelCount: 1, wheel1: 2, wheel2: 0, wheel3: 0)!)!
+  preview.scrollView.scrollWheel(with: wheel)
+  precondition(preview.pagesView.pageRects[0].width > unzoomedWidth, "wheel zooms the on-screen page")
+  preview.update(data: document("# Another note"), revision: key("Another note", "/vault/another.md"))
+  precondition(abs(preview.pagesView.pageRects[0].width - unzoomedWidth) < 2, "changing cards resets preview zoom")
   preview.cancelPending(); window.close()
-  print("Synchronous preview pixel rendering, rapid edits, links, focus and multipage scrolling passed")
+  print("Synchronous preview pixel rendering, rapid edits, links, focus, multipage scrolling and wheel zoom passed")
  }
 }

@@ -32,4 +32,12 @@ precondition(contrast(.white, AppearancePreference.charcoalTeal) >= 4.5)
 precondition(AppearancePreference.tint(for: "slate") == AppearancePreference.slateAccent)
 precondition(contrast(AppearancePreference.slateText, AppearancePreference.slateBackground) >= 4.5)
 precondition(contrast(AppearancePreference.slateAccent, AppearancePreference.slateBackground) >= 4.5)
+precondition(AppearancePreference.focusAccent(for: "slate", mode: "markdown") == nil)
+for mode in ["habits", "todos", "debate"] {
+    let dark = AppearancePreference.focusAccent(for: "slate", mode: mode)!
+    let light = AppearancePreference.focusAccent(for: "light", mode: mode)!
+    precondition(contrast(dark, AppearancePreference.slateGradientEnd) >= 4.5)
+    precondition(contrast(light, .white) >= 4.5)
+}
+_ = AppearancePreference.backdrop(for: "slate")
 print("Appearance preferences and Charcoal palette contrast passed")

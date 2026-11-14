@@ -43,9 +43,15 @@ final class Harness {
         precondition(cancel.text == original && cancel.idMode == .timestamp, "Declining must keep ID and previous style")
         let saved = fresh(); let savedURL = root.appendingPathComponent("saved.md")
         try original.write(to: savedURL, atomically: true, encoding: .utf8); saved.fileURL = savedURL
-        NSAlert.shown = []; NSAlert.replies = []; saved.selectIDMode(.luhmann)
-        precondition(saved.text == original && saved.idMode == .luhmann && NSAlert.shown.isEmpty, "Saved IDs must stay unchanged")
+        NSAlert.shown = []; NSAlert.replies = [1]; saved.selectIDMode(.luhmann)
+        precondition(CardMetadata.parse(saved.text).id == "3" && saved.idMode == .luhmann && NSAlert.shown.count == 1, "Saved ID change needs confirmation")
+        precondition(NSAlert.shown[0].1.contains("keep its filename"), "Saved ID change warns that the filename remains")
         precondition((try? String(contentsOf: savedURL, encoding: .utf8)) == original)
+        let timestamp = fresh(); timestamp.storedIDMode = IDMode.luhmann.rawValue
+        timestamp.text = "---\ncard_id: \"1b\"\n---\n# Idea\n"
+        NSAlert.shown = []; NSAlert.replies = [1]; timestamp.selectIDMode(.timestamp)
+        precondition(timestamp.idMode == .timestamp && CardMetadata.parse(timestamp.text).id != "1b" && NSAlert.shown.count == 1, "Switching from Luhmann must propose a timestamp ID")
+        NSAlert.shown = []
         let debate = fresh(); debate.showDebate = true; debate.text = "---\ncard_id: \"AFF-01\"\n---\n# Point\n"
         let debateOriginal = debate.text; debate.selectIDMode(.luhmann)
         precondition(debate.text == debateOriginal && debate.idMode == .luhmann && NSAlert.shown.isEmpty && debate.status == "Debate cards keep their existing IDs.", "Debate IDs must stay unchanged")
@@ -62,6 +68,7 @@ final class Harness {
         let invalidSavedText = invalidSaved.text; invalidSaved.selectIDMode(.luhmann)
         precondition(invalidSaved.text == invalidSavedText && invalidSaved.idMode == .timestamp, "Malformed saved IDs must keep the previous style")
         let scanFailure = fresh(); scanFailure.showDebate = true; scanFailure.text = "# Note\n"; scanFailure.notesFolder = root.appendingPathComponent("missing").path
+        NSAlert.shown = []; NSAlert.replies = [1]
         let scanFailureText = scanFailure.text; scanFailure.selectIDMode(.luhmann)
         precondition(scanFailure.text == scanFailureText && scanFailure.idMode == .timestamp, "Failed scans must keep the previous style")
         let missing = fresh(); missing.notesFolder = root.appendingPathComponent("missing").path

@@ -15,6 +15,7 @@ enum AppearancePreference: String, CaseIterable, Identifiable {
     static let charcoalTeal = Color(red: 6 / 255, green: 126 / 255, blue: 137 / 255)
     static let charcoalBlue = Color(red: 148 / 255, green: 180 / 255, blue: 205 / 255)
     static let slateBackground = Color(red: 20 / 255, green: 20 / 255, blue: 25 / 255)
+    static let slateGradientEnd = Color(red: 34 / 255, green: 31 / 255, blue: 45 / 255)
     static let slateText = Color(red: 159 / 255, green: 163 / 255, blue: 172 / 255)
     static let slateAccent = Color(red: 139 / 255, green: 147 / 255, blue: 184 / 255)
 
@@ -22,6 +23,20 @@ enum AppearancePreference: String, CaseIterable, Identifiable {
         if stored == charcoal.rawValue { return charcoalBackground }
         if stored == slate.rawValue { return slateBackground }
         return Color(nsColor: .windowBackgroundColor)
+    }
+    static func backdrop(for stored: String) -> LinearGradient {
+        let base = background(for: stored)
+        return LinearGradient(colors: stored == slate.rawValue ? [base, slateGradientEnd] : [base, base],
+                              startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+    static func focusAccent(for stored: String, mode: String) -> Color? {
+        let light = colorScheme(for: stored) == .light
+        switch mode {
+        case "habits": return light ? Color(red: 0.20, green: 0.42, blue: 0.34) : Color(red: 0.54, green: 0.73, blue: 0.64)
+        case "todos": return light ? Color(red: 0.48, green: 0.32, blue: 0.18) : Color(red: 0.82, green: 0.68, blue: 0.52)
+        case "debate": return light ? Color(red: 0.39, green: 0.29, blue: 0.51) : Color(red: 0.70, green: 0.61, blue: 0.82)
+        default: return nil
+        }
     }
     static func foreground(for stored: String) -> Color? {
         if stored == charcoal.rawValue { return charcoalText }

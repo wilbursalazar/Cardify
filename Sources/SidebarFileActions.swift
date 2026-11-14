@@ -4,7 +4,7 @@ import Foundation
 // A snapshot can safely be held while a confirmation dialog is open.
 enum SidebarFileActions {
     enum ActionError: LocalizedError {
-        case unavailable, changed, open, invalidName, filenameID, invalidMarkdown, idComment, existingDestination
+        case unavailable, changed, open, invalidName, filenameID, invalidMarkdown, idComment, existingDestination, invalidFolder
         var errorDescription: String? {
             switch self {
             case .unavailable: return "This note is no longer available in the selected notes folder. Refresh and try again."
@@ -15,6 +15,7 @@ enum SidebarFileActions {
             case .invalidMarkdown: return "This note's metadata or UTF-8 encoding cannot be safely duplicated."
             case .idComment: return "The card ID has an inline comment. Move the comment to its own line before duplicating, so it is preserved."
             case .existingDestination: return "A file with that name already exists. Choose a different name."
+            case .invalidFolder: return "Choose a folder inside the selected notes folder."
             }
         }
     }
@@ -79,6 +80,27 @@ enum SidebarFileActions {
         guard filenameIDs(snapshot.url) == filenameIDs(destination) else { throw ActionError.filenameID }
         guard !FileManager.default.fileExists(atPath: destination.path) else { throw ActionError.existingDestination }
         // moveItem refuses an existing destination even if one appeared after the check.
+        try FileManager.default.moveItem(at: snapshot.url, to: destination)
+        return destination
+    }
+
+    static func move(_ snapshot: Snapshot, to folder: URL, openURLs: [URL]) throws -> URL {
+        let folder = folder.standardizedFileURL
+        let root = snapshot.root
+        let prefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
+        guard folder == root || folder.path.hasPrefix(prefix) else { throw ActionError.invalidFolder }
+        var item = folder
+        while item != root {
+            guard let values = try? item.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .isHiddenKey]),
+                  values.isDirectory == true, values.isSymbolicLink != true, values.isHidden != true,
+                  item.resolvingSymlinksInPath().standardizedFileURL == item else { throw ActionError.invalidFolder }
+            item = item.deletingLastPathComponent()
+        }
+        guard folder == root || (try? root.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true else { throw ActionError.invalidFolder }
+        try validate(snapshot, openURLs: openURLs)
+        let destination = folder.appendingPathComponent(snapshot.url.lastPathComponent)
+        guard destination != snapshot.url else { return destination }
+        guard !FileManager.default.fileExists(atPath: destination.path) else { throw ActionError.existingDestination }
         try FileManager.default.moveItem(at: snapshot.url, to: destination)
         return destination
     }

@@ -220,4 +220,21 @@ precondition(!view.formatSelection(.heading, range: taskRange, expectedText: Dat
 undo.beginUndoGrouping(); precondition(view.formatSelection(.task, range: taskRange, expectedText: Data(view.string.utf8))); undo.endUndoGrouping()
 precondition(view.string == "  - [x] Complete\r\n  - [ ] Pending\r\n", "task conversion must retain nested indentation and completed tasks")
 undo.undo(); precondition(view.string == tasks)
+
+// Dragging a bullet in the main editor reorders its whole nested branch while
+// keeping frontmatter, Unicode, final newline style, and native undo intact.
+let movable = header + "- Alpha 🗂\r\n  - Child\r\n- Beta\r\n- Gamma"
+set(movable); view.setFrontmatterHidden(true)
+let alpha = (movable as NSString).range(of: "- Alpha").location
+let beta = (movable as NSString).range(of: "- Beta").location
+let gamma = (movable as NSString).range(of: "- Gamma").location
+let moved = LinkCompletionTextView.bulletMove(in: movable, from: alpha, to: gamma, after: true)
+precondition(moved != nil)
+undo.beginUndoGrouping(); view.insertText(moved!.1, replacementRange: moved!.0); undo.endUndoGrouping()
+precondition(view.string == header + "- Beta\r\n- Gamma\r\n- Alpha 🗂\r\n  - Child")
+undo.undo(); precondition(view.string == movable, "bullet move must undo in one step")
+undo.redo(); precondition(view.string == header + "- Beta\r\n- Gamma\r\n- Alpha 🗂\r\n  - Child")
+precondition(LinkCompletionTextView.bulletMove(in: movable, from: alpha, to: (header as NSString).range(of: "card_id").location, after: false) == nil)
+precondition(LinkCompletionTextView.bulletMove(in: movable, from: beta, to: gamma, after: true) != nil)
+precondition(LinkCompletionTextView.bulletMove(in: movable, from: alpha, to: (movable as NSString).range(of: "  - Child").location, after: false) == nil, "different indent cannot accidentally reparent a branch")
 print("Metadata conceal/reveal, CRLF, selection, undo, protection, and nested list continuation passed")

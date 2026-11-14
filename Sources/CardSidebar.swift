@@ -12,11 +12,13 @@ struct CardSidebar: View {
     let saveFolder: String
     let refreshToken: UUID
     let onOpen: (URL) -> Bool
+    let onOpenParallel: (URL) -> Void
     let onReveal: (URL) -> Void
     let onDuplicate: (URL) -> Void
     let onRename: (URL) -> Void
     let onTrash: (URL) -> Void
     let onCopyPath: (URL) -> Void
+    let onMove: (URL, URL) -> Void
     let onNew: () -> Void
     let onChooseFolder: () -> Void
 
@@ -130,6 +132,19 @@ struct CardSidebar: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain).disabled(searching)
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            guard let provider = providers.first else { return false }
+            _ = provider.loadObject(ofClass: NSURL.self) { object, _ in
+                guard let url = object as? URL else { return }
+                DispatchQueue.main.async {
+                    guard !folder.isEmpty else { return }
+                    let root = URL(fileURLWithPath: folder, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL
+                    let destination = root.appendingPathComponent(row.path, isDirectory: true)
+                    onMove(url, destination)
+                }
+            }
+            return true
+        }
         .help(searching ? "Clear search to collapse folders." : row.path)
         .accessibilityLabel("Folder \(row.name), \(row.expanded ? "expanded" : "collapsed")")
     }
@@ -156,6 +171,7 @@ struct CardSidebar: View {
         .buttonStyle(.plain)
         .contextMenu {
             Button { open(card) } label: { Label("Open", systemImage: "doc.text") }.disabled(isCurrent(card))
+            Button { perform(onOpenParallel, for: card) } label: { Label("Open Beside Current Card", systemImage: "rectangle.split.2x1") }
             Divider()
             Button { perform(onReveal, for: card) } label: { Label("Show in Finder", systemImage: "folder") }
             Button { perform(onCopyPath, for: card) } label: { Label("Copy Path", systemImage: "doc.on.doc") }
@@ -169,6 +185,7 @@ struct CardSidebar: View {
                 .help(isOpen(card) && !isCurrent(card) ? "This file is open in another workspace." : "Move this file to Trash.")
         }
         .help(card.path)
+        .onDrag { NSItemProvider(object: card.url as NSURL) }
         .accessibilityLabel(card.cardID.map { "\(card.title), ID \($0)" } ?? card.title)
     }
 

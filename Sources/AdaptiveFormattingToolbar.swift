@@ -13,8 +13,10 @@ struct AdaptiveFormattingToolbar: View {
         Button("I") { editor.wrap("*") }.italic().help("Italic").accessibilityLabel("Italic")
         Button("H1") { editor.prefix("# ") }.help("Heading").accessibilityLabel("Heading")
         Button("H2") { editor.prefix("## ") }.help("Subheading").accessibilityLabel("Subheading")
-        Button("• List") { editor.prefix("- ") }.help("Bullet list").accessibilityLabel("Bullet list")
-        Button("☐ Task") { editor.prefix("- [ ] ") }.help("Task").accessibilityLabel("Task")
+        Button { editor.prefix("- ") } label: { Image(systemName: "list.bullet").frame(width: 44) }
+            .help("Bullet list").accessibilityLabel("Bullet list")
+        Button { editor.prefix("- [ ] ") } label: { Image(systemName: "checklist").frame(width: 44) }
+            .help("Task list").accessibilityLabel("Task list")
     }
 
     @ViewBuilder private var sourceButtons: some View {

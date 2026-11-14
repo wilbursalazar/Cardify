@@ -1,6 +1,7 @@
 import Foundation
 
-// Identity policy affects new notes only; existing IDs and filenames remain unchanged.
+// Identity policy proposes an ID for the current card; changing an existing
+// ID requires confirmation and does not rename its saved file.
 enum IDMode: String, CaseIterable, Identifiable {
     case timestamp = "Timestamp"
     case luhmann = "Luhmann"
