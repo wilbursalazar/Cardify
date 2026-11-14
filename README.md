@@ -30,6 +30,8 @@ When you leave a new, edited card, Cardify offers **Save**, **Discard**, or **Ca
 
 The notes sidebar shows Markdown cards from your notes folder, or your save folder if no notes folder is set. A new card also appears there as an unsaved draft. Search or select a card to open it; use the folder and refresh controls at the top to change or rescan the folder. **New Card** starts a draft in the selected card type. Use the sidebar button in the top ribbon, or **Layout → Show notes sidebar**, to hide or show it.
 
+Right-click a saved note in the sidebar to open it, show it in Finder, copy its path, duplicate it, rename its file, or move it to the macOS Trash. A duplicate does not retain the original card ID. Renaming or trashing a file does not update links in other notes. Cardify checks the file for outside changes before changing it.
+
 Use the **back** and **forward** arrows in the top ribbon to revisit cards opened during the current session. The buttons follow browsing history, not the card-number sequence. You can also use **⌘[** and **⌘]**. Opening a different card after going back starts a new path through your history.
 
 Choose **Layout** in the top ribbon to put writing on the left, preview on the left, or writing above preview. Drag the divider to resize the areas; select the divider and use arrow keys to adjust it with the keyboard. Cardify remembers the arrangement. The formatting controls use one row when it fits and two rows when the writing area is narrower. If the controls above the editor need more space, scroll that area to see them all.
@@ -147,7 +149,7 @@ Related: [[Research/Memory and archives]] — connects this idea to how archives
 
 Use the buttons above the editor for **bold**, *italic*, headings, bullet lists, and tasks. Markdown and wiki-link labels appear in the card preview and print output. Cardify renders a subset of Markdown; it does not promise every Obsidian or Markdown feature will print exactly as it appears in another app.
 
-For notes with YAML frontmatter, use **Show Metadata** or **Hide Metadata** in the editor to reveal or conceal it without removing it from the file. Markdown syntax in the body remains visible while editing. Press Return on a bullet or task to continue the list; press Return on an empty item to finish it.
+For notes with YAML frontmatter, use **Show Metadata** or **Hide Metadata** in the editor to reveal or conceal it without removing it from the file. While metadata is hidden, **Select All** selects the note body and leaves the hidden metadata intact; reveal it to select and edit it too. Markdown syntax in the body remains visible while editing. Press Return on a bullet or task to continue the list; press Return on an empty item to finish it.
 
 ## Outline ideas
 

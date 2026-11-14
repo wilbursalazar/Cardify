@@ -5,12 +5,18 @@ import AppKit
 // the editor's existing unsaved-draft guard; the sidebar never writes files.
 struct CardSidebar: View {
     let currentURL: URL?
+    let openURLs: [URL]
     let draftTitle: String
     let draftID: String?
     let notesFolder: String
     let saveFolder: String
     let refreshToken: UUID
     let onOpen: (URL) -> Bool
+    let onReveal: (URL) -> Void
+    let onDuplicate: (URL) -> Void
+    let onRename: (URL) -> Void
+    let onTrash: (URL) -> Void
+    let onCopyPath: (URL) -> Void
     let onNew: () -> Void
     let onChooseFolder: () -> Void
 
@@ -93,6 +99,21 @@ struct CardSidebar: View {
                                     .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
+                                .contextMenu {
+                                    Button { open(card) } label: { Label("Open", systemImage: "doc.text") }
+                                        .disabled(isCurrent(card))
+                                    Divider()
+                                    Button { perform(onReveal, for: card) } label: { Label("Show in Finder", systemImage: "folder") }
+                                    Button { perform(onCopyPath, for: card) } label: { Label("Copy Path", systemImage: "doc.on.doc") }
+                                    Divider()
+                                    Button { perform(onDuplicate, for: card) } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
+                                    Button { perform(onRename, for: card) } label: { Label("Rename File…", systemImage: "pencil") }
+                                        .disabled(isOpen(card) && !isCurrent(card))
+                                        .help(isOpen(card) && !isCurrent(card) ? "This file is open in another workspace." : "Change the filename, not the note heading.")
+                                    Button(role: .destructive) { perform(onTrash, for: card) } label: { Label("Move to Trash", systemImage: "trash") }
+                                        .disabled(isOpen(card) && !isCurrent(card))
+                                        .help(isOpen(card) && !isCurrent(card) ? "This file is open in another workspace." : "Move this file to Trash.")
+                                }
                                 .help(card.path)
                                 .accessibilityLabel(card.cardID.map { "\(card.title), ID \($0)" } ?? card.title)
                             }
@@ -119,6 +140,11 @@ struct CardSidebar: View {
         return currentURL.resolvingSymlinksInPath().standardizedFileURL == card.url.resolvingSymlinksInPath().standardizedFileURL
     }
 
+    private func isOpen(_ card: LibraryCard) -> Bool {
+        let url = card.url.resolvingSymlinksInPath().standardizedFileURL
+        return openURLs.contains { $0.resolvingSymlinksInPath().standardizedFileURL == url }
+    }
+
     private func open(_ card: LibraryCard) {
         guard !folder.isEmpty else { return }
         if isCurrent(card) { return }
@@ -128,6 +154,18 @@ struct CardSidebar: View {
             return
         }
         _ = onOpen(card.url)
+    }
+
+    // The library is an asynchronous snapshot. Recheck its root and target
+    // before dispatching any context action on a potentially stale row.
+    private func perform(_ action: (URL) -> Void, for card: LibraryCard) {
+        guard !folder.isEmpty else { return }
+        let root = URL(fileURLWithPath: folder, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL
+        guard CardGraph.canOpen(card.url, in: root) else {
+            message = "This note is no longer available. Refresh and try again."
+            return
+        }
+        action(card.url)
     }
 
     private func scan() {

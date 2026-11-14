@@ -508,14 +508,16 @@ struct ContentView: View {
             Divider()
             HStack(alignment: .top, spacing: 0) {
                 if showNotesSidebar {
-                    CardSidebar(currentURL: fileURL, draftTitle: currentCardTitle, draftID: cardMode == "markdown" ? CardMetadata.parse(text).id : cardMode == "outline" ? CardMetadata.parse(outline.markdown).id : nil,
+                    CardSidebar(currentURL: fileURL, openURLs: Array(fileURLs.values), draftTitle: currentCardTitle, draftID: cardMode == "markdown" ? CardMetadata.parse(text).id : cardMode == "outline" ? CardMetadata.parse(outline.markdown).id : nil,
                                 notesFolder: notesFolder, saveFolder: saveFolder,
                                 refreshToken: sidebarRefreshToken, onOpen: { url in
                                     let folder = notesFolder.isEmpty ? saveFolder : notesFolder
                                     guard !folder.isEmpty else { status = "Choose a notes folder before opening a sidebar note."; return false }
                                     let root = URL(fileURLWithPath: folder, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL
                                     return loadFile(url, validating: { CardGraph.canOpen(url, in: root) })
-                                }, onNew: newCard, onChooseFolder: chooseNotesFolder)
+                                }, onReveal: revealSidebarNote, onDuplicate: duplicateSidebarNote,
+                                onRename: renameSidebarNote, onTrash: trashSidebarNote,
+                                onCopyPath: copySidebarPath, onNew: newCard, onChooseFolder: chooseNotesFolder)
                         .frame(width: 205)
                     Divider().padding(.trailing, 10)
                 }
@@ -1319,6 +1321,130 @@ struct ContentView: View {
             return
         }
         operation.run()
+    }
+
+    private var sidebarRoot: URL? {
+        let folder = notesFolder.isEmpty ? saveFolder : notesFolder
+        return folder.isEmpty ? nil : URL(fileURLWithPath: folder, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL
+    }
+
+    private func sidebarError(_ error: Error) {
+        status = error.localizedDescription
+        let alert = NSAlert(); alert.messageText = "Could not change note"; alert.informativeText = status; alert.runModal()
+    }
+
+    private func sidebarSnapshot(_ url: URL) throws -> SidebarFileActions.Snapshot {
+        guard let root = sidebarRoot else { throw SidebarFileActions.ActionError.unavailable }
+        return try SidebarFileActions.capture(url, root: root)
+    }
+
+    // A modal confirmation can run the event loop. Remember the exact active
+    // draft and file association, and recheck both after it returns.
+    private struct SidebarMutation {
+        let snapshot: SidebarFileActions.Snapshot
+        let activeMode: String?
+        let activeDraft: Data?
+    }
+
+    private func prepareSidebarMutation(_ url: URL) throws -> SidebarMutation? {
+        let active = fileURL?.standardizedFileURL == url.standardizedFileURL
+        let mode = cardMode
+        let otherURLs = fileURLs.filter { !active || $0.key != mode }.map(\.value)
+        let before = try sidebarSnapshot(url)
+        if active {
+            try SidebarFileActions.validateActive(before, activeURL: fileURL, activeDiskSnapshot: diskSnapshots[mode], otherOpenURLs: otherURLs)
+            guard flushExistingDraft() else { return nil }
+        } else {
+            try SidebarFileActions.validate(before, openURLs: otherURLs)
+        }
+        let snapshot = try sidebarSnapshot(url)
+        if active {
+            try SidebarFileActions.validateActive(snapshot, activeURL: fileURL, activeDiskSnapshot: diskSnapshots[mode], otherOpenURLs: otherURLs)
+            guard let saved = currentDraftSnapshot(), Data(saved.utf8) == Data(currentDraftContents().utf8) else {
+                throw SidebarFileActions.ActionError.changed
+            }
+        } else {
+            try SidebarFileActions.validate(snapshot, openURLs: otherURLs)
+        }
+        return SidebarMutation(snapshot: snapshot, activeMode: active ? mode : nil,
+                               activeDraft: active ? Data(currentDraftContents().utf8) : nil)
+    }
+
+    private func validateSidebarMutation(_ mutation: SidebarMutation) throws -> [URL] {
+        let snapshot = mutation.snapshot
+        guard sidebarRoot == snapshot.root else { throw SidebarFileActions.ActionError.unavailable }
+        if let mode = mutation.activeMode {
+            guard cardMode == mode, fileURL?.standardizedFileURL == snapshot.url,
+                  Data(currentDraftContents().utf8) == mutation.activeDraft,
+                  let saved = currentDraftSnapshot(), Data(saved.utf8) == mutation.activeDraft else {
+                throw SidebarFileActions.ActionError.changed
+            }
+            let otherURLs = fileURLs.filter { $0.key != mode }.map(\.value)
+            try SidebarFileActions.validateActive(snapshot, activeURL: fileURL, activeDiskSnapshot: diskSnapshots[mode], otherOpenURLs: otherURLs)
+            return otherURLs
+        }
+        let openURLs = Array(fileURLs.values)
+        try SidebarFileActions.validate(snapshot, openURLs: openURLs)
+        return openURLs
+    }
+
+    private func revealSidebarNote(_ url: URL) {
+        guard let root = sidebarRoot, CardGraph.canOpen(url, in: root) else { status = "This note is no longer available. Refresh and try again."; return }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    private func copySidebarPath(_ url: URL) {
+        guard let root = sidebarRoot, CardGraph.canOpen(url, in: root) else { status = "This note is no longer available. Refresh and try again."; return }
+        NSPasteboard.general.clearContents()
+        if NSPasteboard.general.setString(url.path, forType: .string) { status = "Copied note path." }
+        else { status = "Could not copy the note path." }
+    }
+
+    private func duplicateSidebarNote(_ url: URL) {
+        do {
+            guard let mutation = try prepareSidebarMutation(url) else { return }
+            let snapshot = mutation.snapshot
+            if snapshot.cardID != nil || BranchIDs.filenameID(for: url) != nil || BranchIDs.luhmannFilenameID(for: url) != nil || BranchIDs.debateFilenameID(for: url) != nil {
+                let alert = NSAlert(); alert.messageText = "Duplicate without the card ID?"
+                alert.informativeText = "The copy will not keep this note's ID, so the two cards do not have the same identifier. The original stays unchanged."
+                alert.addButton(withTitle: "Duplicate"); alert.addButton(withTitle: "Cancel")
+                guard alert.runModal() == .alertFirstButtonReturn else { return }
+            }
+            let otherOpenURLs = try validateSidebarMutation(mutation)
+            let copy = try SidebarFileActions.duplicate(snapshot, openURLs: otherOpenURLs)
+            sidebarRefreshToken = UUID(); status = "Created \(copy.lastPathComponent)."
+        } catch { sidebarError(error) }
+    }
+
+    private func renameSidebarNote(_ url: URL) {
+        do {
+            guard let mutation = try prepareSidebarMutation(url) else { return }
+            let field = NSTextField(string: url.lastPathComponent); field.frame.size.width = 320
+            let alert = NSAlert(); alert.messageText = "Rename file"
+            alert.informativeText = "This changes the filename, not the note heading. Links to the old filename may need to be updated."
+            alert.accessoryView = field; alert.addButton(withTitle: "Rename"); alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            let otherURLs = try validateSidebarMutation(mutation)
+            if mutation.activeMode != nil { autosaveTask?.cancel() }
+            let renamed = try SidebarFileActions.rename(mutation.snapshot, filename: field.stringValue, openURLs: otherURLs)
+            if mutation.activeMode != nil { fileURL = renamed; linkRequestID = UUID() }
+            history.rename(url, to: renamed); sidebarRefreshToken = UUID(); status = "Renamed to \(renamed.lastPathComponent)."
+        } catch { scheduleAutosave(); sidebarError(error) }
+    }
+
+    private func trashSidebarNote(_ url: URL) {
+        do {
+            guard let mutation = try prepareSidebarMutation(url) else { return }
+            let alert = NSAlert(); alert.messageText = "Move this note to Trash?"
+            alert.informativeText = "\(url.lastPathComponent) will move to the macOS Trash. Links to this note may no longer work." + (mutation.activeMode == nil ? "" : " The open note will close.")
+            alert.addButton(withTitle: "Move to Trash"); alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            _ = try validateSidebarMutation(mutation)
+            if mutation.activeMode != nil { autosaveTask?.cancel() }
+            try FileManager.default.trashItem(at: mutation.snapshot.url, resultingItemURL: nil)
+            if let mode = mutation.activeMode { clearDiscardedDraft(mode); history.detach(); linkRequestID = UUID() }
+            history.remove(url); sidebarRefreshToken = UUID(); status = "Moved \(url.lastPathComponent) to Trash."
+        } catch { scheduleAutosave(); sidebarError(error) }
     }
 }
 

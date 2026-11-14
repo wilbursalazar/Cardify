@@ -33,6 +33,43 @@ struct CardHistory {
     // to the most recently visited card rather than skipping over it.
     mutating func detach() { detached = true }
 
+    // Keep every history visit in sync with a user-initiated file rename.
+    mutating func rename(_ source: URL, to destination: URL) {
+        guard source.isFileURL, destination.isFileURL else { return }
+        let source = source.standardizedFileURL, destination = destination.standardizedFileURL
+        guard source != destination else { return }
+        var updated: [URL] = []
+        var updatedPosition: Int?
+        for (index, entry) in entries.enumerated() {
+            let value = entry == source ? destination : entry
+            if updated.last != value { updated.append(value) }
+            if index == position { updatedPosition = updated.count - 1 }
+        }
+        entries = updated
+        position = updatedPosition
+    }
+
+    // Forget every visit to a trashed note. If it was current, retain the
+    // nearest earlier visit (or the next one when there is no earlier visit).
+    mutating func remove(_ url: URL) {
+        guard url.isFileURL else { return }
+        let target = url.standardizedFileURL
+        let original = entries
+        var updated: [URL] = []
+        var indices: [Int: Int] = [:]
+        for (index, entry) in original.enumerated() where entry != target {
+            if updated.last != entry { updated.append(entry) }
+            indices[index] = updated.count - 1
+        }
+        if let current = position {
+            if let retained = indices[current] { position = retained }
+            else if let prior = (0..<current).reversed().first(where: { indices[$0] != nil }) { position = indices[prior] }
+            else if let next = original.indices.first(where: { $0 > current && indices[$0] != nil }) { position = indices[next] }
+            else { position = nil }
+        }
+        entries = updated
+    }
+
     // Save As changes the identity of the current visit, rather than adding
     // an intermediate step between a pending history destination and the card.
     // A previously unsaved draft instead becomes a new visit.

@@ -186,6 +186,15 @@ final class LinkCompletionTextView: NSTextView {
         needsDisplay = true
     }
 
+    // Select the editable document body when metadata is concealed. Selecting
+    // the invisible header too would make Delete, Cut, and replacement fail
+    // the metadata protection check below.
+    override func selectAll(_ sender: Any?) {
+        guard let hidden = hiddenFrontmatterRange else { super.selectAll(sender); return }
+        let start = NSMaxRange(hidden)
+        setSelectedRange(NSRange(location: start, length: (string as NSString).length - start))
+    }
+
     override func shouldChangeText(in affectedCharRange: NSRange, replacementString: String?) -> Bool {
         if let hidden = hiddenFrontmatterRange, affectedCharRange.location < NSMaxRange(hidden) {
             if undoManager?.isUndoing == true || undoManager?.isRedoing == true {

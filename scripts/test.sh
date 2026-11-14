@@ -32,6 +32,8 @@ swiftc "${SWIFT_FLAGS[@]}" "$ROOT/Sources/Outline.swift" "$ROOT/Tests/Outline/ma
 "$TEMP_DIR/outline"
 "$ROOT/scripts/test-editor-structure.sh"
 "$ROOT/scripts/test-autosave.sh"
+"$ROOT/scripts/test-sidebar-actions.sh"
+"$ROOT/scripts/test-sidebar-handlers.sh"
 swiftc "${SWIFT_FLAGS[@]}" "$ROOT/Sources/GraphMotion.swift" "$ROOT/Tests/GraphMotion/main.swift" -o "$TEMP_DIR/graph-motion"
 "$TEMP_DIR/graph-motion"
 swiftc "${SWIFT_FLAGS[@]}" "${COMMON[@]}" "$ROOT/Sources/CardLinks.swift" "$ROOT/Sources/LinkNavigation.swift" "$ROOT/Sources/CardGraph.swift" "$ROOT/Tests/Graph/main.swift" -o "$TEMP_DIR/graph"

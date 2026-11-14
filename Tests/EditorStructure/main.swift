@@ -143,4 +143,47 @@ let insertedFont = view.textStorage!.attribute(.font, at: (header as NSString).l
 precondition((insertedFont?.pointSize ?? 0) >= 10, "visible typing must not inherit the hidden font")
 view.setFrontmatterHidden(false)
 precondition(view.string == header + "X# Title")
+
+// Select All must select the visible body, so Delete, Cut, and typing over
+// the selection work without exposing or removing concealed metadata.
+let selectAllSource = header + "# Title 🗂\r\n\r\nBody."
+set(selectAllSource); view.setFrontmatterHidden(true)
+view.selectAll(nil)
+let bodyRange = NSRange(location: (header as NSString).length, length: (selectAllSource as NSString).length - (header as NSString).length)
+precondition(view.selectedRange() == bodyRange, "Select All must select the entire visible body in UTF-16")
+undo.beginUndoGrouping(); view.deleteBackward(nil); undo.endUndoGrouping()
+precondition(view.string == header, "Delete must preserve hidden metadata and remove the selected body")
+undo.undo(); precondition(view.string == selectAllSource, "undo must restore the deleted body")
+undo.redo(); precondition(view.string == header, "redo must remove the body again")
+undo.beginUndoGrouping(); view.insertText("New", replacementRange: view.selectedRange()); undo.endUndoGrouping()
+precondition(view.string == header + "New", "typing after deleting all body text must work")
+let newBodyFont = view.textStorage!.attribute(.font, at: (header as NSString).length, effectiveRange: nil) as? NSFont
+let newBodyColor = view.textStorage!.attribute(.foregroundColor, at: (header as NSString).length, effectiveRange: nil) as? NSColor
+precondition((newBodyFont?.pointSize ?? 0) >= 10 && (newBodyColor?.alphaComponent ?? 1) > 0, "typing after Delete must remain visible")
+
+set(selectAllSource); view.setFrontmatterHidden(true); view.selectAll(nil)
+undo.beginUndoGrouping(); view.insertText("Replacement", replacementRange: view.selectedRange()); undo.endUndoGrouping()
+precondition(view.string == header + "Replacement", "typing over Select All must preserve hidden metadata")
+undo.undo(); precondition(view.string == selectAllSource, "undo must restore a replaced body")
+
+set(custom); view.setFrontmatterHidden(true); view.selectAll(nil)
+precondition(view.selectedRange().location == (customHeader as NSString).length, "explicitly hidden custom metadata must also be excluded")
+undo.beginUndoGrouping(); view.deleteForward(nil); undo.endUndoGrouping()
+precondition(view.string == customHeader, "forward delete must preserve explicitly hidden custom metadata")
+
+set(header); view.setFrontmatterHidden(true); view.selectAll(nil)
+precondition(view.selectedRange() == NSRange(location: (header as NSString).length, length: 0), "metadata-only documents have an empty editable selection")
+view.deleteBackward(nil)
+precondition(view.string == header, "Delete must not remove a hidden header when the body is empty")
+
+set(original); view.selectAll(nil)
+precondition(view.selectedRange() == NSRange(location: 0, length: (original as NSString).length), "visible metadata must be included in Select All")
+undo.beginUndoGrouping(); view.deleteBackward(nil); undo.endUndoGrouping()
+precondition(view.string.isEmpty, "Select All and Delete must remove visible metadata too")
+undo.undo(); precondition(view.string == original, "undo must restore visible metadata and body")
+
+set("No metadata 🗂"); view.selectAll(nil)
+precondition(view.selectedRange() == NSRange(location: 0, length: (view.string as NSString).length), "notes without metadata must retain normal Select All")
+undo.beginUndoGrouping(); view.deleteBackward(nil); undo.endUndoGrouping()
+precondition(view.string.isEmpty, "Select All and Delete must work without metadata")
 print("Metadata conceal/reveal, CRLF, selection, undo, protection, and nested list continuation passed")

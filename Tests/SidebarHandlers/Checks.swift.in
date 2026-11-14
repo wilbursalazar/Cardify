@@ -1,0 +1,141 @@
+import Foundation
+import CoreGraphics
+
+extension Int { static let alertFirstButtonReturn = 1 }
+final class NSTextField {
+    var stringValue: String
+    var frame = CGRect.zero
+    init(string: String) { stringValue = string }
+}
+final class NSAlert {
+    static var run: ((NSAlert) -> Int)?
+    var messageText = "", informativeText = "", accessoryView: Any?
+    func addButton(withTitle: String) {}
+    @discardableResult func runModal() -> Int { Self.run?(self) ?? 1 }
+}
+
+final class Harness {
+    var notesFolder: String, saveFolder = "", status = "", cardMode = "markdown"
+    var fileURLs: [String: URL] = [:], diskSnapshots: [String: Data] = [:]
+    var text = "", saved: String?, flushCount = 0, scheduleCount = 0, clearCount = 0
+    var autosaveTask: Task<Void, Never>?, history = CardHistory()
+    var linkRequestID = UUID(), sidebarRefreshToken = UUID()
+    var trashDirectory: URL, trashShouldFail = false
+    init(root: URL) { notesFolder = root.path; trashDirectory = root.appendingPathComponent("trash", isDirectory: true) }
+    var fileURL: URL? {
+        get { fileURLs[cardMode] }
+        set { fileURLs[cardMode] = newValue; if newValue == nil { diskSnapshots.removeValue(forKey: cardMode) } }
+    }
+    func currentDraftContents() -> String { text }
+    func currentDraftSnapshot() -> String? { saved }
+    func flushExistingDraft() -> Bool {
+        flushCount += 1
+        guard let url = fileURL, let expected = diskSnapshots[cardMode],
+              let current = try? Data(contentsOf: url), current == expected else { return false }
+        if Data(text.utf8) != Data((saved ?? "").utf8) {
+            do { try Data(text.utf8).write(to: url); diskSnapshots[cardMode] = Data(text.utf8); saved = text }
+            catch { return false }
+        }
+        return true
+    }
+    func scheduleAutosave() { scheduleCount += 1 }
+    func clearDiscardedDraft(_ mode: String) {
+        clearCount += 1; fileURLs.removeValue(forKey: mode); diskSnapshots.removeValue(forKey: mode)
+        text = ""; saved = nil
+    }
+    func fakeTrash(_ url: URL) throws {
+        if trashShouldFail { throw NSError(domain: "test", code: 1) }
+        try FileManager.default.createDirectory(at: trashDirectory, withIntermediateDirectories: true)
+        try FileManager.default.moveItem(at: url, to: trashDirectory.appendingPathComponent(url.lastPathComponent))
+    }
+    // HANDLERS
+}
+
+@main struct Checks {
+    static func main() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("cardify-handlers-" + UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        func fixture(_ name: String, disk: String = "# Old\n", draft: String? = nil) throws -> (Harness, URL) {
+            let file = root.appendingPathComponent(name)
+            try Data(disk.utf8).write(to: file)
+            let h = Harness(root: root); h.fileURL = file; h.diskSnapshots["markdown"] = Data(disk.utf8)
+            h.saved = disk; h.text = draft ?? disk; h.history.visit(file)
+            return (h, file)
+        }
+        func data(_ url: URL) -> Data? { try? Data(contentsOf: url) }
+        func respond(_ value: Int, rename: String? = nil, hook: ((NSAlert) -> Void)? = nil) {
+            NSAlert.run = { alert in
+                if alert.messageText == "Could not change note" { return 1 }
+                if let rename, let field = alert.accessoryView as? NSTextField { field.stringValue = rename }
+                hook?(alert); return value
+            }
+        }
+
+        let (renaming, original) = try fixture("original.md", draft: "# Edited\n")
+        let renamed = root.appendingPathComponent("renamed.md")
+        respond(1, rename: "renamed.md"); renaming.renameSidebarNote(original)
+        precondition(renaming.flushCount == 1 && renaming.fileURL == renamed && data(renamed) == Data("# Edited\n".utf8))
+        precondition(data(original) == nil && renaming.diskSnapshots["markdown"] == Data("# Edited\n".utf8) && renaming.history.current == renamed)
+
+        let (cancel, cancelFile) = try fixture("cancel.md", draft: "# Pending\n")
+        respond(0, rename: "unused.md"); cancel.renameSidebarNote(cancelFile)
+        precondition(cancel.fileURL == cancelFile && data(cancelFile) == Data("# Pending\n".utf8) && data(root.appendingPathComponent("unused.md")) == nil)
+
+        let (stale, staleFile) = try fixture("stale.md")
+        try Data("# External\n".utf8).write(to: staleFile)
+        respond(1, rename: "stale-renamed.md"); stale.renameSidebarNote(staleFile)
+        precondition(stale.fileURL == staleFile && data(staleFile) == Data("# External\n".utf8) && data(root.appendingPathComponent("stale-renamed.md")) == nil)
+
+        let (race, raceFile) = try fixture("race.md")
+        respond(1, rename: "race-renamed.md", hook: { _ in try! Data("# Outside\n".utf8).write(to: raceFile) })
+        race.renameSidebarNote(raceFile)
+        precondition(race.fileURL == raceFile && data(raceFile) == Data("# Outside\n".utf8) && data(root.appendingPathComponent("race-renamed.md")) == nil)
+
+        let (editedInModal, modalFile) = try fixture("modal.md")
+        respond(1, rename: "modal-renamed.md", hook: { _ in editedInModal.text = "# In progress" })
+        editedInModal.renameSidebarNote(modalFile)
+        precondition(editedInModal.fileURL == modalFile && editedInModal.text == "# In progress" && data(root.appendingPathComponent("modal-renamed.md")) == nil)
+
+        let (modeRace, modeFile) = try fixture("mode.md")
+        respond(1, rename: "mode-renamed.md", hook: { _ in modeRace.cardMode = "habits" })
+        modeRace.renameSidebarNote(modeFile)
+        precondition(modeRace.fileURLs["markdown"] == modeFile && data(root.appendingPathComponent("mode-renamed.md")) == nil)
+
+        let (trash, trashFile) = try fixture("trash-me.md", draft: "# Saved before trash\n")
+        respond(1); trash.trashSidebarNote(trashFile)
+        precondition(trash.fileURL == nil && trash.clearCount == 1 && data(trashFile) == nil)
+        precondition(data(trash.trashDirectory.appendingPathComponent("trash-me.md")) == Data("# Saved before trash\n".utf8))
+
+        let (trashCancel, trashCancelFile) = try fixture("trash-cancel.md")
+        respond(0); trashCancel.trashSidebarNote(trashCancelFile)
+        precondition(trashCancel.fileURL == trashCancelFile && trashCancel.clearCount == 0 && data(trashCancelFile) != nil)
+        let (trashFailure, trashFailureFile) = try fixture("trash-fail.md")
+        trashFailure.trashShouldFail = true; respond(1); trashFailure.trashSidebarNote(trashFailureFile)
+        precondition(trashFailure.fileURL == trashFailureFile && trashFailure.clearCount == 0 && data(trashFailureFile) != nil)
+
+        let (alias, aliasFile) = try fixture("alias.md")
+        let hardlink = root.appendingPathComponent("alias-hardlink.md")
+        try FileManager.default.linkItem(at: aliasFile, to: hardlink)
+        alias.fileURLs["habits"] = hardlink
+        respond(1, rename: "alias-renamed.md"); alias.renameSidebarNote(aliasFile)
+        precondition(alias.fileURL == aliasFile && data(aliasFile) != nil && data(root.appendingPathComponent("alias-renamed.md")) == nil)
+
+        let (duplicate, duplicateFile) = try fixture("duplicate.md", draft: "# Updated duplicate\n")
+        respond(1); duplicate.duplicateSidebarNote(duplicateFile)
+        precondition(duplicate.fileURL == duplicateFile && data(root.appendingPathComponent("Copy of duplicate.md")) == Data("# Updated duplicate\n".utf8))
+
+        let (duplicateStale, duplicateStaleFile) = try fixture("duplicate-stale.md")
+        try Data("# Outside\n".utf8).write(to: duplicateStaleFile)
+        respond(1); duplicateStale.duplicateSidebarNote(duplicateStaleFile)
+        precondition(data(root.appendingPathComponent("Copy of duplicate-stale.md")) == nil && duplicateStale.fileURL == duplicateStaleFile)
+
+        let idText = "---\ncard_id: 1a\n---\n# ID\n"
+        let (duplicateRace, duplicateRaceFile) = try fixture("1a Duplicate.md", disk: idText)
+        respond(1, hook: { _ in duplicateRace.text = "# Changed during dialog" })
+        duplicateRace.duplicateSidebarNote(duplicateRaceFile)
+        precondition(data(root.appendingPathComponent("Copy of 1a Duplicate.md")) == nil && duplicateRace.fileURL == duplicateRaceFile)
+        NSAlert.run = nil
+        print("Sidebar handlers preserve active drafts, conflicts, cancellation, rename, Trash, hardlinks, and duplicate safeguards")
+    }
+}
