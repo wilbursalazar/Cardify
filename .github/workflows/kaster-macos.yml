@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/research-card-editor-2026-11
+      - feature/kaster-reference-ui-2026-11
   workflow_dispatch:
 
 permissions:
