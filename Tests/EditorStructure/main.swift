@@ -98,6 +98,12 @@ func list(_ source: String, _ expected: String) {
     undo.redo(); precondition(view.string == expected, "redo must restore the continued list")
 }
 list("- First", "- First\n- ")
+list("1. First", "1. First\n2. ")
+list("9. Ninth", "9. Ninth\n10. ")
+list("3) Third", "3) Third\n4) ")
+list("  2. Nested", "  2. Nested\n  3. ")
+list("2. ", "")
+precondition(LinkCompletionTextView.listNewline(in: "```\n1. code", selection: NSRange(location: 11, length: 0)) == nil, "ordered list inside code fence must not continue")
 list("  * Nested", "  * Nested\n  * ")
 list("- [x] Done", "- [x] Done\n- [ ] ")
 list("\t+ [ ] Task", "\t+ [ ] Task\n\t+ [ ] ")
