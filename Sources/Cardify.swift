@@ -513,7 +513,7 @@ struct ContentView: View {
                 Button { showNotesSidebar.toggle() } label: { Image(systemName: "sidebar.left") }
                     .help(showNotesSidebar ? "Hide notes sidebar" : "Show notes sidebar")
                     .accessibilityLabel(showNotesSidebar ? "Hide notes sidebar" : "Show notes sidebar")
-                Text("Cardify").font(.system(size: 18, weight: .semibold))
+                Text("Kaster").font(.system(size: 18, weight: .semibold))
                     .foregroundColor(AppearancePreference.foreground(for: storedAppearance))
                 Button { navigateHistory(back: true) } label: { Image(systemName: "chevron.left") }
                     .help("Back to the previous card").keyboardShortcut("[", modifiers: .command).disabled(history.backTarget == nil)
@@ -1693,7 +1693,7 @@ private struct EditorWindowRoot: View {
     }
 }
 
-@main struct CardifyApp: App {
+@main struct KasterApp: App {
     var body: some Scene {
         WindowGroup { EditorWindowRoot() }
             .windowStyle(.titleBar)
