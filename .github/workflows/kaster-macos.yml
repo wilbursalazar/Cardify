@@ -35,3 +35,15 @@ jobs:
           name: Kaster-Mac-universal
           path: build/Kaster-Mac.zip
           if-no-files-found: error
+      - name: Create drag-and-drop Kaster DMG
+        run: |
+          mkdir -p build/dmg-root
+          ditto build/Kaster.app build/dmg-root/Kaster.app
+          ln -s /Applications build/dmg-root/Applications
+          hdiutil create -volname Kaster -srcfolder build/dmg-root -ov -format UDZO build/Kaster.dmg
+          hdiutil verify build/Kaster.dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Kaster-Mac-DMG
+          path: build/Kaster.dmg
+          if-no-files-found: error
