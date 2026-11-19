@@ -471,7 +471,7 @@ struct ContentView: View {
     }
     var activeLinkedTab: LinkedCardTab? { linkedTabs.first(where: { $0.id == selectedLinkedTab }) }
     var currentCardTitle: String {
-        let title = cardMode == "habits" ? tracker.title : cardMode == "todos" ? todo.title : cardMode == "outline" ? outline.title : NoteEditing.title(in: text)
+        let title = cardMode == "habits" ? tracker.title : cardMode == "todos" ? todo.title : cardMode == "outline" ? outline.title : NoteEditing.title(in: text, fileURL: fileURL)
         return title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? (fileURL?.deletingPathExtension().lastPathComponent ?? "Untitled card") : title
     }
     var titlePlaceholder: String {
