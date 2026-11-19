@@ -1,9 +1,55 @@
 import Foundation
 
 enum NoteEditing {
+    // An Obsidian file may have a YAML title without a Markdown H1.
+    // Keep the file untouched when merely displaying its title.
+    static func title(in text: String, fileURL: URL?) -> String {
+        let explicit = title(in: text).trimmingCharacters(in: .whitespacesAndNewlines)
+        return explicit.isEmpty ? (fileURL?.deletingPathExtension().lastPathComponent ?? "") : explicit
+    }
+
+    private static func yamlTitleLine(_ lines: MarkdownSource.Lines) -> (range: NSRange, raw: String)? {
+        guard let end = lines.frontmatterEnd else { return nil }
+        let matches = lines.values[1..<end].compactMap { line -> (range: NSRange, raw: String)? in
+            let content = lines.source.substring(with: line.content)
+            guard content.hasPrefix("title:") else { return nil }
+            return (line.content, String(content.dropFirst("title:".count)))
+        }
+        // Ambiguous properties should not be automatically rewritten.
+        return matches.count == 1 ? matches[0] : nil
+    }
+
+    private static func decodeYAMLTitle(_ raw: String) -> String {
+        let candidate = raw.trimmingCharacters(in: .whitespaces)
+        if candidate.hasPrefix("\"") {
+            // Match an ordinary JSON-compatible YAML double-quoted scalar.
+            var closing = false, escaped = false
+            for (index, character) in candidate.enumerated() where index > 0 {
+                if escaped { escaped = false; continue }
+                if character == "\\" { escaped = true; continue }
+                if character == "\"" { closing = true; break }
+            }
+            guard closing, let lastQuote = candidate.indices.dropFirst().first(where: { index in
+                candidate[index] == "\"" && candidate[candidate.index(before: index)] != "\\"
+            }) else { return "" }
+            let quoted = String(candidate[...lastQuote])
+            guard let decoded = try? JSONDecoder().decode(String.self, from: Data(quoted.utf8)) else { return "" }
+            return decoded
+        }
+        if candidate.hasPrefix("'") {
+            guard let end = candidate.dropFirst().firstIndex(of: "'") else { return "" }
+            return String(candidate[candidate.index(after: candidate.startIndex)..<end]).replacingOccurrences(of: "''", with: "'")
+        }
+        return String(candidate.components(separatedBy: " #").first ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     static func title(in text: String) -> String {
         let lines = MarkdownSource.lines(in: text)
         if lines.hasFrontmatterStart && lines.frontmatterEnd == nil { return "" }
+        if let property = yamlTitleLine(lines) {
+            let metadataTitle = decodeYAMLTitle(property.raw).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !metadataTitle.isEmpty { return metadataTitle }
+        }
         let start = lines.frontmatterEnd.map { $0 + 1 } ?? 0
         for index in lines.values.indices.dropFirst(start) {
             let line = lines.values[index].content
@@ -18,6 +64,12 @@ enum NoteEditing {
         let lines = MarkdownSource.lines(in: text)
         // An unterminated header may contain YAML comments that look like titles.
         guard !lines.hasFrontmatterStart || lines.frontmatterEnd != nil else { return text }
+        if let property = yamlTitleLine(lines),
+           let encoded = try? JSONEncoder().encode(safe),
+           let quoted = String(data: encoded, encoding: .utf8) {
+            let suffix = trailingCommentOrWhitespace(property.raw)
+            return lines.source.replacingCharacters(in: property.range, with: "title: " + quoted + suffix)
+        }
         let start = lines.frontmatterEnd.map { $0 + 1 } ?? 0
         for index in lines.values.indices.dropFirst(start) {
             let line = lines.values[index].content
