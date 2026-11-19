@@ -17,6 +17,14 @@ try write("Next.md", "---\ncard_id: 1b\n---\n# Next card")
 try write("Timestamp.md", "---\ncard_id: 202611122145\n---\n# Time")
 let first = LibrarySnapshot.load(folder: root)!
 check(first.cards.count == 6, "loads nested and uppercase-extension Markdown")
+let yamlTitle = "---\ncard_id: 4a\ntitle: \"My Obsidian Title\" # context\n---\n# Body Heading\nBody"
+check(NoteEditing.title(in: yamlTitle) == "My Obsidian Title", "YAML title takes precedence over H1")
+check(NoteEditing.title(in: "# First Heading") == "First Heading", "H1 is used without title property")
+check(NoteEditing.title(in: "Body only", fileURL: root.appendingPathComponent("Filename Fallback.md")) == "Filename Fallback", "filename fallback")
+let changed = NoteEditing.setTitle("Edited Title", in: yamlTitle)
+check(NoteEditing.title(in: changed) == "Edited Title" && changed.contains("# Body Heading") && changed.contains("# context"), "editing YAML title preserves heading and inline comment")
+check(NoteEditing.setTitle("New Title", in: "---\r\ntitle: Old\r\n---\r\nBody").contains("\r\n"), "title edit preserves CRLF")
+check(NoteEditing.title(in: "---\ntitle: 'Single quoted'\n---\n") == "Single quoted", "single quoted Obsidian title")
 let alpha = first.cards.first { $0.path == "Alpha" }!
 check(LibrarySearch.matches(alpha, query: "needle"), "full-text case insensitive search")
 check(LibrarySearch.matches(alpha, query: "ALPHA HEADING"), "heading search")
