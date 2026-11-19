@@ -218,10 +218,16 @@ final class LinkCompletionTextView: NSTextView {
             let suffix = format == .link ? "]]" : prefix
             if format == .link && selected.contains(where: { "[]\r\n".contains($0) }) { return false }
             let before = (prefix as NSString).length, after = (suffix as NSString).length
-            if range.location >= before, NSMaxRange(range) + after <= source.length,
-               source.substring(with: NSRange(location: range.location - before, length: before)) == prefix,
-               source.substring(with: NSRange(location: NSMaxRange(range), length: after)) == suffix {
-                replaceRange = NSRange(location: range.location - before, length: before + range.length + after)
+            // Existing emphasis can use either Markdown delimiter style.
+            let existingMarkers = format == .italic ? ["*", "_"] : format == .bold ? ["**", "__"] : [prefix]
+            if let marker = existingMarkers.first(where: { marker in
+                let count = (marker as NSString).length
+                return range.location >= count && NSMaxRange(range) + count <= source.length &&
+                    source.substring(with: NSRange(location: range.location - count, length: count)) == marker &&
+                    source.substring(with: NSRange(location: NSMaxRange(range), length: count)) == (format == .link ? "]]" : marker)
+            }) {
+                let count = (marker as NSString).length
+                replaceRange = NSRange(location: range.location - count, length: count + range.length + (format == .link ? 2 : count))
                 replacement = selected
                 nextSelection = NSRange(location: replaceRange.location, length: range.length)
             } else {
@@ -335,15 +341,28 @@ final class LinkCompletionTextView: NSTextView {
         guard fence == nil else { return nil }
         let contentRange = NSRange(location: line.location, length: contentEnd - line.location)
         let content = source.substring(with: contentRange)
-        let pattern = try! NSRegularExpression(pattern: #"^([ \t]*)([-+*])([ \t]+)(?:\[([ xX])\]([ \t]+|$))?"#)
+        let pattern = try! NSRegularExpression(pattern: #"^([ \t]*)(?:([-+*])([ \t]+)(?:\[([ xX])\]([ \t]+|$))?|([0-9]{1,9})([.)])([ \t]+))"#)
         guard let match = pattern.firstMatch(in: content, range: NSRange(location: 0, length: (content as NSString).length)),
               selection.location >= line.location + NSMaxRange(match.range) else { return nil }
         let s = content as NSString
         let remainder = s.substring(from: NSMaxRange(match.range))
         if remainder.trimmingCharacters(in: .whitespaces).isEmpty { return (contentRange, "") }
-        let indent = s.substring(with: match.range(at: 1)), bullet = s.substring(with: match.range(at: 2)), spacing = s.substring(with: match.range(at: 3))
-        let task = match.range(at: 4).location != NSNotFound
-        let suffix = task ? "[ ] " : ""
+        let indent = s.substring(with: match.range(at: 1))
+        let isOrdered = match.range(at: 6).location != NSNotFound
+        let marker: String
+        let spacing: String
+        let suffix: String
+        if isOrdered {
+            let digits = s.substring(with: match.range(at: 6))
+            let delimiter = s.substring(with: match.range(at: 7))
+            marker = String((Int(digits) ?? 0) + 1) + delimiter
+            spacing = s.substring(with: match.range(at: 8))
+            suffix = ""
+        } else {
+            marker = s.substring(with: match.range(at: 2))
+            spacing = s.substring(with: match.range(at: 3))
+            suffix = match.range(at: 4).location != NSNotFound ? "[ ] " : ""
+        }
         var newline = NSMaxRange(line) > contentEnd ? source.substring(with: NSRange(location: contentEnd, length: NSMaxRange(line) - contentEnd)) : ""
         if newline.isEmpty {
             let all = text as NSString
@@ -356,7 +375,7 @@ final class LinkCompletionTextView: NSTextView {
             }
         }
         if newline.isEmpty { newline = "\n" }
-        return (selection, newline + indent + bullet + spacing + suffix)
+        return (selection, newline + indent + marker + spacing + suffix)
     }
 
     override func insertNewline(_ sender: Any?) {
