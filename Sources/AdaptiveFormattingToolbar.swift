@@ -15,6 +15,8 @@ struct AdaptiveFormattingToolbar: View {
         Button("H2") { editor.prefix("## ") }.help("Subheading").accessibilityLabel("Subheading")
         Button { editor.prefix("- ") } label: { Image(systemName: "list.bullet").frame(width: 44) }
             .help("Bullet list").accessibilityLabel("Bullet list")
+        Button { editor.prefix("1. ") } label: { Image(systemName: "list.number").frame(width: 44) }
+            .help("Numbered list").accessibilityLabel("Numbered list")
         Button { editor.prefix("- [ ] ") } label: { Image(systemName: "checklist").frame(width: 44) }
             .help("Task list").accessibilityLabel("Task list")
     }
