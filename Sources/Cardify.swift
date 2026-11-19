@@ -511,63 +511,50 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 10) {
                 Button { showNotesSidebar.toggle() } label: { Image(systemName: "sidebar.left") }
-                    .help(showNotesSidebar ? "Hide notes sidebar" : "Show notes sidebar")
-                    .accessibilityLabel(showNotesSidebar ? "Hide notes sidebar" : "Show notes sidebar")
-                Text("Kaster").font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(AppearancePreference.foreground(for: storedAppearance))
+                    .help(showNotesSidebar ? "Hide library" : "Show library")
+                Text("Kaster").font(.system(size: 15, weight: .semibold))
+                Divider().frame(height: 15)
                 Button { navigateHistory(back: true) } label: { Image(systemName: "chevron.left") }
-                    .help("Back to the previous card").keyboardShortcut("[", modifiers: .command).disabled(history.backTarget == nil)
+                    .keyboardShortcut("[", modifiers: .command).disabled(history.backTarget == nil)
                 Button { navigateHistory(back: false) } label: { Image(systemName: "chevron.right") }
-                    .help("Forward to the next visited card").keyboardShortcut("]", modifiers: .command).disabled(history.forwardTarget == nil)
-                Divider().frame(height: 16)
-                Button("Library") { showLibrary = true }.fixedSize()
-                Button("Graph") { showGraph() }.fixedSize().help("Explore card connections in a separate window")
+                    .keyboardShortcut("]", modifiers: .command).disabled(history.forwardTarget == nil)
                 Spacer(minLength: 8)
-                Menu("Layout") {
-                    ForEach(WorkspaceArrangement.allCases) { choice in
-                        Button {
-                            storedWorkspaceArrangement = choice.rawValue
-                        } label: {
-                            if WorkspaceArrangement.stored(storedWorkspaceArrangement) == choice {
-                                Label(choice.title, systemImage: "checkmark")
-                            } else {
-                                Text(choice.title)
-                            }
-                        }
-                    }
-                    Divider()
-                    Toggle("Show notes sidebar", isOn: $showNotesSidebar)
-                }
-                Menu("File") {
+                Button { showLibrary = true } label: { Image(systemName: "square.grid.2x2") }.help("Library")
+                Button { showGraph() } label: { Image(systemName: "point.3.connected.trianglepath.dotted") }.help("Graph")
+                Button { _ = saveMarkdown() } label: { Image(systemName: "square.and.arrow.down") }
+                    .help("Save").keyboardShortcut("s", modifiers: .command)
+                Button { printCards() } label: { Image(systemName: "printer") }
+                    .help("Print").keyboardShortcut("p", modifiers: .command)
+                Menu {
                     Button("New Card", action: newCard)
                     Button("Open Markdown…", action: openFile)
                     Button("Research Clipper…") { research = ResearchClip() }
-                    Button("Mark as Index Card") { markIndexCard() }.disabled(cardMode != "markdown")
-                    Button("New Linked Idea from Current…") { ideaFromCurrent() }.disabled(cardMode != "markdown")
-                    Button("Save As…") { _ = saveMarkdown(saveAs: true) }
                     Divider()
+                    Button("Save As…") { _ = saveMarkdown(saveAs: true) }
                     Button("Export PDF…", action: exportPDF)
+                    Button("Save & Print") { if saveMarkdown() { printCards() } }
+                    Divider()
+                    Menu("Layout") {
+                        ForEach(WorkspaceArrangement.allCases) { choice in
+                            Button(choice.title) { storedWorkspaceArrangement = choice.rawValue }
+                        }
+                        Toggle("Show library", isOn: $showNotesSidebar)
+                    }
+                    Button("Mark as Index Card") { markIndexCard() }.disabled(cardMode != "markdown")
+                    Button("New Linked Idea…") { ideaFromCurrent() }.disabled(cardMode != "markdown")
                     Divider()
                     Button("Choose Save Folder…", action: chooseFolder)
                     Button("Choose Notes Folder…", action: chooseNotesFolder)
-                    Divider()
                     Button("Settings…") { showSettings = true }
-                }
-                Button("Save") { _ = saveMarkdown() }.fixedSize().keyboardShortcut("s")
-                Button("Print", action: printCards).fixedSize().keyboardShortcut("p")
-                if storedAppearance == AppearancePreference.charcoal.rawValue {
-                    Button("Save & Print") { if saveMarkdown() { printCards() } }.fixedSize().buttonStyle(CharcoalPrimaryButtonStyle())
-                } else if storedAppearance == AppearancePreference.slate.rawValue {
-                    Button("Save & Print") { if saveMarkdown() { printCards() } }.fixedSize().buttonStyle(SlatePrimaryButtonStyle())
-                } else {
-                    Button("Save & Print") { if saveMarkdown() { printCards() } }.fixedSize().buttonStyle(.borderedProminent)
-                }
+                } label: { Image(systemName: "ellipsis.circle") }.help("More actions")
             }
-            Divider().overlay(alignment: .bottom) {
-                if let focus = AppearancePreference.focusAccent(for: storedAppearance, mode: showDebate && cardMode == "markdown" ? "debate" : cardMode) {
-                    Rectangle().fill(focus.opacity(0.75)).frame(height: 2)
-                }
-            }
+            .font(.system(size: 12))
+            .buttonStyle(.borderless)
+            .padding(.horizontal, 12)
+            .frame(height: 38)
+            .background(Color(red: 0.969, green: 0.963, blue: 0.978))
+            Divider()
+
             HStack(alignment: .top, spacing: 0) {
                 if showNotesSidebar {
                     CardSidebar(currentURL: fileURL, openURLs: Array(fileURLs.values), draftTitle: currentCardTitle, draftID: cardMode == "markdown" ? CardMetadata.parse(text).id : cardMode == "outline" ? CardMetadata.parse(outline.markdown).id : nil,
@@ -579,13 +566,23 @@ struct ContentView: View {
                                     return loadFile(url, validating: { CardGraph.canOpen(url, in: root) })
                                 }, onOpenParallel: { url in openLinkedTab(url) }, onReveal: revealSidebarNote, onDuplicate: duplicateSidebarNote,
                                 onRename: renameSidebarNote, onTrash: trashSidebarNote,
-                                onCopyPath: copySidebarPath, onMove: moveSidebarNote, onNew: newCard, onChooseFolder: chooseNotesFolder)
-                        .frame(width: 205)
-                    Divider().padding(.trailing, 10)
+                                onCopyPath: copySidebarPath, onMove: moveSidebarNote, onNew: newCard, onChooseFolder: chooseNotesFolder,
+                                 onGraph: showGraph, onSettings: { showSettings = true })
+                        .frame(minWidth: 280, idealWidth: 320, maxWidth: 440)
+                    Divider()
                 }
                 WorkspaceSplitView(arrangement: WorkspaceArrangement.stored(storedWorkspaceArrangement), editor: {
                 GeometryReader { editorGeometry in
-                VStack(alignment: .leading) {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "doc.text").foregroundStyle(Color(red: 0.43, green: 0.20, blue: 0.76))
+                        Text(currentCardTitle).lineLimit(1).font(.system(size: 12, weight: .semibold))
+                        Spacer(minLength: 0)
+                        Button(action: newCard) { Image(systemName: "plus") }
+                            .buttonStyle(.borderless).help("New card")
+                    }.padding(.horizontal, 10).frame(height: 34)
+                     .background(Color(red: 0.98, green: 0.976, blue: 0.991))
+                    Divider()
                     ScrollView(.vertical) {
                     VStack(alignment: .leading) {
                     HStack(spacing: 8) {
@@ -807,10 +804,10 @@ struct ContentView: View {
                 })
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
             Text(status).font(.caption).foregroundStyle(.secondary)
-        }.padding(.horizontal, 20).padding(.vertical, 18).frame(minWidth: 850, minHeight: 600)
+        }.padding(.horizontal, 0).padding(.vertical, 0).frame(minWidth: 1080, minHeight: 650)
         .background(AppearancePreference.backdrop(for: storedAppearance))
-        .accentColor(AppearancePreference.focusAccent(for: storedAppearance, mode: showDebate && cardMode == "markdown" ? "debate" : cardMode) ?? AppearancePreference.accent(for: storedAppearance))
-        .tint(AppearancePreference.focusAccent(for: storedAppearance, mode: showDebate && cardMode == "markdown" ? "debate" : cardMode) ?? AppearancePreference.tint(for: storedAppearance))
+        .accentColor(Color(red: 0.43, green: 0.20, blue: 0.76))
+        .tint(Color(red: 0.43, green: 0.20, blue: 0.76))
         .preferredColorScheme(AppearancePreference.colorScheme(for: storedAppearance))
         .onAppear {
             if storedIDMode.isEmpty { storedIDMode = (autoTimestampID ? IDMode.timestamp : IDMode.titleOnly).rawValue }
