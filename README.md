@@ -1,4 +1,16 @@
-# Cardify
+# Kaster — Research Index Cards (development branch)
+
+Kaster is the renamed macOS research-card application, developed from Cardify. It remains local-first, supports ordinary Markdown and Obsidian vaults, and preserves index-card printing.
+
+**Download development build:** [Kaster macOS workflow](https://github.com/wilbursalazar/Cardify/actions/workflows/kaster-macos.yml). Select a successful run on this branch and download the `Kaster-Mac-universal` artifact. The ZIP contains `Kaster.app` for Apple silicon and Intel Macs. Builds are ad-hoc signed, not notarized.
+
+**Work in progress:** This branch adds Obsidian YAML-title handling, ordered-list continuation and controls, underscore-emphasis toggling, and Kaster branding. Other proposed research-editor features are not yet implemented. Build artifacts are available only after tests and packaging pass.
+
+The original Cardify documentation follows as reference for the existing functionality.
+
+---
+
+# Cardify (original documentation)
 
 **Write a note once. Keep it as Markdown, print it on 3 × 5-inch index cards, or do both.**
 
