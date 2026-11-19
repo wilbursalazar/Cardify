@@ -36,8 +36,7 @@ struct LibrarySnapshot {
             guard let content = try? String(contentsOf: url, encoding: .utf8) else { unreadable += 1; continue }
             let relative = String(fullPath.dropFirst(prefix.count))
             let path = String(relative.dropLast(url.pathExtension.count + 1))
-            let heading = NoteEditing.title(in: content).trimmingCharacters(in: .whitespacesAndNewlines)
-            let title = heading.isEmpty ? url.deletingPathExtension().lastPathComponent : heading
+            let title = NoteEditing.title(in: content, fileURL: url)
             let cardID = CardMetadata.parse(content).id ?? BranchIDs.filenameID(for: url) ?? BranchIDs.luhmannFilenameID(for: url) ?? BranchIDs.debateFilenameID(for: url)
             cards.append(LibraryCard(url: url, path: path, title: title, cardID: cardID, content: content))
         }
