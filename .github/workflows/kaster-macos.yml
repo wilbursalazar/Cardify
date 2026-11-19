@@ -1,0 +1,36 @@
+name: Build Kaster for macOS
+
+on:
+  push:
+    branches:
+      - feature/research-card-editor-2026-11
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run regression tests
+        run: bash scripts/test.sh
+      - name: Build universal Kaster application
+        run: bash scripts/build.sh
+      - name: Check application packaging
+        run: |
+          test -f build/Kaster.app/Contents/MacOS/Kaster
+          test -f build/Kaster.app/Contents/Resources/AppIcon.icns
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' build/Kaster.app/Contents/Info.plist)" = "Kaster"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' build/Kaster.app/Contents/Info.plist)" = "Kaster"
+          lipo -verify_arch arm64 x86_64 build/Kaster.app/Contents/MacOS/Kaster
+          codesign --verify --deep --strict build/Kaster.app
+      - name: Package Kaster
+        run: ditto -c -k --sequesterRsrc --keepParent build/Kaster.app build/Kaster-Mac.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Kaster-Mac-universal
+          path: build/Kaster-Mac.zip
+          if-no-files-found: error
