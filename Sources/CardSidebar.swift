@@ -21,9 +21,15 @@ struct CardSidebar: View {
     let onMove: (URL, URL) -> Void
     let onNew: () -> Void
     let onChooseFolder: () -> Void
+    let onGraph: () -> Void
+    let onSettings: () -> Void
 
     @AppStorage("cardifyAppearance") private var appearance = AppearancePreference.system.rawValue
     @State private var query = ""
+    @State private var selectedFolder: String?
+    @State private var selectedSection = "Library"
+    @AppStorage("kasterFavoritePaths") private var favoriteStorage = ""
+    @FocusState private var searchFocused: Bool
     @State private var snapshot = LibrarySnapshot(cards: [], outgoing: [:], incoming: [:], unreadable: 0)
     @State private var loading = false
     @State private var message = "Choose a notes folder."
@@ -33,83 +39,159 @@ struct CardSidebar: View {
     @State private var expandedFolders: Set<String> = []
 
     private var folder: String { notesFolder.isEmpty ? saveFolder : notesFolder }
+    private var favorites: Set<String> { Set(favoriteStorage.split(separator: "\n").map(String.init)) }
     private var matches: [LibraryCard] {
-        snapshot.cards.filter { LibrarySearch.matches($0, query: query) }
+        var results = snapshot.cards.filter { LibrarySearch.matches($0, query: query) }
+        if let selectedFolder {
+            results = results.filter { $0.path.hasPrefix(selectedFolder + "/") }
+        }
+        if selectedSection == "Favorites" {
+            results = results.filter { favorites.contains($0.path) }
+        } else if selectedSection == "Recent" {
+            results.sort {
+                let a = (try? $0.url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+                let b = (try? $1.url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+                return a > b
+            }
+            results = Array(results.prefix(50))
+        }
+        return results
     }
-    private var treeRows: [SidebarFolders.Row] {
-        SidebarFolders.rows(folders: folderPaths, cards: matches.map(\.path), expanded: expandedFolders, query: query)
+    private var folderRows: [SidebarFolders.Row] {
+        SidebarFolders.rows(folders: folderPaths, cards: [], expanded: expandedFolders, query: "")
+    }
+    private var selectionTitle: String {
+        if let selectedFolder { return (selectedFolder as NSString).lastPathComponent }
+        return selectedSection == "Library" ? "All Cards" : selectedSection
+    }
+    private func setSection(_ name: String) {
+        selectedSection = name
+        selectedFolder = nil
+        if name == "Search" { searchFocused = true }
+    }
+    private func toggleFavorite(_ path: String) {
+        var next = favorites
+        if next.contains(path) { next.remove(path) } else { next.insert(path) }
+        favoriteStorage = next.sorted().joined(separator: "\n")
+    }
+    private func navigationRow(_ name: String, icon: String, count: Int? = nil) -> some View {
+        let active = selectedSection == name && selectedFolder == nil
+        return Button {
+            if name == "Graph" { onGraph() }
+            else { setSection(name) }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: icon).frame(width: 15)
+                Text(name).lineLimit(1)
+                Spacer(minLength: 0)
+                if let count {
+                    Text("\(count)").font(.system(size: 10)).foregroundStyle(.secondary)
+                }
+            }
+            .font(.system(size: 12, weight: active ? .semibold : .regular))
+            .padding(.horizontal, 7).padding(.vertical, 6)
+            .background(active ? Color(red: 0.89, green: 0.83, blue: 0.96) : .clear,
+                        in: RoundedRectangle(cornerRadius: 5))
+            .contentShape(Rectangle())
+        }.buttonStyle(.plain)
     }
 
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Text("Notes").font(.headline)
-                    .foregroundColor(AppearancePreference.foreground(for: appearance))
-                Spacer(minLength: 0)
-                Button(action: onChooseFolder) { Image(systemName: "folder") }
-                    .help("Choose Notes Folder").accessibilityLabel("Choose Notes Folder")
-                Button(action: scan) { Image(systemName: "arrow.clockwise") }
-                    .help("Refresh Notes").accessibilityLabel("Refresh Notes").disabled(folder.isEmpty || loading)
-            }
-            .buttonStyle(.borderless)
-            Button("New Card", action: onNew)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            if currentURL == nil {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(draftTitle).font(.system(size: 13, weight: .medium)).lineLimit(2)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    Text(draftID.map { "Draft · \($0)" } ?? "Draft").font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                }
-                .padding(.horizontal, 9).padding(.vertical, 7)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background((AppearancePreference.accent(for: appearance) ?? Color.accentColor).opacity(0.22), in: RoundedRectangle(cornerRadius: 6))
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Current unsaved draft, \(draftTitle)")
-                .accessibilityAddTraits(.isSelected)
-            }
-            if folder.isEmpty {
-                Text("Choose a notes folder to see your cards here.")
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                Button("Choose Notes Folder", action: onChooseFolder)
-            } else {
-                Label(URL(fileURLWithPath: folder, isDirectory: true).lastPathComponent, systemImage: "folder.fill")
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                    .help(folder)
-                TextField("Search notes", text: $query)
-                    .textFieldStyle(.roundedBorder)
-                if loading {
-                    HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Loading notes") }
-                        .font(.caption).foregroundStyle(.secondary)
-                } else if !message.isEmpty {
-                    Text(message).font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                let rows = treeRows
-                if !rows.isEmpty {
-                    let cardsByPath = Dictionary(snapshot.cards.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
+        HSplitView {
+            VStack(alignment: .leading, spacing: 5) {
+                navigationRow("Library", icon: "rectangle.stack")
+                navigationRow("All Cards", icon: "square.grid.2x2", count: snapshot.cards.count)
+                navigationRow("Recent", icon: "clock", count: min(50, snapshot.cards.count))
+                navigationRow("Favorites", icon: "star", count: favorites.count)
+                navigationRow("Graph", icon: "point.3.connected.trianglepath.dotted")
+                navigationRow("Search", icon: "magnifyingglass")
+                Divider().padding(.vertical, 6)
+                HStack {
+                    Text("FOLDERS").font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button(action: onChooseFolder) { Image(systemName: "folder.badge.plus") }
+                        .help("Choose Notes Folder")
+                }.buttonStyle(.borderless).padding(.horizontal, 6)
+                if folder.isEmpty {
+                    Text("Choose your notes folder").font(.caption).foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                } else {
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 2) {
-                            ForEach(rows) { row in
-                                if row.kind == .folder {
-                                    folderRow(row)
-                                } else if let card = cardsByPath[row.path] {
-                                    noteRow(card, depth: row.depth)
-                                }
+                        LazyVStack(alignment: .leading, spacing: 1) {
+                            ForEach(folderRows) { row in
+                                folderRow(row)
                             }
                         }
                     }
-                } else if !loading && message.isEmpty {
-                    Text(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "No Markdown notes in this folder." : "No matching notes.")
-                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                HStack {
+                    Button(action: onNew) { Image(systemName: "plus") }
+                        .help("New Card")
+                    Spacer()
+                    Button(action: onSettings) { Image(systemName: "gearshape") }
+                        .help("Settings")
+                }
+                .buttonStyle(.borderless).padding(.horizontal, 6)
+            }
+            .padding(9)
+            .frame(minWidth: 120, idealWidth: 135, maxWidth: 185,
+                   maxHeight: .infinity, alignment: .topLeading)
+            .background(Color(red: 0.955, green: 0.951, blue: 0.965))
+
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 6) {
+                    Image(systemName: "rectangle.stack").font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    Text(selectionTitle).font(.system(size: 12, weight: .semibold))
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    Button(action: onNew) { Image(systemName: "plus") }
+                        .help("New Card")
+                    Button(action: scan) { Image(systemName: "arrow.up.arrow.down") }
+                        .help("Refresh Cards")
+                        .disabled(folder.isEmpty || loading)
+                }
+                .buttonStyle(.borderless).padding(.horizontal, 10).frame(height: 34)
+                Divider()
+                TextField("Search cards", text: $query)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($searchFocused)
+                    .padding(.horizontal, 8).padding(.vertical, 7)
+                if loading {
+                    ProgressView().controlSize(.small).padding(8)
+                } else if !message.isEmpty && snapshot.cards.isEmpty {
+                    Text(message).font(.caption).foregroundStyle(.secondary)
+                        .padding(8)
+                }
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 2) {
+                        if currentURL == nil {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(draftTitle).font(.system(size: 12, weight: .semibold)).lineLimit(2)
+                                Text(draftID.map { "\($0) · Draft" } ?? "Unsaved draft")
+                                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                            }
+                            .padding(9).frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color(red: 0.90, green: 0.85, blue: 0.96),
+                                        in: RoundedRectangle(cornerRadius: 6))
+                        }
+                        ForEach(matches) { card in noteRow(card, depth: 0) }
+                    }.padding(.horizontal, 6)
+                }
+                if !loading && matches.isEmpty && currentURL != nil {
+                    Text("No matching cards").font(.caption).foregroundStyle(.secondary).padding(8)
                 }
             }
-            Spacer(minLength: 0)
+            .frame(minWidth: 155, idealWidth: 182, maxWidth: .infinity,
+                   maxHeight: .infinity, alignment: .topLeading)
+            .background(Color(nsColor: .textBackgroundColor))
         }
-        .padding(14)
-        .frame(minWidth: 180, idealWidth: 220, maxWidth: 280, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.55))
+        .frame(minWidth: 280, idealWidth: 320, maxWidth: 440, maxHeight: .infinity)
         .onAppear(perform: scan)
-        .onChange(of: folder) { _ in scan() }
+        .onChange(of: folder) { _ in selectedFolder = nil; scan() }
         .onChange(of: refreshToken) { _ in scan() }
         .onChange(of: currentURL) { _ in revealCurrentCard() }
         .onDisappear { scanID = UUID() }
@@ -118,6 +200,8 @@ struct CardSidebar: View {
     private func folderRow(_ row: SidebarFolders.Row) -> some View {
         let searching = !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         return Button {
+            selectedFolder = row.path
+            selectedSection = "Folders"
             if expandedFolders.contains(row.path) { expandedFolders.remove(row.path) }
             else { expandedFolders.insert(row.path) }
         } label: {
@@ -127,8 +211,10 @@ struct CardSidebar: View {
                 Text(row.name).lineLimit(1).truncationMode(.middle)
                 Spacer(minLength: 0)
             }
-            .font(.system(size: 13)).padding(.horizontal, 5).padding(.vertical, 5)
-            .padding(.leading, CGFloat(min(row.depth, 16)) * 14)
+            .font(.system(size: 11)).padding(.horizontal, 4).padding(.vertical, 5)
+            .padding(.leading, CGFloat(min(row.depth, 16)) * 8)
+            .background(selectedFolder == row.path ? Color(red: 0.89, green: 0.83, blue: 0.96) : .clear,
+                        in: RoundedRectangle(cornerRadius: 5))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain).disabled(searching)
@@ -164,12 +250,14 @@ struct CardSidebar: View {
             .padding(.horizontal, 9).padding(.vertical, 7)
             .padding(.leading, CGFloat(min(depth, 16)) * 14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(isCurrent(card) ? (AppearancePreference.accent(for: appearance) ?? Color.accentColor).opacity(0.22) : Color.clear,
+            .background(isCurrent(card) ? Color(red: 0.90, green: 0.85, blue: 0.96) : Color.clear,
                         in: RoundedRectangle(cornerRadius: 6))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .contextMenu {
+            Button(favorites.contains(card.path) ? "Remove from Favorites" : "Add to Favorites") { toggleFavorite(card.path) }
+            Divider()
             Button { open(card) } label: { Label("Open", systemImage: "doc.text") }.disabled(isCurrent(card))
             Button { perform(onOpenParallel, for: card) } label: { Label("Open Beside Current Card", systemImage: "rectangle.split.2x1") }
             Divider()
