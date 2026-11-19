@@ -380,8 +380,7 @@ struct LinkedCardTab: Identifiable {
     var url: URL
     let content: String
     var title: String {
-        let heading = NoteEditing.title(in: content).trimmingCharacters(in: .whitespacesAndNewlines)
-        return heading.isEmpty ? url.deletingPathExtension().lastPathComponent : heading
+        NoteEditing.title(in: content, fileURL: url)
     }
 }
 
@@ -679,7 +678,7 @@ struct ContentView: View {
                     }
                     if cardMode == "markdown" {
                     HStack {
-                        TextField(titlePlaceholder, text: Binding(get: { NoteEditing.title(in: text) }, set: { text = NoteEditing.setTitle($0, in: text) }))
+                        TextField(titlePlaceholder, text: Binding(get: { NoteEditing.title(in: text, fileURL: fileURL) }, set: { text = NoteEditing.setTitle($0, in: text) }))
                             .textFieldStyle(.plain).font(.system(size: 17, weight: .semibold)).padding(.vertical, 6)
                         Picker("ID", selection: Binding(get: { idMode }, set: { mode in
                             selectIDMode(mode)
