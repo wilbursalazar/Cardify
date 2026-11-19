@@ -19,7 +19,6 @@ NSGraphicsContext.saveGraphicsState()
 NSGraphicsContext.current = graphics
 let context = graphics.cgContext
 context.setAllowsAntialiasing(true)
-context.setShouldAntialiasing(true)
 func color(_ hex: UInt32) -> CGColor {
     CGColor(red: CGFloat((hex >> 16) & 255) / 255,
             green: CGFloat((hex >> 8) & 255) / 255,
