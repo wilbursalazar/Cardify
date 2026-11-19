@@ -25,7 +25,7 @@ jobs:
           test -f build/Kaster.app/Contents/Resources/AppIcon.icns
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' build/Kaster.app/Contents/Info.plist)" = "Kaster"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' build/Kaster.app/Contents/Info.plist)" = "Kaster"
-          lipo -verify_arch arm64 x86_64 build/Kaster.app/Contents/MacOS/Kaster
+          lipo build/Kaster.app/Contents/MacOS/Kaster -verify_arch arm64 x86_64
           codesign --verify --deep --strict build/Kaster.app
       - name: Package Kaster
         run: ditto -c -k --sequesterRsrc --keepParent build/Kaster.app build/Kaster-Mac.zip
