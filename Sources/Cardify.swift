@@ -436,6 +436,84 @@ struct ContentView: View {
     @State private var status = "Draft saved on this Mac."
     @State private var sidebarRefreshToken = UUID()
     @State private var editorHeaderHeight: CGFloat = 100
+    @AppStorage("kasterEditorPresentation") private var editorPresentation = "visual"
+    @State private var inspectorTab = "Preview"
+    @State private var inspectorSnapshot = LibrarySnapshot(cards: [], outgoing: [:], incoming: [:], unreadable: 0)
+    @State private var editorTabs: [URL] = []
+    private let highlightColor = Color(red: 0.43, green: 0.20, blue: 0.76)
+
+    private var presentation: EditorPresentationMode {
+        EditorPresentationMode(rawValue: editorPresentation) ?? .visual
+    }
+    private var inspectedBacklinks: [LibraryCard] {
+        guard let fileURL,
+              let item = inspectorSnapshot.cards.first(where: { $0.url.standardizedFileURL == fileURL.standardizedFileURL }) else { return [] }
+        let paths = Set(inspectorSnapshot.incoming[item.path] ?? [])
+        return inspectorSnapshot.cards.filter { paths.contains($0.path) }
+    }
+    private func refreshInspector() {
+        let path = notesFolder.isEmpty ? saveFolder : notesFolder
+        guard !path.isEmpty else {
+            inspectorSnapshot = LibrarySnapshot(cards: [], outgoing: [:], incoming: [:], unreadable: 0)
+            return
+        }
+        if let snapshot = LibrarySnapshot.load(folder: URL(fileURLWithPath: path, isDirectory: true)) {
+            inspectorSnapshot = snapshot
+        }
+    }
+    private func registerEditorTab() {
+        guard let fileURL else { return }
+        if !editorTabs.contains(where: { $0.standardizedFileURL == fileURL.standardizedFileURL }) {
+            editorTabs.append(fileURL)
+        }
+    }
+    private func closeEditorTab(_ url: URL) {
+        if fileURL?.standardizedFileURL == url.standardizedFileURL {
+            if let other = editorTabs.first(where: { $0.standardizedFileURL != url.standardizedFileURL }) {
+                guard loadFile(other) else { return }
+            } else {
+                newCard()
+                guard fileURL == nil else { return }
+            }
+        }
+        editorTabs.removeAll { $0.standardizedFileURL == url.standardizedFileURL }
+    }
+    private func insertImageFromDisk() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.png, .jpeg, .gif, .tiff, .heic]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let rootPath = notesFolder.isEmpty ? saveFolder : notesFolder
+        guard !rootPath.isEmpty else {
+            status = "Choose a notes folder before adding image assets."
+            return
+        }
+        let root = URL(fileURLWithPath: rootPath, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL
+        do {
+            let selected = url.resolvingSymlinksInPath().standardizedFileURL
+            var image = selected
+            if !(selected.path.hasPrefix(root.path + "/")) {
+                let directory = root.appendingPathComponent("Attachments", isDirectory: true)
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                image = directory.appendingPathComponent(selected.lastPathComponent)
+                if FileManager.default.fileExists(atPath: image.path) {
+                    image = directory.appendingPathComponent(UUID().uuidString + "-" + selected.lastPathComponent)
+                }
+                try FileManager.default.copyItem(at: selected, to: image)
+            }
+            let relative = String(image.path.dropFirst(root.path.count + 1))
+            let title = image.deletingPathExtension().lastPathComponent
+            editor.insert("![\(title)](<\(relative)>)")
+            status = "Linked image in Markdown."
+        } catch {
+            status = "Could not import image: \(error.localizedDescription)"
+            let alert = NSAlert()
+            alert.messageText = "Could not import image"
+            alert.informativeText = status
+            alert.runModal()
+        }
+    }
     var fileURL: URL? {
         get { fileURLs[cardMode] }
         nonmutating set {
@@ -521,8 +599,14 @@ struct ContentView: View {
                 Spacer(minLength: 8)
                 Button { showLibrary = true } label: { Image(systemName: "square.grid.2x2") }.help("Library")
                 Button { showGraph() } label: { Image(systemName: "point.3.connected.trianglepath.dotted") }.help("Graph")
-                Button { _ = saveMarkdown() } label: { Image(systemName: "square.and.arrow.down") }
-                    .help("Save").keyboardShortcut("s", modifiers: .command)
+                Button {
+                    let old = status
+                    if !saveMarkdown() && status == old { status = "Save cancelled. No files were changed." }
+                } label: {
+                    Label("Save", systemImage: "square.and.arrow.down")
+                }
+                .help("Save current card")
+                .keyboardShortcut("s", modifiers: .command)
                 Button { printCards() } label: { Image(systemName: "printer") }
                     .help("Print").keyboardShortcut("p", modifiers: .command)
                 Menu {
@@ -574,13 +658,40 @@ struct ContentView: View {
                 WorkspaceSplitView(arrangement: WorkspaceArrangement.stored(storedWorkspaceArrangement), editor: {
                 GeometryReader { editorGeometry in
                 VStack(alignment: .leading, spacing: 0) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "doc.text").foregroundStyle(Color(red: 0.43, green: 0.20, blue: 0.76))
-                        Text(currentCardTitle).lineLimit(1).font(.system(size: 12, weight: .semibold))
-                        Spacer(minLength: 0)
+                    HStack(spacing: 6) {
+                        ScrollView(.horizontal) {
+                            HStack(spacing: 4) {
+                                if fileURL == nil {
+                                    Label(currentCardTitle, systemImage: "doc.text")
+                                        .lineLimit(1).font(.system(size: 11, weight: .semibold))
+                                        .padding(.horizontal, 10).padding(.vertical, 7)
+                                        .background(Color(red: 0.96, green: 0.95, blue: 0.99),
+                                                    in: RoundedRectangle(cornerRadius: 6))
+                                }
+                                ForEach(editorTabs, id: \.self) { url in
+                                    let active = fileURL?.standardizedFileURL == url.standardizedFileURL
+                                    HStack(spacing: 5) {
+                                        Button {
+                                            if !active { _ = loadFile(url) }
+                                        } label: {
+                                            Text(url.deletingPathExtension().lastPathComponent)
+                                                .lineLimit(1).frame(maxWidth: 160)
+                                        }.buttonStyle(.plain)
+                                        Button { closeEditorTab(url) } label: {
+                                            Image(systemName: "xmark").font(.system(size: 9))
+                                        }.buttonStyle(.borderless).help("Close tab")
+                                    }
+                                    .font(.system(size: 11, weight: active ? .semibold : .regular))
+                                    .padding(.horizontal, 10).padding(.vertical, 7)
+                                    .background(active ? Color(red: 0.93, green: 0.89, blue: 0.98) :
+                                                Color(red: 0.977, green: 0.975, blue: 0.985),
+                                                in: RoundedRectangle(cornerRadius: 6))
+                                }
+                            }
+                        }.scrollIndicators(.hidden)
                         Button(action: newCard) { Image(systemName: "plus") }
                             .buttonStyle(.borderless).help("New card")
-                    }.padding(.horizontal, 10).frame(height: 34)
+                    }.padding(.horizontal, 8).frame(height: 35)
                      .background(Color(red: 0.98, green: 0.976, blue: 0.991))
                     Divider()
                     ScrollView(.vertical) {
@@ -727,9 +838,13 @@ struct ContentView: View {
                         })
                     } else {
                     VStack(spacing: 0) {
-                        AdaptiveFormattingToolbar(editor: editor, onLinkNote: { showNotes = true }, onZotero: { showZotero = true })
+                        AdaptiveFormattingToolbar(editor: editor,
+                            presentation: Binding(get: { presentation }, set: { editorPresentation = $0.rawValue }),
+                            onLinkNote: { showNotes = true }, onZotero: { showZotero = true },
+                            onInsertImage: insertImageFromDisk)
                         Divider()
-                        MarkdownEditor(text: $text, editor: editor, onFollowLink: followLink)
+                        MarkdownEditor(text: $text, editor: editor, onFollowLink: followLink,
+                                       presentation: presentation)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.16)))
@@ -810,11 +925,15 @@ struct ContentView: View {
         .tint(Color(red: 0.43, green: 0.20, blue: 0.76))
         .preferredColorScheme(AppearancePreference.colorScheme(for: storedAppearance))
         .onAppear {
+            registerEditorTab()
+            refreshInspector()
             if storedIDMode.isEmpty { storedIDMode = (autoTimestampID ? IDMode.timestamp : IDMode.titleOnly).rawValue }
             if let data = habitDraft.data(using: .utf8), let saved = try? JSONDecoder().decode(HabitTracker.self, from: data) { tracker = saved }
             if let data = todoDraft.data(using: .utf8), let saved = try? JSONDecoder().decode(TodoList.self, from: data) { todo = saved }
             if let data = outlineDraft.data(using: .utf8), let saved = try? JSONDecoder().decode(OutlineDocument.self, from: data) { outline = saved }
         }
+        .onChange(of: fileURL) { _ in registerEditorTab(); refreshInspector() }
+        .onChange(of: sidebarRefreshToken) { _ in refreshInspector() }
         .onChange(of: text) { _ in if cardMode == "markdown" { scheduleAutosave() } }
         .onChange(of: habitDraft) { _ in if cardMode == "habits" { scheduleAutosave() } }
         .onChange(of: todoDraft) { _ in if cardMode == "todos" { scheduleAutosave() } }
