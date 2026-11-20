@@ -43,7 +43,21 @@ jobs:
           ditto build/Kaster.app build/dmg-root/Kaster.app
           ln -s /Applications build/dmg-root/Applications
           hdiutil create -volname Kaster -srcfolder build/dmg-root -ov -format UDZO build/Kaster.dmg
-          hdiutil verify build/Kaster.dmg
+          # DiskImages may briefly report an unavailable resource immediately
+          # after image creation on shared macOS CI runners. Verification
+          # must ultimately succeed; a corrupt image is never published.
+          for attempt in 1 2 3 4 5; do
+            if hdiutil verify build/Kaster.dmg; then
+              echo "Kaster DMG verified."
+              break
+            fi
+            if [ "$attempt" -eq 5 ]; then
+              echo "DMG verification failed after 5 attempts." >&2
+              exit 1
+            fi
+            echo "DMG verification temporarily failed (attempt $attempt/5); retrying..."
+            sleep 4
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: Kaster-Mac-DMG
