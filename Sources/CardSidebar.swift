@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 
 enum SidebarSelection: Hashable {
-    case all, recent, favorites
+    case all, recent, favorites, unprinted
     case folder(String)
 }
 
@@ -41,6 +41,8 @@ struct CardSidebar: View {
     let onChooseFolder: () -> Void
     let onGraph: () -> Void
     let onSettings: () -> Void
+    let onPrint: ([URL], String) -> Void
+    let lastPrint: Date
 
     @AppStorage("cardifyAppearance") private var appearance = AppearancePreference.system.rawValue
     @AppStorage("kasterFavorites") private var favorites = ""
@@ -51,6 +53,7 @@ struct CardSidebar: View {
     @State private var searching = false
     @FocusState private var searchFocused: Bool
     @State private var expandedFolders: Set<String> = []
+    @State private var selectedPaths: Set<String> = []
 
     private var folder: String { notesFolder.isEmpty ? saveFolder : notesFolder }
     private var accent: Color { AppearancePreference.accent(for: appearance) ?? AppearancePreference.kasterPurple }
@@ -71,7 +74,8 @@ struct CardSidebar: View {
         }
         .frame(maxHeight: .infinity)
         .onAppear(perform: scan)
-        .onChange(of: folder) { _ in selection = .all; scan() }
+        .onChange(of: folder) { _ in selection = .all; selectedPaths = []; scan() }
+        .onChange(of: selection) { _ in selectedPaths = [] }
         .onChange(of: refreshToken) { _ in scan() }
         .onChange(of: currentURL) { url in
             revealCurrentCard()
@@ -90,6 +94,8 @@ struct CardSidebar: View {
                     navRow("All Cards", systemImage: "square.stack", count: store.snapshot.cards.count, target: .all)
                     navRow("Recent", systemImage: "clock", count: recentCards.count, target: .recent)
                     navRow("Favorites", systemImage: "star", count: favoriteCards.count, target: .favorites)
+                    navRow("Unprinted", systemImage: "printer", count: unprintedCards.count, target: .unprinted)
+                        .help("Cards created or changed since your last print — keep the paper box in step")
                     actionRow("Graph", systemImage: "point.3.connected.trianglepath.dotted", action: onGraph)
                     actionRow("Search", systemImage: "magnifyingglass", shortcut: "⌘F") { startSearch() }
                         .keyboardShortcut("f", modifiers: .command)
@@ -216,6 +222,12 @@ struct CardSidebar: View {
             return true
         }
         .help(row.path)
+        .contextMenu {
+            let cards = store.snapshot.cards.filter { $0.path.hasPrefix(row.path + "/") }
+                .sorted { ($0.cardID ?? "~" + $0.title).localizedStandardCompare($1.cardID ?? "~" + $1.title) == .orderedAscending }
+            Button { onPrint(cards.map(\.url), "in \(row.name)") } label: { Label("Print All Cards in \(row.name) (\(cards.count))", systemImage: "printer") }
+                .disabled(cards.isEmpty)
+        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Folder \(row.name)")
     }
@@ -228,8 +240,13 @@ struct CardSidebar: View {
         case .all: return "All Cards"
         case .recent: return "Recent"
         case .favorites: return "Favorites"
+        case .unprinted: return "Unprinted"
         case .folder(let path): return (path as NSString).lastPathComponent
         }
+    }
+
+    private var unprintedCards: [LibraryCard] {
+        store.snapshot.cards.filter { (store.modified[$0.path] ?? .distantPast) > lastPrint }
     }
 
     private var recentCards: [LibraryCard] {
@@ -250,6 +267,7 @@ struct CardSidebar: View {
             case .all: base = store.snapshot.cards
             case .recent: return recentCards
             case .favorites: base = favoriteCards
+            case .unprinted: base = unprintedCards
             case .folder(let path): base = store.snapshot.cards.filter { $0.path.hasPrefix(path + "/") }
             }
         }
@@ -271,6 +289,8 @@ struct CardSidebar: View {
                     .foregroundColor(AppearancePreference.foreground(for: appearance))
                 Spacer(minLength: 0)
                 Button(action: onNew) { Image(systemName: "plus") }.help("New Card")
+                Button { onPrint(listedCards.map(\.url), "from \(listTitle)") } label: { Image(systemName: "printer") }
+                    .help("Print every card in this list").disabled(listedCards.isEmpty)
                 Menu {
                     Picker("Sort By", selection: $storedSort) {
                         ForEach(NoteListSort.allCases, id: \.rawValue) { Text($0.title).tag($0.rawValue) }
@@ -309,14 +329,30 @@ struct CardSidebar: View {
                 }
                 .padding(6)
             }
+            if !selectedPaths.isEmpty {
+                Divider()
+                HStack(spacing: 8) {
+                    Text("\(selectedPaths.count) selected").font(.system(size: 12, weight: .medium))
+                    Spacer()
+                    Button { onPrint(selectedCards.map(\.url), "selected") } label: { Label("Print", systemImage: "printer") }
+                        .controlSize(.small)
+                    Button { selectedPaths = [] } label: { Image(systemName: "xmark.circle.fill") }
+                        .buttonStyle(.borderless).foregroundStyle(.secondary).help("Clear selection")
+                }
+                .padding(.horizontal, 12).padding(.vertical, 8)
+            }
         }
     }
+
+    // Selected cards print in the order they appear in the list.
+    private var selectedCards: [LibraryCard] { listedCards.filter { selectedPaths.contains($0.path) } }
 
     private var selectionIcon: String {
         switch selection {
         case .all: return "square.stack"
         case .recent: return "clock"
         case .favorites: return "star"
+        case .unprinted: return "printer"
         case .folder: return "folder"
         }
     }
@@ -326,6 +362,7 @@ struct CardSidebar: View {
         switch selection {
         case .favorites: return "Right-click a card and choose Add to Favorites."
         case .recent: return "Cards you open appear here."
+        case .unprinted: return "Every card has been printed since it last changed."
         default: return "No Markdown cards here yet."
         }
     }
@@ -355,7 +392,16 @@ struct CardSidebar: View {
 
     private func noteRow(_ card: LibraryCard) -> some View {
         let current = isCurrent(card)
-        return Button { open(card) } label: {
+        let selected = selectedPaths.contains(card.path)
+        return Button {
+            // ⌘-click builds a selection for batch printing; a plain click opens the card.
+            if NSEvent.modifierFlags.contains(.command) {
+                if selected { selectedPaths.remove(card.path) } else { selectedPaths.insert(card.path) }
+            } else {
+                selectedPaths = []
+                open(card)
+            }
+        } label: {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 4) {
                     Text(card.title).font(.system(size: 13, weight: current ? .semibold : .medium)).lineLimit(2)
@@ -366,12 +412,25 @@ struct CardSidebar: View {
             .padding(.horizontal, 10).padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(current ? selectionFill : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(accent, lineWidth: selected ? 1.5 : 0))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .contextMenu {
             Button { open(card) } label: { Label("Open", systemImage: "doc.text") }.disabled(current)
             Button { perform(onOpenParallel, for: card) } label: { Label("Open Beside Current Card", systemImage: "rectangle.split.2x1") }
+            Divider()
+            Button { onPrint([card.url], "") } label: { Label("Print Card", systemImage: "printer") }
+            if card.cardID != nil {
+                let branch = KasterSequence.branch(of: card, in: store.snapshot.cards)
+                Button { onPrint(branch.map(\.url), "in the \(card.cardID ?? "") branch") } label: {
+                    Label("Print Card and Its Branch (\(branch.count))", systemImage: "arrow.triangle.branch")
+                }
+            }
+            if selectedPaths.count > 1 && selected {
+                Button { onPrint(selectedCards.map(\.url), "selected") } label: { Label("Print \(selectedPaths.count) Selected Cards", systemImage: "printer.dotmatrix") }
+            }
+            Divider()
             Button { favorites = KasterPathList.toggle(card.url, in: favorites) } label: {
                 Label(isFavorite(card) ? "Remove from Favorites" : "Add to Favorites", systemImage: isFavorite(card) ? "star.slash" : "star")
             }

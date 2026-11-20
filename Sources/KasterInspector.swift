@@ -12,6 +12,10 @@ struct KasterInspector<CardPreview: View>: View {
     let cardType: String
     let onFollowLink: (CardLinkTarget) -> Void
     let onOpen: (URL) -> Void
+    var documentPDF: Data? = nil
+    var documentRevision: PDFPreviewRevision? = nil
+    var typesetError: String? = nil
+    var onPrintCard: () -> Void = {}
     @ViewBuilder let cardPreview: () -> CardPreview
 
     @AppStorage("kasterInspectorTab") private var storedTab = InspectorTab.preview.rawValue
@@ -65,10 +69,24 @@ struct KasterInspector<CardPreview: View>: View {
                 .help("Read the note as a document, or see how it prints on 3 × 5 cards")
             }
             if style == .document {
-                ScrollView {
-                    KasterDocumentView(markdown: markdown, onFollowLink: onFollowLink)
-                        .padding(.horizontal, 16).padding(.vertical, 12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                Group {
+                    if let documentPDF {
+                        // Typeset by the same engine that prints the card.
+                        PDFPreview(data: documentPDF, revision: documentRevision, fitWidth: true, onFollowLink: onFollowLink)
+                    } else {
+                        ScrollView {
+                            KasterDocumentView(markdown: markdown, onFollowLink: onFollowLink)
+                                .padding(.horizontal, 16).padding(.vertical, 12)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+                .overlay(alignment: .top) {
+                    if let typesetError {
+                        Label(typesetError, systemImage: "exclamationmark.triangle")
+                            .font(.caption).lineLimit(3).padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                            .background(.regularMaterial)
+                    }
                 }
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.18)))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
