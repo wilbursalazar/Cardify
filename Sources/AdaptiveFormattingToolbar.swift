@@ -1,50 +1,69 @@
 import SwiftUI
 import AppKit
 
-// Prefer one compact row; on narrower editors keep controls legible on two
-// rows. The last resort scrolls rather than clipping at unusually small sizes.
+// A compact research toolbar. The content remains Markdown regardless of
+// presentation mode; these controls operate on the editor's actual text.
 struct AdaptiveFormattingToolbar: View {
     let editor: EditorState
+    @Binding var presentation: EditorPresentationMode
     let onLinkNote: () -> Void
     let onZotero: () -> Void
+    let onInsertImage: () -> Void
 
-    @ViewBuilder private var formattingButtons: some View {
-        Button("B") { editor.wrap("**") }.fontWeight(.bold).help("Bold").accessibilityLabel("Bold")
-        Button("I") { editor.wrap("*") }.italic().help("Italic").accessibilityLabel("Italic")
-        Button("H1") { editor.prefix("# ") }.help("Heading").accessibilityLabel("Heading")
-        Button("H2") { editor.prefix("## ") }.help("Subheading").accessibilityLabel("Subheading")
-        Button { editor.prefix("- ") } label: { Image(systemName: "list.bullet").frame(width: 44) }
-            .help("Bullet list").accessibilityLabel("Bullet list")
-        Button { editor.prefix("1. ") } label: { Image(systemName: "list.number").frame(width: 44) }
-            .help("Numbered list").accessibilityLabel("Numbered list")
-        Button { editor.prefix("- [ ] ") } label: { Image(systemName: "checklist").frame(width: 44) }
-            .help("Task list").accessibilityLabel("Task list")
-    }
+    private let purple = Color(red: 0.43, green: 0.20, blue: 0.76)
 
-    @ViewBuilder private var sourceButtons: some View {
-        Button("Link Note", action: onLinkNote).help("Search your notes folder").accessibilityLabel("Link Note")
-        Button("Add Zotero Source", action: onZotero).help("Find a source in Zotero").accessibilityLabel("Add Zotero Source")
+    @ViewBuilder private var formatting: some View {
+        Menu {
+            Button("Heading 1") { editor.prefix("# ") }
+            Button("Heading 2") { editor.prefix("## ") }
+            Button("Heading 3") { editor.prefix("### ") }
+        } label: {
+            HStack(spacing: 3) { Text("Heading"); Image(systemName: "chevron.down").font(.system(size: 9)) }
+        }.help("Insert heading")
+
+        Divider().frame(height: 16)
+        Button { editor.wrap("**") } label: { Text("B").bold() }.help("Bold")
+        Button { editor.wrap("*") } label: { Text("I").italic() }.help("Italic")
+        Button { editor.wrap("<u>") } label: { Text("U").underline() }.help("Underline (HTML)")
+        Button { editor.wrap("~~") } label: { Text("S").strikethrough() }.help("Strikethrough")
+        Button(action: onLinkNote) { Image(systemName: "link") }.help("Link note")
+        Button(action: onInsertImage) { Image(systemName: "photo") }.help("Insert image")
+        Button {
+            editor.insert("| Column 1 | Column 2 |\n| --- | --- |\n| Text | Text |\n")
+        } label: { Image(systemName: "tablecells") }.help("Insert Markdown table")
+        Divider().frame(height: 16)
+        Button { editor.prefix("1. ") } label: { Image(systemName: "list.number") }.help("Numbered list")
+        Button { editor.prefix("- ") } label: { Image(systemName: "list.bullet") }.help("Bulleted list")
+        Menu {
+            Button("Task list") { editor.prefix("- [ ] ") }
+            Button("Inline code") { editor.wrap("`") }
+            Button("Zotero source", action: onZotero)
+        } label: { Image(systemName: "ellipsis") }.help("More formatting")
     }
 
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 10) {
-                formattingButtons
-                sourceButtons
-            }.fixedSize(horizontal: true, vertical: false)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 10) { formattingButtons }
-                    HStack(spacing: 14) { sourceButtons }
-                }.fixedSize(horizontal: true, vertical: false)
-            }.fixedSize(horizontal: false, vertical: true)
+        HStack(spacing: 8) {
+            HStack(spacing: 9) { formatting }
+                .font(.system(size: 11))
+                .fixedSize(horizontal: true, vertical: false)
+            Spacer(minLength: 6)
+            HStack(spacing: 1) {
+                ForEach(EditorPresentationMode.allCases, id: \.self) { item in
+                    Button(item.label) { presentation = item }
+                        .font(.system(size: 10, weight: presentation == item ? .semibold : .medium))
+                        .foregroundStyle(presentation == item ? Color.white : Color.primary)
+                        .padding(.horizontal, 8).frame(height: 24)
+                        .background(presentation == item ? purple : Color.clear,
+                                    in: RoundedRectangle(cornerRadius: 5))
+                        .help(item.description)
+                }
+            }
+            .padding(2)
+            .background(Color(nsColor: .controlBackgroundColor),
+                        in: RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.borderless)
-        .controlSize(.small)
-        .font(.system(size: 12, weight: .medium))
-        .padding(.horizontal, 10).padding(.vertical, 8)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.65))
+        .padding(.horizontal, 10).frame(height: 36)
+        .background(Color(red: 0.977, green: 0.975, blue: 0.983))
     }
 }
