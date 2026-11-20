@@ -189,6 +189,8 @@ final class StablePDFPreviewView: NSView {
     private var displayedRevision: PDFPreviewRevision?
     private var displayedData: Data?
     private var zoom: CGFloat = 1
+    /// Documents fill the pane's width and scroll; cards fit the whole page in view.
+    var fitWidth = false
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -258,7 +260,7 @@ final class StablePDFPreviewView: NSView {
         guard size.width > 0, size.height > 0 else { return }
         let oldOrigin = scrollView.contentView.bounds.origin
         var width = max(1, size.width - 20)
-        if let document = pagesView.document, document.pageCount == 1,
+        if !fitWidth, let document = pagesView.document, document.pageCount == 1,
            let page = document.page(at: 0) {
             let bounds = page.bounds(for: .mediaBox)
             if bounds.height > 0 { width = min(width, max(1, size.height - 20) * bounds.width / bounds.height) }
@@ -273,7 +275,7 @@ final class StablePDFPreviewView: NSView {
         }
         let totalHeight = heights.reduce(0, +) + CGFloat(max(0, heights.count - 1)) * 12
         let documentWidth = max(size.width, width + 20)
-        var y = max(10, (size.height - totalHeight) / 2)
+        var y = fitWidth ? 10 : max(10, (size.height - totalHeight) / 2)
         pagesView.pageRects = heights.map { height in
             defer { y += height + 12 }
             return NSRect(x: (documentWidth - width) / 2, y: y, width: width, height: height)
@@ -291,11 +293,13 @@ struct PDFPreview: NSViewRepresentable {
     let data: Data?
     let revision: PDFPreviewRevision?
     let onFollowLink: (CardLinkTarget) -> Void
-    init(data: Data?, revision: PDFPreviewRevision? = nil, onFollowLink: @escaping (CardLinkTarget) -> Void) {
-        self.data = data; self.revision = revision; self.onFollowLink = onFollowLink
+    var fitWidth = false
+    init(data: Data?, revision: PDFPreviewRevision? = nil, fitWidth: Bool = false, onFollowLink: @escaping (CardLinkTarget) -> Void) {
+        self.data = data; self.revision = revision; self.fitWidth = fitWidth; self.onFollowLink = onFollowLink
     }
-    func makeNSView(context: Context) -> StablePDFPreviewView { StablePDFPreviewView() }
+    func makeNSView(context: Context) -> StablePDFPreviewView { let view = StablePDFPreviewView(); view.fitWidth = fitWidth; return view }
     func updateNSView(_ view: StablePDFPreviewView, context: Context) {
+        view.fitWidth = fitWidth
         view.setLinkHandler(onFollowLink)
         view.update(data: data, revision: revision)
     }
@@ -410,6 +414,10 @@ struct ContentView: View {
     @StateObject private var editor = EditorState()
     @StateObject private var graphWindow = GraphWindowManager()
     @StateObject private var library = LibraryStore()
+    @StateObject private var typeset = TypesetPreview()
+    @AppStorage("kasterTypesetEngine") private var typesetEngine = TypesetEngine.typst.rawValue
+    @AppStorage("kasterPreviewStyle") private var previewStyle = PreviewStyle.document.rawValue
+    @AppStorage("kasterLastPrint") private var lastPrintTime = 0.0
     @AppStorage("kasterEditorMode") private var editorMode = KasterEditorMode.live.rawValue
     @State private var openTabs: [URL] = []
     @AppStorage("kasterLayoutMigrated") private var kasterLayoutMigrated = false
@@ -556,7 +564,8 @@ struct ContentView: View {
                     Button("Save As…") { _ = saveMarkdown(saveAs: true) }
                     Divider()
                     Button("Export PDF…", action: exportPDF)
-                    Button("Save & Print") { if saveMarkdown() { printCards() } }
+                    Button("Print Cards Changed Since Last Print…") { printBatch(unprintedCardURLs(), label: "changed since your last print") }
+                        .disabled(notesFolder.isEmpty && saveFolder.isEmpty)
                     Divider()
                     Button("Choose Save Folder…", action: chooseFolder)
                     Button("Choose Notes Folder…", action: chooseNotesFolder)
@@ -567,7 +576,8 @@ struct ContentView: View {
                 Button { _ = saveMarkdown() } label: { Image(systemName: "square.and.arrow.down") }
                     .keyboardShortcut("s").help("Save (⌘S)")
                 Button(action: printCards) { Image(systemName: "printer") }
-                    .keyboardShortcut("p").help("Print index cards (⌘P)")
+                    .keyboardShortcut("p").help("Print this card (⌘P)")
+                saveAndPrintButton
             }
             .buttonStyle(.borderless)
             .font(.system(size: 14))
@@ -589,7 +599,9 @@ struct ContentView: View {
                                 }, onOpenParallel: { url in openLinkedTab(url) }, onReveal: revealSidebarNote, onDuplicate: duplicateSidebarNote,
                                 onRename: renameSidebarNote, onTrash: trashSidebarNote,
                                 onCopyPath: copySidebarPath, onMove: moveSidebarNote, onNew: newCard, onChooseFolder: chooseNotesFolder,
-                                onGraph: showGraph, onSettings: { showSettings = true })
+                                onGraph: showGraph, onSettings: { showSettings = true },
+                                onPrint: { urls, label in printBatch(urls, label: label) },
+                                lastPrint: Date(timeIntervalSince1970: lastPrintTime))
                     Divider()
                 }
                 WorkspaceSplitView(arrangement: WorkspaceArrangement.stored(storedWorkspaceArrangement), editor: {
@@ -790,7 +802,11 @@ struct ContentView: View {
                                     onFollowLink: { target in
                                         if let linked = activeLinkedTab { followLinkFromTab(target, source: linked) } else { followLink(target) }
                                     },
-                                    onOpen: { url in _ = loadFile(url) }) {
+                                    onOpen: { url in _ = loadFile(url) },
+                                    documentPDF: activeLinkedTab == nil && typesetSource != nil ? typeset.documentPDF : nil,
+                                    documentRevision: PDFPreviewRevision(mode: "document", content: "\(typeset.generation)", portrait: false, fontSize: 11, dotGrid: false, filePath: fileURL?.path),
+                                    typesetError: activeLinkedTab == nil && typesetSource != nil ? typeset.error : nil,
+                                    onPrintCard: printCards) {
                     VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 8) {
                         Picker("Orientation", selection: $portrait) {
@@ -807,8 +823,8 @@ struct ContentView: View {
                         Text("\(Int(fontSize)) pt").font(.caption).monospacedDigit().frame(width: 38, alignment: .trailing)
                     }
                     let linked = activeLinkedTab
-                    let previewData = linked == nil ? previewPDF : linked.flatMap { CardDocument(text: $0.content, portrait: portrait, fontSize: fontSize, dotGrid: dotGrid).pdf(includeLinks: true) }
-                    let revision = linked.map { PDFPreviewRevision(mode: "markdown", content: $0.content, portrait: portrait, fontSize: fontSize, dotGrid: dotGrid, filePath: $0.url.path) } ?? previewRevision
+                    let previewData = linked == nil ? currentPreviewData : linked.flatMap { CardDocument(text: $0.content, portrait: portrait, fontSize: fontSize, dotGrid: dotGrid).pdf(includeLinks: true) }
+                    let revision = linked.map { PDFPreviewRevision(mode: "markdown", content: $0.content, portrait: portrait, fontSize: fontSize, dotGrid: dotGrid, filePath: $0.url.path) } ?? currentPreviewRevision
                     PDFPreview(data: previewData, revision: revision, onFollowLink: { target in
                         if let linked { followLinkFromTab(target, source: linked) }
                         else { followLink(target) }
@@ -816,7 +832,11 @@ struct ContentView: View {
                         .border(Color.secondary.opacity(0.2)).help("Click an underlined link to open it.")
                         .allowsHitTesting(previewData != nil)
                         .overlay(alignment: .top) {
-                            if previewData == nil {
+                            if linked == nil, typesetSource != nil, let problem = typeset.error {
+                                Label(problem, systemImage: "exclamationmark.triangle")
+                                    .font(.caption).lineLimit(3).padding(8).frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(.regularMaterial).allowsHitTesting(false)
+                            } else if previewData == nil {
                                 Text("Preview unavailable; the last valid card may be shown. Check the card before printing.")
                                     .font(.caption).padding(8).frame(maxWidth: .infinity)
                                     .background(.regularMaterial).allowsHitTesting(false)
@@ -854,6 +874,7 @@ struct ContentView: View {
         .onAppear {
             if storedIDMode.isEmpty { storedIDMode = (autoTimestampID ? IDMode.timestamp : IDMode.titleOnly).rawValue }
             rememberTab(fileURL)
+            refreshTypeset()
             if !kasterLayoutMigrated { storedWorkspaceArrangement = WorkspaceArrangement.editorLeft.rawValue; showNotesSidebar = true; kasterLayoutMigrated = true }
             if let data = habitDraft.data(using: .utf8), let saved = try? JSONDecoder().decode(HabitTracker.self, from: data) { tracker = saved }
             if let data = todoDraft.data(using: .utf8), let saved = try? JSONDecoder().decode(TodoList.self, from: data) { todo = saved }
@@ -861,6 +882,7 @@ struct ContentView: View {
         }
         .onChange(of: text) { _ in if cardMode == "markdown" { scheduleAutosave() } }
         .onChange(of: fileURL) { url in rememberTab(url) }
+        .onChange(of: typesetRequest) { _ in refreshTypeset() }
         .onChange(of: habitDraft) { _ in if cardMode == "habits" { scheduleAutosave() } }
         .onChange(of: todoDraft) { _ in if cardMode == "todos" { scheduleAutosave() } }
         .onChange(of: outlineDraft) { _ in if cardMode == "outline" { scheduleAutosave() } }
@@ -926,6 +948,116 @@ struct ContentView: View {
                 .fixedSize().help("Create a linked branch from the current card (e.g. 21/3 → 21/3a)")
         }
     }
+    // MARK: Typesetting
+
+    /// Markdown that Kaster typesets for the current card, or nil for artifacts (habits, to-dos).
+    var typesetSource: String? {
+        if cardMode == "markdown" { return text }
+        if cardMode == "outline" { return outlineCard?.text }
+        return nil
+    }
+    var engine: TypesetEngine { TypesetEngine.stored(typesetEngine) }
+    var typesetRequest: TypesetPreview.Request? {
+        guard let source = typesetSource, KasterTypesetter.isAvailable(engine) else { return nil }
+        return .init(text: source, cardURL: fileURL, portrait: portrait, fontSize: fontSize, dotGrid: dotGrid,
+                     engine: engine, wantsDocument: previewStyle == PreviewStyle.document.rawValue)
+    }
+    func refreshTypeset() { if let request = typesetRequest { typeset.request(request) } }
+    var currentPreviewData: Data? {
+        if typesetRequest != nil { return typeset.cardPDF }
+        return previewPDF
+    }
+    var currentPreviewRevision: PDFPreviewRevision {
+        guard typesetRequest != nil else { return previewRevision }
+        return PDFPreviewRevision(mode: cardMode, content: "typeset-\(typeset.generation)", portrait: portrait, fontSize: fontSize, dotGrid: dotGrid, filePath: fileURL?.standardizedFileURL.path)
+    }
+
+    /// The PDF that prints or exports: typeset for cards, the artifact's own renderer otherwise.
+    /// If typesetting fails, offer the basic renderer so printing is never blocked.
+    func outputPDF() -> Data? {
+        guard let source = typesetSource else { return activePDF }
+        guard KasterTypesetter.isAvailable(engine) else { return activePDF }
+        let card = KasterTypesetter.prepare(source, cardURL: fileURL, links: false)
+        switch KasterTypesetter.render([card], layout: .card(portrait: portrait, fontSize: fontSize, dotGrid: dotGrid), engine: engine) {
+        case .success(let data): return data
+        case .failure(let failure):
+            let alert = NSAlert()
+            alert.messageText = "This card couldn't be typeset"
+            alert.informativeText = "\(failure.localizedDescription)\n\nYou can fix the card, or print it now with the basic renderer (no math or table layout)."
+            alert.addButton(withTitle: "Use Basic Renderer"); alert.addButton(withTitle: "Cancel")
+            return alert.runModal() == .alertFirstButtonReturn ? activePDF : nil
+        }
+    }
+
+    // MARK: Batch printing
+
+    func unprintedCardURLs() -> [URL] {
+        let since = Date(timeIntervalSince1970: lastPrintTime)
+        return library.snapshot.cards.filter { (library.modified[$0.path] ?? .distantPast) > since }
+            .sorted { ($0.cardID ?? "~" + $0.title).localizedStandardCompare($1.cardID ?? "~" + $1.title) == .orderedAscending }
+            .map(\.url)
+    }
+
+    /// Typesets the cards as one job (one card per page) and opens a single print dialog.
+    func printBatch(_ urls: [URL], label: String) {
+        guard !urls.isEmpty else {
+            let alert = NSAlert(); alert.messageText = "No cards to print"
+            alert.informativeText = label == "changed since your last print" ? "Every card has been printed since it last changed." : "There are no cards here yet."
+            alert.runModal(); return
+        }
+        guard flushExistingDraft() else { return }
+        var cards: [TypesetCard] = []
+        var unreadable: [String] = []
+        for url in urls {
+            if let content = try? String(contentsOf: url, encoding: .utf8) {
+                cards.append(KasterTypesetter.prepare(content, cardURL: url, links: false))
+            } else { unreadable.append(url.lastPathComponent) }
+        }
+        guard !cards.isEmpty else { status = "Could not read those cards."; return }
+        status = "Typesetting \(cards.count) cards…"
+        let layout = TypesetLayout.card(portrait: portrait, fontSize: fontSize, dotGrid: dotGrid)
+        var data: Data?
+        if KasterTypesetter.isAvailable(engine) {
+            switch KasterTypesetter.render(cards, layout: layout, engine: engine) {
+            case .success(let pdf): data = pdf
+            case .failure(let failure):
+                let alert = NSAlert()
+                alert.messageText = "Some cards couldn't be typeset"
+                alert.informativeText = "\(failure.localizedDescription)\n\nPrint the batch with the basic renderer instead?"
+                alert.addButton(withTitle: "Use Basic Renderer"); alert.addButton(withTitle: "Cancel")
+                guard alert.runModal() == .alertFirstButtonReturn else { status = "Batch print cancelled."; return }
+            }
+        }
+        if data == nil {
+            let merged = PDFDocument()
+            for url in urls {
+                guard let content = try? String(contentsOf: url, encoding: .utf8),
+                      let pdfData = CardDocument(text: content, portrait: portrait, fontSize: fontSize, dotGrid: dotGrid).pdf(),
+                      let doc = PDFDocument(data: pdfData) else { continue }
+                for index in 0..<doc.pageCount { if let page = doc.page(at: index) { merged.insert(page, at: merged.pageCount) } }
+            }
+            data = merged.dataRepresentation()
+        }
+        guard let data else { status = "Could not prepare cards."; return }
+        if runPrint(data) {
+            status = "Printed \(cards.count) \(cards.count == 1 ? "card" : "cards")\(label.isEmpty ? "" : " " + label)." + (unreadable.isEmpty ? "" : " Skipped \(unreadable.count) unreadable file(s).")
+        } else {
+            status = "Batch print cancelled."
+        }
+    }
+
+    // Kept front and center: saving and printing a card is Kaster's core loop.
+    @ViewBuilder var saveAndPrintButton: some View {
+        let label = Label("Save & Print", systemImage: "printer.fill").labelStyle(.titleAndIcon)
+        if storedAppearance == AppearancePreference.charcoal.rawValue {
+            Button { if saveMarkdown() { printCards() } } label: { label }.fixedSize().buttonStyle(CharcoalPrimaryButtonStyle())
+        } else if storedAppearance == AppearancePreference.slate.rawValue {
+            Button { if saveMarkdown() { printCards() } } label: { label }.fixedSize().buttonStyle(SlatePrimaryButtonStyle())
+        } else {
+            Button { if saveMarkdown() { printCards() } } label: { label }.fixedSize().buttonStyle(.borderedProminent).controlSize(.regular)
+        }
+    }
+
     // White writing surfaces on the system themes; Charcoal and Slate keep their backdrop.
     var paneBackground: Color {
         AppearancePreference.foreground(for: storedAppearance) == nil ? Color(nsColor: .textBackgroundColor) : Color.clear
@@ -1225,7 +1357,10 @@ struct ContentView: View {
             status = "\(continuation ? "Continuation" : "Branch") \(childID) created. The parent is unchanged."
         } catch { status = "Could not create branch: \(error.localizedDescription)" }
     }
-    var pageCount: Int { activePDF.flatMap { PDFDocument(data: $0)?.pageCount } ?? 0 }
+    var pageCount: Int {
+        if typesetSource != nil && typeset.cardPDF != nil { return typeset.pageCount }
+        return activePDF.flatMap { PDFDocument(data: $0)?.pageCount } ?? 0
+    }
     // Check the active draft before any action that replaces it.
     func confirmReplaceDraft(hidden: Bool = false) -> Bool {
         var discarded: [String] = []
@@ -1578,7 +1713,7 @@ struct ContentView: View {
         }
     }
     func exportPDF() {
-        guard let data = activePDF else { status = cardMode == "habits" ? "Shorten the heading to create a PDF." : "Could not create PDF."; return }
+        guard let data = outputPDF() else { status = cardMode == "habits" ? "Shorten the heading to create a PDF." : "Could not create PDF."; return }
         let panel = NSSavePanel(); if !saveFolder.isEmpty { panel.directoryURL = URL(fileURLWithPath: saveFolder, isDirectory: true) }; panel.allowedContentTypes = [.pdf]; panel.nameFieldStringValue = (fileURL?.deletingPathExtension().lastPathComponent ?? "Index Card") + ".pdf"
         if panel.runModal() == .OK, let url = panel.url {
             do { try data.write(to: url, options: .atomic); status = "Exported \(url.lastPathComponent)." }
@@ -1586,7 +1721,13 @@ struct ContentView: View {
         }
     }
     func printCards() {
-        guard let data = activePDF, let pdf = PDFDocument(data: data) else { status = cardMode == "habits" ? "Shorten the heading to print." : "Could not prepare cards."; return }
+        guard let data = outputPDF() else { status = cardMode == "habits" ? "Shorten the heading to print." : "Could not prepare cards."; return }
+        if runPrint(data) { status = "Sent \(currentCardTitle) to the printer." }
+    }
+
+    @discardableResult
+    func runPrint(_ data: Data) -> Bool {
+        guard let pdf = PDFDocument(data: data) else { status = "Could not prepare cards."; return false }
         let info = NSPrintInfo.shared.copy() as! NSPrintInfo
         info.paperSize = NSSize(width: 216, height: 360)
         info.orientation = portrait ? .portrait : .landscape
@@ -1595,9 +1736,11 @@ struct ContentView: View {
         info.isHorizontallyCentered = false; info.isVerticallyCentered = false
         guard let operation = pdf.printOperation(for: info, scalingMode: .pageScaleNone, autoRotate: false) else {
             status = "Could not prepare the print job."
-            return
+            return false
         }
-        operation.run()
+        let printed = operation.run()
+        if printed { lastPrintTime = Date().timeIntervalSince1970 }
+        return printed
     }
 
     private var sidebarRoot: URL? {

@@ -132,3 +132,23 @@ enum KasterText {
         return seen
     }
 }
+
+// Luhmann sequences: 21 → 21/1 → 21/1a → 21/1a1. A descendant extends the parent's ID
+// with a separator ("/" or ",") or with a component of the opposite kind (digit ↔ letter).
+enum KasterSequence {
+    static func isDescendant(_ id: String, of parent: String) -> Bool {
+        let child = id.lowercased(), base = parent.lowercased()
+        guard !base.isEmpty, child.count > base.count, child.hasPrefix(base), let last = base.last else { return false }
+        let next = child[child.index(child.startIndex, offsetBy: base.count)]
+        if next == "/" || next == "," || next == "." { return true }
+        if last == "/" || last == "," || last == "." { return true }
+        return last.isNumber ? next.isLetter : next.isNumber
+    }
+
+    /// The card and all its descendants, in sequence order.
+    static func branch(of card: LibraryCard, in cards: [LibraryCard]) -> [LibraryCard] {
+        guard let id = card.cardID, !id.isEmpty else { return [card] }
+        let descendants = cards.filter { other in other.cardID.map { isDescendant($0, of: id) } ?? false }
+        return [card] + descendants.sorted { ($0.cardID ?? "").localizedStandardCompare($1.cardID ?? "") == .orderedAscending }
+    }
+}

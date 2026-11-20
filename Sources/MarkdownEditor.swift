@@ -1024,6 +1024,11 @@ extension LinkCompletionTextView {
         each("^\\s*\\|?[\\s:|-]*-{3,}[\\s:|-]*$") { set([.foregroundColor: dim], $0.range) }
         each("\\|") { set([.foregroundColor: dim], $0.range) }
         each("(?<![\\w#&])#[A-Za-z][\\w/-]*") { set([.foregroundColor: purple], $0.range) }
+        // Math is typeset in the preview and on the card; in the editor it reads as code.
+        let mathColor = purple.withAlphaComponent(0.85)
+        each("\\$\\$[\\s\\S]+?\\$\\$|(?<![\\\\$])\\$(?=\\S)[^$\\n]+?(?<=\\S)\\$(?!\\d)") { match in
+            set([.font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular), .foregroundColor: mathColor], match.range)
+        }
         // Blank lines separate paragraphs; keep them short so the page reads like a document.
         let blank = NSMutableParagraphStyle(); blank.lineSpacing = 0; blank.paragraphSpacing = 0
         each("^\\n") { set([.font: NSFont.systemFont(ofSize: 7), .paragraphStyle: blank], $0.range) }

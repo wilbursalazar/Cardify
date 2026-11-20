@@ -46,6 +46,7 @@ struct WorkflowSettings: View {
     @AppStorage("dotGrid") private var dotGrid = false
     @AppStorage("timestampDateStyle") private var timestampDateStyle = TimestampDateStyle.sortable.rawValue
     @AppStorage("timestampIncludeTime") private var timestampIncludeTime = true
+    @AppStorage("kasterTypesetEngine") private var typesetEngine = TypesetEngine.typst.rawValue
     private var preference: WorkflowPreference { WorkflowPreference(rawValue: storedWorkflow) ?? .configured }
 
     var body: some View {
@@ -55,6 +56,16 @@ struct WorkflowSettings: View {
             AppearanceSettings()
             Toggle("Dot grid on cards", isOn: $dotGrid)
                 .help("Show a light dot grid in the preview and on printed cards.")
+            Text("Typesetting").font(.headline)
+            Picker("Engine", selection: $typesetEngine) {
+                ForEach(TypesetEngine.allCases) { engine in
+                    Text(engine.title + (KasterTypesetter.isAvailable(engine) ? "" : " — not installed")).tag(engine.rawValue)
+                }
+            }
+            Text(TypesetEngine.stored(typesetEngine) == .typst
+                 ? "Previews and printed cards are typeset by Typst, built into Kaster. Write tables with | pipes | and math as $x^2$ or $$…$$ in LaTeX notation."
+                 : "Uses your installed Pandoc and XeLaTeX (MacTeX). Slower to preview; same Markdown and $math$ syntax.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Text("New Markdown cards").font(.headline)
             Picker("Starting workflow", selection: Binding(get: { preference }, set: { storedWorkflow = $0.rawValue })) {
                 ForEach(WorkflowPreference.allCases) { choice in Text(choice.name).tag(choice) }
@@ -70,6 +81,6 @@ struct WorkflowSettings: View {
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Spacer()
             HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
-        }.padding(24).frame(width: 540, height: 470)
+        }.padding(24).frame(width: 560, height: 580)
     }
 }
