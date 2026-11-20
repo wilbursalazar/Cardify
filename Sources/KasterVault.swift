@@ -146,8 +146,8 @@ enum KasterFrontmatter {
 
 // MARK: Luhmann IDs
 
-/// Luhmann-style addresses: top-level 1, 2, 3…; a top-level card's follow-ups use a slash
-/// (21 → 21/1 → 21/2); branches alternate letters and numbers (21/1 → 21/1a → 21/1a1).
+/// Luhmann-style addresses: top-level 1, 2, 3…; going deeper from a top-level card uses a
+/// slash (21 → 21/1); deeper levels alternate letters and numbers (21/1 → 21/1a → 21/1a1).
 enum LuhmannIDs {
     static func isLuhmann(_ id: String) -> Bool {
         id.range(of: "^[0-9]{1,6}([/,][0-9]+)?([A-Za-z]+[0-9]*)*([/,][0-9A-Za-z]+)*$", options: .regularExpression) != nil
@@ -171,11 +171,12 @@ enum LuhmannIDs {
         return "\(parent)/\((used.max() ?? 0) + 1)"
     }
 
+    /// Continue = the next card at the same level: 21 → 22, 21/1 → 21/2, 21/1a → 21/1b.
     static func continuation(of parent: String, existing: Set<String>) throws -> String {
-        if isTopLevel(parent) { return firstChild(of: parent, existing: existing) }
-        return try CardIDs.continuation(from: parent, existing: existing)
+        try CardIDs.continuation(from: parent, existing: existing)
     }
 
+    /// Branch = one level deeper: 21 → 21/1, 21/1 → 21/1a, 21/1a → 21/1a1.
     static func branch(of parent: String, existing: Set<String>) throws -> String {
         if isTopLevel(parent) { return firstChild(of: parent, existing: existing) }
         return try BranchIDs.branch(from: parent, existing: existing)

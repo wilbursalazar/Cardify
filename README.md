@@ -1,249 +1,135 @@
 # Kaster
 
-**Write a note once. Keep it as Markdown, print it on 3 × 5-inch index cards, or do both.**
+**An offline, digital-and-physical slip box. Capture an idea, connect it, and print it as a perfect 3 × 5-inch index card.**
 
-Kaster is a free, open-source Mac app for research, reading, studying, and keeping a paper-and-digital slip box. Write in Markdown, connect your notes, explore them in a graph, add Zotero sources, and see how your cards will print as you work. You can use Kaster with an Obsidian vault, a folder of Markdown files, a physical card box, or any combination of the three.
+Kaster is a free, open-source Mac app that does one thing: it turns research into a permanent, interconnected system of index cards that live both on your Mac and in a box on your desk. Cards are plain Markdown files you own. Kaster gives them numbers, links and a typeset look, and prints them exactly to size.
 
-[Download Kaster for Mac](https://github.com/wilbursalazar/Cardify/raw/refs/heads/main/Downloads/Cardify-Mac.zip) · [Get started](#your-first-card) · [Use the library](#find-and-connect-cards) · [Explore the graph](#explore-the-graph) · [Choose a note-taking approach](#three-approaches-one-flexible-workflow) · [Printing help](#printing)
+[Download Kaster for Mac](https://github.com/wilbursalazar/Cardify/raw/refs/heads/main/Downloads/Kaster-Mac.zip) · [Philosophy](#philosophy) · [Card types](#card-types) · [Features](#features) · [Printing](#printing) · [Build from source](#build-from-source)
 
-## Download and open
+## Philosophy
 
-1. [Download Cardify-Mac.zip](https://github.com/wilbursalazar/Cardify/raw/refs/heads/main/Downloads/Cardify-Mac.zip) and unzip it.
-2. Move **Cardify.app** to Applications if you like, then open it.
-3. If macOS blocks the app, look in **System Settings → Privacy & Security** for an option to allow it to open.
+Kaster deliberately isn't a general writing app, a project manager or another note database. It aims to be the best possible tool for the slip-box method, judged by three activities:
 
-Kaster requires **macOS 13 or later** and includes code for both Apple silicon and Intel Macs. The current build is ad-hoc signed and **not Apple-notarized**, so macOS may ask for confirmation. Compatibility across all Macs and printers has not been tested. Kaster is currently a Mac app; Windows and Linux versions are not available.
+- **Capture:** get an idea or a source onto a card in seconds.
+- **Connect:** link the card to what you already think, and let lines of thought branch.
+- **Preserve:** keep every card findable and printable, so the digital box and the physical box stay in step.
 
-## Your first card
+A few commitments follow from that:
 
-1. Open Kaster. Use the card-type menu above the writing area to choose **Research**, **Habit**, **To Do**, or **Debate**.
-2. Optional: choose **File → Choose Save Folder…** to set the folder offered when you save a new note or export a PDF. To work with an Obsidian vault, you can choose a folder inside your vault.
-3. Optional: choose **File → Choose Notes Folder…** and select your vault or notes folder. For Obsidian, select the vault root so inserted paths are relative to the vault. Kaster searches this folder for notes to link and for existing card IDs. It can be the same folder as your save folder.
-4. Enter a title and write, or choose **Templates → Eco reading**, **Luhmann idea**, or **Quick note** to start a new Research card. Kaster asks before replacing an edited draft. Use **File → Mark as Index Card** when a card should serve as a topic entry point.
-5. Check the preview. Use the controls beside it to change orientation or text size, or scroll over the card to zoom the on-screen view. To add a dot grid, open **Settings → Appearance**. Then choose **Save**, **Print**, or **Save & Print**. Preview zoom does not change the printed size.
+- **Plain Markdown is the source of truth.** Every card is an ordinary `.md` file, readable in any editor and compatible with Obsidian. Nothing is locked in a database.
+- **Offline first.** Everything, including typesetting, runs on your Mac. Nothing is uploaded.
+- **The card is the unit.** One idea per card, small enough for 3 × 5 inches. If a card overflows, it probably holds two ideas.
+- **Print is a core feature.** A card prints as a faithful physical card, with exact margins and typography, in pure black ink unless you choose color.
+- **Frictionless and reversible.** Cards save themselves, links repair themselves when files move or are renamed, and nothing is silently lost.
 
-When you leave a new, edited card, Kaster offers **Save**, **Discard**, or **Cancel**. **Save** opens a dialog to save a `.md` file. After a file is saved or opened, Kaster saves edits automatically; ordinary **Save** updates that same file. If the file changes outside Kaster, autosave stops and your draft stays open so you can resolve the conflict. **Print** opens the printer dialog. **Save & Print** saves first and starts printing only if the save succeeds. **File → Export PDF…** saves a PDF for review or printing later. Longer notes can continue onto more than one card.
+The design draws on Niklas Luhmann's numbered, branching card file; Umberto Eco's reading cards from *How to Write a Thesis*; and the habit of sorting themed notecards into a box to build a book.
 
-New Habit, To Do, and Debate cards default to **Habit**, **To Do**, and **Debate** folders inside your chosen notes folder. They remain part of the same searchable, linkable vault. Existing files stay where they are; you can choose another destination in the Save dialog.
+## Card types
 
-> Save folder and notes folder have different jobs: the first is a default destination; the second is the collection Kaster searches. If no notes folder is selected, note suggestions fall back to the save folder. Saving still lets you choose a destination.
-
-## Navigate between cards
-
-The notes sidebar shows Markdown cards from your notes folder, or your save folder if no notes folder is set. A new card also appears there as an unsaved draft. Search or select a card to open it; use the folder and refresh controls at the top to change or rescan the folder. **New Card** starts a draft in the selected card type. Use the sidebar button in the top ribbon, or **Layout → Show notes sidebar**, to hide or show it.
-
-Use the folder arrows to expand and collapse nested folders. Search opens the paths containing matches, and selecting a note reveals its parent folders. Empty folders are shown too.
-
-Drag a saved note onto a folder in the sidebar to move the Markdown file into that folder on disk. Kaster refuses a move that would overwrite another file. Links that spell out the old folder path may need updating.
-
-Right-click a note and choose **Open Beside Current Card** to view it in a parallel tab without leaving the card you are writing.
-
-Right-click a saved note in the sidebar to open it, show it in Finder, copy its path, duplicate it, rename its file, or move it to the macOS Trash. A duplicate does not retain the original card ID. Renaming or trashing a file does not update links in other notes. Kaster checks the file for outside changes before changing it.
-
-Use the **back** and **forward** arrows in the top ribbon to revisit cards opened during the current session. The buttons follow browsing history, not the card-number sequence. You can also use **⌘[** and **⌘]**. Opening a different card after going back starts a new path through your history.
-
-Choose **Layout** in the top ribbon to put writing on the left, preview on the left, or writing above preview. Drag the divider to resize the areas; select the divider and use arrow keys to adjust it with the keyboard. Kaster remembers the arrangement. The formatting controls use one row when it fits and two rows when the writing area is narrower. If the controls above the editor need more space, scroll that area to see them all.
-
-Kaster asks before leaving a changed, unsaved draft. If you save it before going back, you can return to the saved card with Forward. A discarded unsaved draft cannot be recovered through history.
-
-## Find and connect cards
-
-Click **Library** to browse the Markdown files in your notes folder, or in your save folder if no notes folder is set. Search by title, filename, card ID, or note text. Select a card to see its text, outgoing links, and notes that link to it. Click a connection to inspect it, then **Open Card** to edit it. The library reads files; browsing does not rename or rewrite them. Use **Refresh** after changes outside Kaster.
-
-In the Cards view, **Insert Link** adds a link to the selected card in the current Markdown draft. You can include an optional explanation, such as “supports this argument.” You can do the same from **Link Note** above the editor. Links to ambiguous or unrecognized targets may not appear in the library’s connections; the Markdown itself remains unchanged. Nearby IDs are hints inferred from address shapes, not proof that cards are related.
-
-### Create a keyword index
-
-Choose **Templates → Quick note**, give it a subject such as “Memory,” and add a few links that are good starting points. Choose **File → Mark as Index Card**, then save it in the notes folder. In **Library → Index**, select that index card to explore its links. Index cards are ordinary Markdown files with `cardify_index: true` in their frontmatter, which makes them discoverable in the Index view. The marker is not printed on the card.
-
-To include an existing Markdown note, open it and choose **File → Mark as Index Card**, then save it. This changes your draft only until you choose to save. You choose the entry points and the words explaining them; Kaster does not require every related note to appear in an index.
-
-### Turn a reading into an idea
-
-Open a reading card and choose **File → New Linked Idea from Current…**. If needed, Kaster asks you to save the current card first, then creates a new unsaved Idea Card with a link back to it. Write and save the idea when you are ready. This also works with other Markdown cards; it does not alter the saved source card.
-
-## Explore the graph
-
-Click **Graph** beside Library to open a separate, read-only window for the selected notes folder. When your current saved card is in that folder, the graph starts with its nearby connections; otherwise it opens the whole-vault view. Search the list, select a node to inspect it, and use **Open Card** or double-click a node to open it in the editor. Opening a card follows the usual unsaved-draft protection.
-
-Solid lines show actual links to other Markdown cards. Dotted lines, controlled by **Possible branches**, are *possible* relationships inferred from card IDs; an ID alone does not establish why notes are related. A node’s number, color, and size show its count of distinct neighbors connected by actual links, not importance. Links that cannot be resolved safely are counted in the status but not guessed.
-
-Use the local depth control to show one or two steps, or choose **Whole vault**. Drag the background to pan, drag a card to move it, use the zoom control, and select **Center here** to explore another card’s neighborhood. The graph gently settles into place and respects the macOS Reduce Motion setting. The graph draws at most 180 nodes at a time and reports when more are available; search or center a card to narrow the view. Select **Refresh** after outside edits. The graph reads your files but does not rename, edit, or upload them.
-
-## Set your starting workflow
-
-Choose **File → Settings…** for **System, Light, Dark, Charcoal, or Slate** appearance and to select defaults for new Research cards. **As configured** keeps your current behavior. **Luhmann-inspired** starts an Idea Card with a Luhmann-style ID; **Eco-inspired** starts a Reading Card with a title-only filename; **Obsidian-style** starts a blank Markdown card with a title-only filename. Choose a different ID style or template whenever you want.
-
-The setting takes effect when you create a new Markdown card. It does not change the open draft, existing files, IDs, or folder locations. Every workflow keeps the same tools for links, Zotero, the library, and printing. These are optional starting points, not rules you must follow.
-
-## Three approaches, one flexible workflow
-
-You do not have to follow a single system. These approaches answer different questions, and Kaster lets you borrow the parts you find useful.
-
-### Umberto Eco: keep track of your research
-
-In *How to Write a Thesis*, Umberto Eco describes using different files of cards to organize research. A **bibliography file** records works to find or consult; a **reading file** records works actually read, with summaries, quotations, assessments, and the details needed to find the source again. He also discusses cards for ideas and quotations. A working plan helps relate material to a piece of writing.
-
-**Try it in Kaster:** choose a **Reading Card**, record a summary or clearly marked quotation, add the source and page, and write your own response. Use an **Idea Card** when the reading gives you an idea worth developing. An **Index Card** can collect links to notes for a topic or project. Zotero can help you find and insert a source; you decide how to organize your bibliography and work plan.
-
-Eco's method is especially helpful when you need to distinguish **what a source says** from **what you think about it**, and when you want to return to the exact page later. Kaster supplies tools for this kind of work; it does not automatically build Eco's complete research system for you.
-
-### Niklas Luhmann: develop connected lines of thought
-
-Luhmann's physical card index used fixed addresses, sequences, branches, cross-references, and an index of entry points. New notes could be placed near an existing line of thought without renumbering the whole collection. Cross-references could connect ideas in different places, allowing several paths through the file.
-
-**Try it in Kaster:** choose the **Luhmann** ID style, write an idea, and save it. Use **Continue sequence** for the next address in a sequence or **Branch from card** for an offshoot. Add links and a sentence explaining why the notes belong together. An Index Card can serve as an entry point into a topic.
-
-Kaster's numbering is **Luhmann-inspired**, not an exact reconstruction of every address in his historical archive. You remain free to edit an ID or write notes in a different style.
-
-### Obsidian: work with connected Markdown files
-
-Obsidian is an app for working with a vault of files; it is not a single prescribed research method. Its internal links let you connect notes digitally using `[[wiki links]]`. You can use an Eco-inspired research practice, a Luhmann-inspired slip box, or your own approach in Obsidian.
-
-**Try them together:** select an Obsidian vault as your notes folder and save cards into it. Kaster creates ordinary Markdown files, and its note picker inserts links to existing filenames. Open the same vault in Obsidian to continue working there; print the cards you want in your physical box. Kaster does not provide a separate sync service, and the paper copy will not update itself when a Markdown file changes. Reprint a card when you want the paper copy to reflect edits.
-
-## Continue a sequence or branch from a card?
-
-Think of a **continuation** as the next address at the same level and a **branch** as a new address extending from the current one. These are filing relationships; you choose what the relationship means in your writing.
-
-| Current card | Action | Example new ID | A possible use |
-| --- | --- | --- | --- |
-| `1a` | Continue sequence | `1b` | Add the next note in a line of thought. |
-| `1a` | Branch from card | `1a1` | Develop an offshoot or a more specific question. |
-| `1a1` | Continue sequence | `1a2` | Add another note at the offshoot's level. |
-| `1a1` | Branch from card | `1a1a` | Explore another offshoot. |
-
-These examples assume the suggested IDs are available. Kaster searches for existing IDs and skips ones already in use. Your actual suggestion may differ, and you can edit it. **Continue sequence** appears in Luhmann mode; **Branch from card** is available in Luhmann and Timestamp modes.
-
-To use either action:
-
-1. Give the current card an ID. If the card is new or has unsaved edits, Kaster asks you to save it first.
-2. Choose **Continue sequence** or **Branch from card**. Kaster creates a new draft with a suggested ID and a link back to the saved card.
-3. Give the new draft a title, write your note, and save it. The new draft is **not saved automatically**.
-
-The original card keeps its ID and filename. Kaster does not automatically add a link from the original card to the new one; add one yourself if you want a link in both directions. Neither action automatically renumbers existing notes.
-
-## Choose an ID style
-
-The **ID style** selector sits above the writing area. IDs are optional and editable; when present, they appear in small type on the top line of the printed card and as `card_id` in the Markdown frontmatter. The first line wraps before it reaches the ID; an unusually long ID uses its own line.
-
-| Style | What Kaster suggests | Useful when |
+| Type | What it's for | Saved as |
 | --- | --- | --- |
-| **Timestamp** | A local date-and-time ID, such as `202611122145`. If needed, a suffix distinguishes collisions. | You want a chronological identifier and simple filenames. |
-| **Luhmann** | An available numeric starting ID, with continuation and branch suggestions. | You want addresses that express sequences and offshoots. |
-| **Title only** | No new ID. | You prefer a descriptive filename without an automatically generated ID. |
+| **Research** | What a source says (quotation or paraphrase) and your response, with `Source: [[Bibliography card]], p. 42`. Eco-style. | `Research/Title.md` |
+| **Zettel** | One permanent idea, with a Luhmann address such as `21/1a`. | `Zettel/21-1a-Title.md` |
+| **Quick** | Just a title: capture now, develop later. Promote it to a Zettel or Research card with one click. | `Quick/Title.md` |
+| **Bibliography** | One card per source: title, author, year. It shows which Research cards cite it. | `Bibliography/Title.md` |
 
-With Timestamp or Luhmann selected, a new note's suggested filename combines its ID and title. For example, a card titled `Ways of remembering` might be suggested as `202611122145 Ways of remembering.md`. Title only suggests a title-based filename. Switching between Timestamp and Luhmann proposes a new ID for the current Research card. If it already has an ID, Kaster shows both IDs and asks whether to replace it. For a saved card, this changes the Markdown ID when you save; its existing filename stays the same. Debate cards keep their own IDs. You can also edit the ID field yourself.
+**Luhmann numbering**
+- New top-level cards are numbered 1, 2, 3…
+- **Continue** adds the next card at the same level: 21 → 22, 21/1 → 21/2, 21/1a → 21/1b.
+- **Branch** goes one level deeper: 21 → 21/1, 21/1 → 21/1a, 21/1a → 21/1a1.
+- Because a card's number never changes, a new thought can be filed right behind the card it develops.
 
-In **Settings**, choose year–month–day, day–month–year, or month–day–year for new timestamp IDs. Turn **Include hours and minutes** on or off. For example, day–month–year can produce `13-11-26` or `13-11-26-1437`. Changing this setting does not rename existing notes or change their IDs.
+**Themes** (optional, in Settings): each card's first `#tag` becomes its theme. It prints in the card's top corner, and a Themes list in the sidebar gathers, orders and prints a theme's cards as a stack, like a box of themed dividers.
 
-Before saving an ID-bearing note, Kaster checks the selected notes folder and the destination folder, including their subfolders, for duplicate IDs it recognizes. If the check cannot be completed, Kaster stops the save instead of assuming the ID is unique. These checks apply only to the folders searched and cannot prevent simultaneous changes by another app.
+**Artifacts:** habit trackers, to-do lists and debate maps are still available from the Artifacts menu. They're kept apart from the slip box, in folders you choose.
 
-If an externally edited file causes a save conflict, you can use **File → Save As** to preserve your draft separately. If the original is still inside a folder being checked and both copies have the same card ID, change the draft's ID before saving the copy; Kaster does not silently create duplicate IDs.
+## Features
 
-## Link and format notes
+### Capture
+- **⌘N** makes a new card of the type you used last. The cursor lands on the title.
+- **No Save dialog:** a card saves itself into its folder as soon as it has a title, and keeps autosaving.
+- **Changing a title renames the file** and updates every link to it across the vault.
+- **Zotero:** add a source from your local Zotero library, from the toolbar or the selection bar.
+- **Web clipper (optional):** send selected text, the page title and the URL from Chrome or LibreWolf.
 
-In a Markdown card, type `[[` to search the selected notes folder by filename and insert a link. Use the arrow keys to choose a suggestion, Return or Tab to insert it, and Escape to dismiss the list. You can also click **Link Note** and search for a note. Kaster inserts a path-based link such as `[[Research/Memory and archives]]`; it does not change the linked file.
+### Connect
+- Type `[[` to link a card. ⌘-click a link to open it.
+- **⌘-click a link to a card that doesn't exist yet** and Kaster creates it as a Quick card.
+- **Backlinks and Info:** the inspector shows what links here, what this card links to, and the card's details.
+- **Open Beside:** edit a second card next to the first; both stay editable.
+- **Graph:** see connections in a separate window.
+- **Index cards:** entry points into a subject that can point to cards anywhere in the box.
+- Every card gets a permanent hidden `uid`, so its identity survives renumbering and renaming.
 
-To follow a link, **Command-click** it in the Markdown editor, or click the underlined link in the card preview. `[[Note]]`, `[[Folder/Note|label]]`, and heading links such as `[[Note#Heading]]` open Markdown cards in a tab beside the current editor. Close a linked tab with its ×, choose **Current card** to return to your own preview, or choose **Edit** to open the linked note in the main editor. Web links open in your browser, and Zotero links open in Zotero.
+### Write
+- **Live mode:** headings, emphasis, links and tags are styled while you type. Markdown symbols hide except on the line you're editing. **Source mode** shows plain Markdown.
+- **Selection toolbar:** bold, italic, highlight, H1–H3, bullets, code, `[[link]]`, math and Zotero.
+- **Math and tables:** write math in `$…$` / `$$…$$` and tables with `| pipes |`. With the Typst engine, math can use Typst syntax (`frac(a, b)`) or LaTeX commands (`\frac{a}{b}`).
 
-Choose the vault root with **File → Choose Notes Folder…** so note links resolve against your vault. If a filename is ambiguous or a target cannot be found, Kaster tells you instead of opening a different note. Heading links support Markdown headings; Obsidian block links are not supported yet. Preview links are interactive only inside Kaster; Kaster does not add its internal link actions to exported or printed PDFs. The Zotero open-source line is hidden in the printed preview, but you can Command-click it in the editor.
-
-Add a few words explaining a link when they will help you later, for example:
-
-```md
-Related: [[Research/Memory and archives]] — connects this idea to how archives preserve context.
-```
-
-Use the buttons above the editor for **bold**, *italic*, headings, bullet lists, and tasks. The list and task buttons use icons with labels on hover. Markdown and wiki-link labels appear in the card preview and print output. Kaster renders a subset of Markdown; it does not promise every Obsidian or Markdown feature will print exactly as it appears in another app.
-
-Select text in the editor to show a compact formatting toolbar. Use it to format the selection, make a list or task, or wrap selected text in `[[double brackets]]` as a note link.
-
-For notes with YAML frontmatter, use **Show Metadata** or **Hide Metadata** in the editor to reveal or conceal it without removing it from the file. While metadata is hidden, **Select All** selects the note body and leaves the hidden metadata intact; reveal it to select and edit it too. Markdown syntax in the body remains visible while editing. Press Return on a bullet or task to continue the list; press Return on an empty item to finish it.
-
-## Reorder an outline
-
-Write an outline as an ordinary Markdown list in a Research card. Drag the bullet marker (`-`, `+`, or `*`) to move that point and any indented bullets beneath it. This changes their order in the Markdown file and can be undone with Command-Z.
-
-Existing files made with Kaster's older structured Outline mode still open in that editor. New outlines can be written directly in Research cards.
-
-## Add a Zotero source
-
-1. Open Zotero. In Zotero, enable **Settings → Advanced → Allow other applications on this computer to communicate with Zotero**.
-2. In a Markdown card, click **Add Zotero Source**.
-3. Search your library, select a source, and optionally enter a page or other location. Kaster adds a readable source and a link that opens the item in Zotero.
-
-You can choose your personal library or an available group, search more fields, and load additional results. Zotero must be running with local access enabled. Kaster reads through Zotero's local API and does not modify your library. Check source details and page numbers before citing them.
-
-## Weekly habit cards
-
-Choose **Habit**, then **Templates → Weekly Habit Tracker** if you want a fresh tracker. Edit the heading, add a row for each habit, and click the weekday boxes to add or remove an X. You can also leave the boxes empty and mark the printed card by hand.
-
-Use the preview's **Text size** control to change the tracker font. Seven standard rows fit on a landscape card at the default size; larger text, long habit names, or more rows can continue onto additional cards. Saving produces a Markdown table. Opening a table saved by Kaster restores it in the habit editor.
-
-## To-do cards
-
-Choose **To Do** to write a heading and add tasks. Click each checkbox to mark or clear it, and use **Add task** or the minus button to change the list. Adjust text size and orientation beside the preview, then save, print, or both.
-
-The saved file uses ordinary Markdown task checkboxes and a `<!-- cardify:todo -->` marker. The marker is hidden on the printed card and lets Kaster reopen the list in the structured editor. If a marked file contains additional content the editor cannot safely represent, Kaster opens it as a Research note instead of discarding that content.
-
-## Debate: resolutions and argument maps
-
-Choose **Debate** to organize arguments using the same Markdown draft, ID options, links, Zotero tools, preview, and print controls as Research. The argument map shows a resolution at the top, AFF and DEF points underneath, and each point's evidence, objections, arguments, and replies below it. This structure is inspired by [William Lane Craig's description of preparing and reusing documented argument and response briefs](https://www.reasonablefaith.org/media/reasonable-faith-podcast/dr-craig-live-at-west-university-baptist-church-part-1/); the visual map is Kaster's own design.
-
-1. Choose **File → Choose Notes Folder…** and select your notes folder. The argument map searches this folder; if none is selected, it uses the save folder.
-2. Under **New**, choose **Resolution**, give the resolution a title, and save it in the notes folder. Existing debate projects still appear as resolutions. Use **Mark as** to identify an existing draft without renaming its file.
-3. Open **Argument map**. The map guides you to create a resolution, then add an AFF point; you can also add as many DEF points as you need. New points receive IDs such as `AFF-01` and `DEF-01`, shown at the top right of their cards and in their suggested filenames. Existing IDs and filenames are kept. Choose a notes or save folder first so Kaster can check for duplicate IDs.
-4. Select a point or connected card on the map. Choose **Add objection or counterargument**, **Add supporting evidence**, **Add response**, or **Add supporting argument**. The new card branches from the selected card, which becomes its primary parent. You can select that new card later to continue the chain. It inherits its parent's ID: an objection under `AFF-01` might be `AFF-01-OB-01`, and its reply `AFF-01-OB-01-RE-01`. The other type codes are `EV` (evidence), `AR` (argument), and `NT` (other note); each type has its own sequence. If an older parent has no ID, you can add one first or continue without an inherited ID. Save and refresh the map to see each new card.
-5. To connect an existing draft to another card, select its parent on the map and choose **Set as primary parent**. To connect it elsewhere too, choose **Add related parent**. A card has one primary parent; dashed connections show additional related parents. You can add a brief explanation of each relationship. Kaster refuses primary links that would make a cycle.
-
-Select any node to inspect its actions; double-click it or choose **Open card** to edit the note. Choose **Focus branch** above the map, or **Focus on this branch** beside the selected card, to see its path and immediate children. Select another card to follow the chain, or choose **Full map** to return to the whole debate. Related cards are cross-links, not additional primary parents. Use the resolution picker to switch between debates and search within the displayed map. The **Unassigned** view keeps earlier AFF/DEF notes that have no resolution link accessible. A parent may belong to more than one resolution, and a related card may appear under multiple points without being copied.
-
-Each primary connection can be marked **Supports parent**, **Challenges parent**, or **Not specified**. The relation describes the connection, not the card type: supporting evidence supports its selected parent, while an objection challenges it. A new response starts unspecified; open the card and use **Relationship to parent** to choose. Older cards remain unspecified until you choose, and changing a card's primary parent clears the old connection's label. Save the card after changing its relationship.
-
-Resolutions, points, and connected cards are ordinary Markdown files. Role and relationship markers are hidden from the printed card, and parent relationships are readable wiki links. No linked note is copied, automatically renamed, or modified when you connect your current draft. If a linked file is moved or renamed outside Kaster, repair its link in the Markdown. Anki integration and study scheduling are not included in this version.
+### Organize and find
+- **Library:** All Cards, Recent, Favorites, Unprinted, Graph, Search (⌘F), Themes and your folders.
+- **Note list:** each card shows its type, its ID and when it last changed. Sort by date, ID, title, or **Manual**: drag cards to reorder them (saved as `order:` in the card).
+- **Folders:**
+  - Drag cards and folders between folders; links are kept intact.
+  - Right-click for New Card Here, New Folder Here, Move to…, Rename, Duplicate and Trash.
+  - Resize the two left panes by dragging.
+- **Organize Vault into Kaster Folders** (File menu): sorts an existing folder of notes into the card-type folders. It shows every move first, makes a zip backup, and repairs links.
 
 ## Printing
 
-1. Choose **Landscape · 5 × 3** or **Portrait · 3 × 5** beside the preview.
-2. Review the preview and card count. Adjust text size if needed; long content can continue onto additional cards.
-3. Click **Print**. In your printer dialog, choose a printer-supported **3 × 5-inch** paper size and the matching orientation. Print at **100% scale**, without fit-to-page scaling.
-4. Feed the cards according to your printer's instructions. Print a test card to check the feed, orientation, ink, and margins for your printer.
+Kaster typesets cards with [Typst](https://typst.app), bundled inside the app, so the preview is exactly what prints. A LaTeX engine (Pandoc + XeLaTeX from your own TeX installation) is available in Settings.
 
-Kaster generates a 3 × 5-inch PDF with a 3/8-inch inset. Actual printable margins and media handling depend on the printer and driver. If the result is clipped, blank, or misaligned, check the paper size, media type, tray, and scaling in the printer dialog; try **File → Export PDF…** to inspect or print the PDF separately. A correct preview cannot guarantee that a particular printer will handle the card stock correctly.
+- **3 × 5 in cards**, landscape or portrait, ⅜ in margins, at the text size you pick. Print at 100% scale.
+- **Black only (default):** text, tables, rules and IDs print in pure black ink (K-only), and images in grayscale. **Color:** black text, purple links and color images.
+- **Save & Print**, **⌘P**, or the PDF button, which saves `Card.pdf` next to `Card.md`.
+- **Batch printing:**
+  - selected cards (⌘-click)
+  - the current list
+  - a whole folder
+  - a Zettel and its entire branch, in sequence order
+  - every card changed since your last print (the **Unprinted** list)
+- Long cards continue onto additional cards automatically.
 
-For a light background, enable **Dot grid on cards** under **Settings → Appearance**. It appears in the preview, exported PDF, and printed cards.
+## Download and open
+
+1. [Download Kaster-Mac.zip](https://github.com/wilbursalazar/Cardify/raw/refs/heads/main/Downloads/Kaster-Mac.zip) and unzip it.
+2. Move **Kaster.app** to Applications, then open it. The first time, Kaster creates your slip box at `~/Documents/Kaster`. Choose another folder with **File → Choose Notes Folder…**.
+3. If macOS blocks the app, look in **System Settings → Privacy & Security** for an option to allow it to open.
+
+Kaster requires **macOS 13 or later**. The app is ad-hoc signed and **not Apple-notarized**, so macOS may ask for confirmation. The bundled Typst engine is for Apple silicon; on Intel Macs, Kaster uses an installed `typst` if one is present, or a basic built-in renderer otherwise.
+
+## Appearance
+
+Kaster has six appearances: System, Light, Dark, Charcoal, Slate, and **Midnight**, a high-contrast dark theme that eases from near-black into a faint violet. Settings also has the dot-grid option for printed cards, the typesetting engine, Themes, and the folders used for artifacts.
 
 ## Clip research from the web
 
-The optional browser clipper sends selected webpage text, the page title, and URL to Kaster for review. Open Kaster once before using it so macOS can register the app's link handler.
+The optional browser clipper sends selected webpage text, the page title and the URL to Kaster for review. Open Kaster once before using it, so macOS can register the app's link handler.
 
-- **Chrome:** load [Extensions/Chrome](Extensions/Chrome) with **Load unpacked** at `chrome://extensions`, after enabling Developer mode.
-- **LibreWolf:** [Download the clipper XPI](Downloads/Cardify-Clipper-LibreWolf.xpi). In `about:addons`, use the gear menu → **Install Add-on From File…**. This package is unsigned. LibreWolf must support unsigned extensions and have signature verification disabled before it can install it; that setting affects all extensions in the profile. Once installed, it persists across restarts. This package does not currently update itself.
-- **Firefox:** the XPI is not Mozilla-signed and cannot be permanently installed in ordinary Firefox release builds. For testing, load [Extensions/LibreWolf](Extensions/LibreWolf) from `about:debugging` → **This Firefox** → **Load Temporary Add-on**. A Mozilla-signed release is not yet available.
-
-Select text on a supported webpage, open the extension, and choose **Open in Kaster**. Review the header, note, and source before appending to or replacing your draft. Some browser pages, embedded frames, and PDF viewers restrict access; images and video are not extracted, and very long selections are rejected. Browser-to-app handoff has not been tested across every browser and macOS version.
+- **Chrome:** at `chrome://extensions`, enable Developer mode, then load [Extensions/Chrome](Extensions/Chrome) with **Load unpacked**.
+- **LibreWolf:** [download the clipper XPI](Downloads/Cardify-Clipper-LibreWolf.xpi), then in `about:addons` use the gear menu → **Install Add-on From File…**. The package is unsigned, so LibreWolf must allow unsigned extensions.
+- **Firefox:** for testing, load [Extensions/LibreWolf](Extensions/LibreWolf) from `about:debugging` → **This Firefox** → **Load Temporary Add-on**.
 
 ## Privacy and your files
 
-Drafts and the default save-folder setting are stored locally. Markdown files are saved where you choose. The clipper passes selected text, title, and the full URL through a local custom URL scheme; it does not send them to a remote Kaster service. Other local software or system components may see a custom URL, and a webpage URL can contain private query parameters. Review a source before sharing or printing it. Zotero integration communicates with the local Zotero service.
+Your cards are Markdown files in the folder you choose. Drafts and settings stay on your Mac. Typesetting runs locally, and nothing is sent to a remote Kaster service. The clipper passes the selected text, title and URL through a local URL scheme.
 
 ## Build from source
 
-On macOS, install the Apple Command Line Tools, then run:
+Install the Apple Command Line Tools and [Typst](https://typst.app) (`brew install typst`), then run:
 
 ```sh
 ./scripts/build.sh
 open build/Kaster.app
 ```
 
-The script builds a universal app targeting macOS 13 and later and signs it ad hoc. The result is not notarized. Run `./scripts/test.sh` for library, graph physics, index, workflow, appearance, to-do, history, and draft-protection checks, `./scripts/test-printed-id.sh` for PDF layout checks, `./scripts/test-preview-links.sh` for clickable-preview checks, `./scripts/test-preview-stability.sh` for preview updates, `./scripts/test-todo-pdf.sh` for to-do printing, `./scripts/test-graph-layout.sh` for graph layout, and `./scripts/test-graph-open.sh` for graph-opening safeguards.
+The script builds a universal app for macOS 13 and later, bundles Typst and its Markdown and math packages (licenses in `Resources/Typst/NOTICE.md`), and signs the app ad hoc. Run `./scripts/test.sh` for the test suite, which covers the library, IDs, links, vault organization, typesetting and print colors, autosave, and editor behavior.
 
 ## Further reading
 
-- Johannes F. K. Schmidt, [“Niklas Luhmann's Card Index: The Fabrication of Serendipity”](https://www.uni-bielefeld.de/fakultaeten/soziologie/forschung/luhmann-archiv/pdf/jschmidt_niklas-luhmanns-card-index_-sociologica_2018_12-1.pdf) and the [Niklas Luhmann Archive's overview](https://niklas-luhmann-archiv.de/nachlass/zettelkasten).
-- Umberto Eco, [*How to Write a Thesis*](https://mitpress.mit.edu/9780262527132/how-to-write-a-thesis/), especially its chapters on bibliography, index cards, and the work plan.
-- Obsidian Help, [Internal links](https://obsidian.md/help/links).
+- Johannes F. K. Schmidt, ["Niklas Luhmann's Card Index: The Fabrication of Serendipity"](https://www.uni-bielefeld.de/fakultaeten/soziologie/forschung/luhmann-archiv/pdf/jschmidt_niklas-luhmanns-card-index_-sociologica_2018_12-1.pdf), and the [Niklas Luhmann Archive](https://niklas-luhmann-archiv.de/nachlass/zettelkasten).
+- Umberto Eco, [*How to Write a Thesis*](https://mitpress.mit.edu/9780262527132/how-to-write-a-thesis/), especially the chapters on index cards and the work plan.
+- Sönke Ahrens, *How to Take Smart Notes*.
 
 ## License
 

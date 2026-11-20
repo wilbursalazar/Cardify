@@ -3,6 +3,7 @@ import AppKit
 
 enum SidebarSelection: Hashable {
     case all, recent, favorites, unprinted
+    case theme(String)
     case folder(String)
 }
 
@@ -53,6 +54,9 @@ struct CardSidebar: View {
     @AppStorage("kasterFavorites") private var favorites = ""
     @AppStorage("kasterRecents") private var recents = ""
     @AppStorage("kasterNoteSort") private var storedSort = NoteListSort.modified.rawValue
+    @AppStorage("kasterThemes") private var themesEnabled = false
+    @AppStorage("kasterLibraryWidth") private var libraryWidth = 196.0
+    @AppStorage("kasterNoteListWidth") private var listWidth = 238.0
     @State private var selection: SidebarSelection = .all
     @State private var query = ""
     @State private var searching = false
@@ -70,12 +74,13 @@ struct CardSidebar: View {
     var body: some View {
         HStack(spacing: 0) {
             libraryColumn
-                .frame(width: 196)
+                .frame(width: libraryWidth)
                 .background(AppearancePreference.foreground(for: appearance) == nil ? Color.primary.opacity(0.035) : Color.clear)
-            Divider()
+            PaneResizeHandle(width: $libraryWidth, range: 150...340)
             noteListColumn
-                .frame(width: 238)
+                .frame(width: listWidth)
                 .background(AppearancePreference.foreground(for: appearance) == nil ? Color(nsColor: .textBackgroundColor) : Color.white.opacity(0.03))
+            PaneResizeHandle(width: $listWidth, range: 180...460)
         }
         .frame(maxHeight: .infinity)
         .onAppear(perform: scan)
@@ -104,6 +109,17 @@ struct CardSidebar: View {
                     actionRow("Graph", systemImage: "point.3.connected.trianglepath.dotted", action: onGraph)
                     actionRow("Search", systemImage: "magnifyingglass", shortcut: "⌘F") { startSearch() }
                         .keyboardShortcut("f", modifiers: .command)
+                    if themesEnabled {
+                        Text("Themes").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                            .padding(.horizontal, 10).padding(.top, 16).padding(.bottom, 4)
+                        let themes = store.themes.keys.sorted()
+                        if themes.isEmpty {
+                            Text("Add a #tag to a card; its first tag is its theme.").font(.caption).foregroundStyle(.secondary).padding(.horizontal, 10)
+                        }
+                        ForEach(themes, id: \.self) { theme in
+                            navRow("#" + theme, systemImage: "tag", count: store.themes[theme]?.count ?? 0, target: .theme(theme))
+                        }
+                    }
                     HStack {
                         Text("Folders").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
                         Spacer()
@@ -271,6 +287,7 @@ struct CardSidebar: View {
         case .recent: return "Recent"
         case .favorites: return "Favorites"
         case .unprinted: return "Unprinted"
+        case .theme(let theme): return "#" + theme
         case .folder(let path): return (path as NSString).lastPathComponent
         }
     }
@@ -298,6 +315,9 @@ struct CardSidebar: View {
             case .recent: return recentCards
             case .favorites: base = favoriteCards
             case .unprinted: base = unprintedCards
+            case .theme(let theme):
+                let paths = Set(store.themes[theme] ?? [])
+                base = store.snapshot.cards.filter { paths.contains($0.path) }
             case .folder(let path): base = store.snapshot.cards.filter { $0.path.hasPrefix(path + "/") }
             }
         }
@@ -399,6 +419,7 @@ struct CardSidebar: View {
         case .recent: return "clock"
         case .favorites: return "star"
         case .unprinted: return "printer"
+        case .theme: return "tag"
         case .folder: return "folder"
         }
     }
@@ -434,6 +455,11 @@ struct CardSidebar: View {
         return date.isEmpty ? id : "\(id) · \(date)"
     }
 
+    private func cardType(_ card: LibraryCard) -> KasterMode? {
+        guard let first = card.path.split(separator: "/").first, card.path.contains("/") else { return nil }
+        return KasterMode.allCases.first { $0.folder.caseInsensitiveCompare(String(first)) == .orderedSame }
+    }
+
     private func isFavorite(_ card: LibraryCard) -> Bool { KasterPathList.decode(favorites).contains(KasterPathList.key(card.url)) }
 
     private func noteRow(_ card: LibraryCard) -> some View {
@@ -453,7 +479,10 @@ struct CardSidebar: View {
                     Text(card.title).font(.system(size: 13, weight: current ? .semibold : .medium)).lineLimit(2)
                     if isFavorite(card) { Image(systemName: "star.fill").font(.system(size: 9)).foregroundStyle(accent) }
                 }
-                Text(subtitle(for: card)).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                HStack(spacing: 4) {
+                    if let mode = cardType(card) { Image(systemName: mode.systemImage).font(.system(size: 9, weight: .semibold)).foregroundStyle(accent.opacity(0.8)).help(mode.title) }
+                    Text(subtitle(for: card)).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                }
             }
             .padding(.horizontal, 10).padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -586,5 +615,27 @@ struct CardSidebar: View {
             // Expand top-level folders on first load so the tree isn't empty-looking.
             if expandedFolders.isEmpty { expandedFolders = Set(store.folderPaths.filter { !$0.contains("/") }) }
         }
+    }
+}
+
+
+/// A thin divider you can drag to resize the pane on its left. Double-click resets nothing;
+/// widths are remembered between launches.
+struct PaneResizeHandle: View {
+    @Binding var width: Double
+    let range: ClosedRange<Double>
+    @State private var start: Double?
+    var body: some View {
+        Rectangle().fill(Color(nsColor: .separatorColor)).frame(width: 1)
+            .overlay(Color.clear.frame(width: 8).contentShape(Rectangle())
+                .onHover { inside in if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() } }
+                .gesture(DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                    .onChanged { value in
+                        let base = start ?? width
+                        if start == nil { start = width }
+                        width = min(max(base + value.translation.width, range.lowerBound), range.upperBound)
+                    }
+                    .onEnded { _ in start = nil }))
+            .accessibilityLabel("Resize pane")
     }
 }

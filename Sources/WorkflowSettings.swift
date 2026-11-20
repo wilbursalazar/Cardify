@@ -48,6 +48,7 @@ struct WorkflowSettings: View {
     @AppStorage("timestampDateStyle") private var timestampDateStyle = TimestampDateStyle.sortable.rawValue
     @AppStorage("timestampIncludeTime") private var timestampIncludeTime = true
     @AppStorage("kasterTypesetEngine") private var typesetEngine = TypesetEngine.typst.rawValue
+    @AppStorage("kasterThemes") private var themesEnabled = false
     @AppStorage("kasterArtifactFolder.habits") private var habitsFolder = ""
     @AppStorage("kasterArtifactFolder.todos") private var todosFolder = ""
     @AppStorage("kasterArtifactFolder.debates") private var debatesFolder = ""
@@ -95,6 +96,9 @@ struct WorkflowSettings: View {
             Text("Cards").font(.headline)
             Text("Research · Zettel · Quick · Bibliography. ⌘N makes a new card of the type you used last; it saves itself into its folder once it has a title.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Toggle("Themes (Holiday–Greene)", isOn: $themesEnabled)
+            Text("Each card's first #tag becomes its theme: printed in the card's top-left corner, with a Themes list in the sidebar to gather, reorder and print a theme's cards.")
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Text("Artifact folders").font(.headline)
             ForEach(KasterArtifact.allCases) { artifact in
                 HStack {
@@ -107,6 +111,6 @@ struct WorkflowSettings: View {
             }
             Spacer()
             HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
-        }.padding(24).frame(width: 560, height: 580)
+        }.padding(24).frame(width: 560, height: 640)
     }
 }

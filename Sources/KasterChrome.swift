@@ -73,6 +73,8 @@ struct KasterFormatBar: View {
                 HStack(spacing: 2) { headingMenu; emphasis; icon("link", "Link a card ([[ ]])", action: onLinkNote); moreMenu(compact: true); Spacer(minLength: 4) }
                 HStack(spacing: 2) { moreMenu(compact: true); Spacer(minLength: 4) }
             }
+            Button(action: onZotero) { Label("Zotero", systemImage: "books.vertical").font(.system(size: 12)) }
+                .buttonStyle(.borderless).fixedSize().help("Add a source from your Zotero library").padding(.trailing, 6)
             KasterModePicker(mode: $mode).fixedSize()
         }
         .padding(.horizontal, 10).frame(height: 38)

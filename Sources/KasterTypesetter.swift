@@ -29,6 +29,7 @@ struct TypesetCard: Equatable {
     var markdown: String      // Body only: frontmatter removed, wiki links rewritten
     var id: String?
     var images: [String: URL] // name inside the job folder -> source file
+    var theme: String? = nil  // Holiday–Greene theme (first #tag) when Themes is on
 }
 
 enum TypesetError: LocalizedError, Equatable {
@@ -91,7 +92,15 @@ enum KasterTypesetter {
 
     /// Converts a stored card into the Markdown the engines read.
     /// `links: true` keeps clickable in-app links (preview); print output shows plain labels.
-    static func prepare(_ text: String, cardURL: URL? = nil, links: Bool) -> TypesetCard {
+    /// The first #tag in the card body — its Holiday–Greene theme.
+    static func firstTag(in text: String) -> String? {
+        let body = stripFrontmatter(text)
+        guard let regex = try? NSRegularExpression(pattern: "(?<![\\w#&/])#([A-Za-z][\\w/-]*)"),
+              let match = regex.firstMatch(in: body, range: NSRange(location: 0, length: (body as NSString).length)) else { return nil }
+        return (body as NSString).substring(with: match.range(at: 1))
+    }
+
+    static func prepare(_ text: String, cardURL: URL? = nil, links: Bool, themes: Bool? = nil) -> TypesetCard {
         let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
         let metadata = CardMetadata.parse(normalized)
         var body = stripFrontmatter(normalized)
@@ -102,7 +111,8 @@ enum KasterTypesetter {
         var images: [String: URL] = [:]
         body = rewriteImages(body, base: cardURL?.deletingLastPathComponent(), into: &images)
         let id = metadata.id ?? cardURL.flatMap { BranchIDs.luhmannFilenameID(for: $0) ?? BranchIDs.filenameID(for: $0) }
-        return TypesetCard(markdown: body, id: id, images: images)
+        let showTheme = themes ?? UserDefaults.standard.bool(forKey: "kasterThemes")
+        return TypesetCard(markdown: body, id: id, images: images, theme: showTheme ? firstTag(in: normalized) : nil)
     }
 
     /// Removes a leading YAML block ("---" … "---" or "...").
@@ -248,8 +258,11 @@ enum KasterTypesetter {
         // Under Typst, $…$ holds Typst math; math written with LaTeX commands (\\frac…) still works.
         #let kmath(block: false, src) = if src.contains("\\\\") { mitex(block: block, src) } else { math.equation(block: block, eval(src, mode: "math")) }
         #let kcard(index) = {
-          let id = ids.at(index)
+          let meta = ids.at(index)
+          let id = meta.at("id", default: none)
+          let theme = meta.at("theme", default: none)
           if id != none { place(top + right, dy: -14pt, text(size: 6.5pt, fill: cmyk(0%, 0%, 0%, 85%), id)) }
+          if theme != none { place(top + left, dy: -14.5pt, text(size: 7pt, weight: "bold", tracking: 0.06em, fill: ink, upper(theme))) }
           cmarker.render(
             read("card-" + str(index) + ".md"),
             math: kmath,
@@ -277,7 +290,9 @@ enum KasterTypesetter {
             for (index, card) in cards.enumerated() {
                 try card.markdown.write(to: job.appendingPathComponent("card-\(index).md"), atomically: true, encoding: .utf8)
             }
-            let ids = try JSONSerialization.data(withJSONObject: cards.map { $0.id.map { $0 as Any } ?? NSNull() }, options: [.fragmentsAllowed])
+            let ids = try JSONSerialization.data(withJSONObject: cards.map { card -> [String: Any] in
+                ["id": card.id.map { $0 as Any } ?? NSNull(), "theme": card.theme.map { $0 as Any } ?? NSNull()]
+            })
             try ids.write(to: job.appendingPathComponent("ids.json"))
             try typstSource(cardCount: cards.count, layout: layout, color: color).write(to: job.appendingPathComponent("main.typ"), atomically: true, encoding: .utf8)
         } catch {
@@ -338,6 +353,9 @@ enum KasterTypesetter {
         var markdown = ""
         for (index, card) in cards.enumerated() {
             if index > 0 { markdown += "\n\n\\newpage\n\n" }
+            if let theme = card.theme {
+                markdown += "```{=latex}\n\\noindent\\textbf{\\scriptsize\\MakeUppercase{\(latexEscape(theme))}}\\par\\vspace{-1.6em}\n```\n\n"
+            }
             if let id = card.id {
                 markdown += "```{=latex}\n\\hfill\\textcolor{black!85}{\\scriptsize \(latexEscape(id))}\\par\\vspace{-0.8em}\n```\n\n"
             }
@@ -434,6 +452,7 @@ final class TypesetPreview: ObservableObject {
         let engine: TypesetEngine
         let wantsDocument: Bool
         var color: PrintColor = .black
+        var themes: Bool = false
     }
 
     @Published private(set) var cardPDF: Data?
@@ -478,7 +497,7 @@ final class TypesetPreview: ObservableObject {
         inFlight = true
         busy = true
         DispatchQueue.global(qos: .userInteractive).async { [weak self] in
-            let card = KasterTypesetter.prepare(request.text, cardURL: request.cardURL, links: true)
+            let card = KasterTypesetter.prepare(request.text, cardURL: request.cardURL, links: true, themes: request.themes)
             // Card and document typeset in parallel.
             var cardResult: Result<Data, TypesetError> = .failure(.failed(""))
             var documentResult: Result<Data, TypesetError>?
