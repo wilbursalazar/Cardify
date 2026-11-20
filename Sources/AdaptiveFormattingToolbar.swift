@@ -24,7 +24,7 @@ struct AdaptiveFormattingToolbar: View {
         Divider().frame(height: 16)
         Button { editor.wrap("**") } label: { Text("B").bold() }.help("Bold")
         Button { editor.wrap("*") } label: { Text("I").italic() }.help("Italic")
-        Button { editor.wrap("<u>") } label: { Text("U").underline() }.help("Underline (HTML)")
+        Button { editor.insert("<u></u>") } label: { Text("U").underline() }.help("Underline (HTML)")
         Button { editor.wrap("~~") } label: { Text("S").strikethrough() }.help("Strikethrough")
         Button(action: onLinkNote) { Image(systemName: "link") }.help("Link note")
         Button(action: onInsertImage) { Image(systemName: "photo") }.help("Insert image")
@@ -41,29 +41,50 @@ struct AdaptiveFormattingToolbar: View {
         } label: { Image(systemName: "ellipsis") }.help("More formatting")
     }
 
+    @ViewBuilder private var modeSwitch: some View {
+        HStack(spacing: 1) {
+            ForEach(EditorPresentationMode.allCases, id: \.self) { item in
+                Button(item.label) { presentation = item }
+                    .font(.system(size: 10, weight: presentation == item ? .semibold : .medium))
+                    .foregroundStyle(presentation == item ? Color.white : Color.primary)
+                    .padding(.horizontal, 8).frame(height: 24)
+                    .background(presentation == item ? purple : Color.clear,
+                                in: RoundedRectangle(cornerRadius: 5))
+                    .help(item.description)
+            }
+        }
+        .padding(2)
+        .background(Color(nsColor: .controlBackgroundColor),
+                    in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    @ViewBuilder private var formattingRow: some View {
+        HStack(spacing: 9) { formatting }
+            .font(.system(size: 11))
+            .fixedSize(horizontal: true, vertical: false)
+    }
+
     var body: some View {
-        HStack(spacing: 8) {
-            HStack(spacing: 9) { formatting }
-                .font(.system(size: 11))
-                .fixedSize(horizontal: true, vertical: false)
-            Spacer(minLength: 6)
-            HStack(spacing: 1) {
-                ForEach(EditorPresentationMode.allCases, id: \.self) { item in
-                    Button(item.label) { presentation = item }
-                        .font(.system(size: 10, weight: presentation == item ? .semibold : .medium))
-                        .foregroundStyle(presentation == item ? Color.white : Color.primary)
-                        .padding(.horizontal, 8).frame(height: 24)
-                        .background(presentation == item ? purple : Color.clear,
-                                    in: RoundedRectangle(cornerRadius: 5))
-                        .help(item.description)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                formattingRow
+                Spacer(minLength: 6)
+                modeSwitch
+            }
+            .fixedSize(horizontal: true, vertical: false)
+            VStack(spacing: 2) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    formattingRow
+                }.frame(height: 25)
+                HStack {
+                    Spacer()
+                    modeSwitch
                 }
             }
-            .padding(2)
-            .background(Color(nsColor: .controlBackgroundColor),
-                        in: RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.borderless)
-        .padding(.horizontal, 10).frame(height: 36)
+        .padding(.horizontal, 10).padding(.vertical, 3)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(red: 0.977, green: 0.975, blue: 0.983))
     }
 }
