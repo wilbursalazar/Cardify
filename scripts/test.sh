@@ -9,7 +9,7 @@ swiftc "${SWIFT_FLAGS[@]}" "${COMMON[@]}" "$ROOT/Tests/Library/main.swift" -o "$
 "$TEMP_DIR/library"
 swiftc "${SWIFT_FLAGS[@]}" "${COMMON[@]}" "$ROOT/Tests/Timestamp/main.swift" -o "$TEMP_DIR/timestamp"
 "$TEMP_DIR/timestamp"
-swiftc "${SWIFT_FLAGS[@]}" "${COMMON[@]}" "$ROOT/Sources/InlineTemplates.swift" "$ROOT/Sources/AppearanceSettings.swift" "$ROOT/Sources/WorkflowSettings.swift" "$ROOT/Sources/KasterTypesetter.swift" "$ROOT/Sources/PDFLinkSupport.swift" "$ROOT/Sources/LinkNavigation.swift" "$ROOT/Sources/CardLinks.swift" "$ROOT/Sources/MarkdownRendering.swift" "$ROOT/Tests/Workflow/main.swift" -o "$TEMP_DIR/workflow"
+swiftc "${SWIFT_FLAGS[@]}" "${COMMON[@]}" "$ROOT/Sources/InlineTemplates.swift" "$ROOT/Sources/AppearanceSettings.swift" "$ROOT/Sources/WorkflowSettings.swift" "$ROOT/Sources/KasterTypesetter.swift" "$ROOT/Sources/KasterVault.swift" "$ROOT/Sources/HabitTracker.swift" "$ROOT/Sources/TodoList.swift" "$ROOT/Sources/DebateNotes.swift" "$ROOT/Sources/DebateIDs.swift" "$ROOT/Sources/PDFLinkSupport.swift" "$ROOT/Sources/LinkNavigation.swift" "$ROOT/Sources/CardLinks.swift" "$ROOT/Sources/MarkdownRendering.swift" "$ROOT/Tests/Workflow/main.swift" -o "$TEMP_DIR/workflow"
 "$TEMP_DIR/workflow"
 swiftc "${SWIFT_FLAGS[@]}" "$ROOT/Tests/CRLFEditor/main.swift" -o "$TEMP_DIR/crlf-editor"
 "$ROOT/scripts/test-crlf.sh"
@@ -62,3 +62,4 @@ PY
 swiftc "${SWIFT_FLAGS[@]}" -parse-as-library "$ROOT/Sources/CardHistory.swift" "$ROOT/Sources/TodoList.swift" "$ROOT/Sources/Outline.swift" "$TEMP_DIR/DraftChecks.swift" -o "$TEMP_DIR/draft"
 "$TEMP_DIR/draft"
 "$ROOT/scripts/test-typeset.sh"
+"$ROOT/scripts/test-vault.sh"

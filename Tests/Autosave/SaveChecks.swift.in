@@ -62,6 +62,12 @@ final class Harness {
     var savedMarkdownSnapshot: String?, savedHabitSnapshot: String?, savedTodoSnapshot: String?, savedOutlineSnapshot: String?
     var autosaveTask: Task<Void, Never>?, history = History(), suppressHistorySave = false, sidebarRefreshToken = UUID()
     func ensureID() -> Bool { true }
+    // Kaster hooks: these checks cover the existing save paths, so no automatic
+    // card-type destination is offered and title renames are no-ops here.
+    struct Mode { let rawValue = "zettel" }
+    var lastMode = "zettel", kasterMode = Mode()
+    func autoTarget(prompting: Bool) -> URL? { nil }
+    func scheduleTitleRename() {}
     func chooseNotesFolder() {
         let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true
         if panel.runModal() == .OK, let url = panel.url { notesFolder = url.path }

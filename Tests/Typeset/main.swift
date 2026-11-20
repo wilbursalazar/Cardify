@@ -39,6 +39,10 @@ import Foundation
         let docPage = PDFDocument(data: docData)?.page(at: 0) else { fatalError("Document render failed") }
   precondition(abs(docPage.bounds(for: .mediaBox).width - 396) < 1, "Document preview is 5.5 in wide")
 
+  let typstMath = KasterTypesetter.prepare("# Typst math\n\nNative $frac(a, b) + sum_(i=1)^n i$ and ==highlighted== text.", links: false)
+  guard case .success(let typstMathData) = KasterTypesetter.render([typstMath], layout: .card(portrait: false, fontSize: 9, dotGrid: false), engine: .typst),
+        let typstMathText = PDFDocument(data: typstMathData)?.page(at: 0)?.string else { fatalError("Typst-native math must typeset") }
+  precondition(!typstMathText.contains("frac(") && !typstMathText.contains("=="), "Typst math and highlights are typeset: \(typstMathText)")
   let broken = KasterTypesetter.prepare("# Bad\n\n$\\frac{1}{$", links: false)
   if case .success = KasterTypesetter.render([broken], layout: .card(portrait: false, fontSize: 9, dotGrid: false), engine: .typst) {
     print("note: malformed math still rendered (mitex is lenient)")
@@ -53,6 +57,21 @@ import Foundation
   } else {
     print("LaTeX engine not installed; skipped")
   }
+  // Print colors: Black only never asks the printer to mix colors; Color keeps purple links.
+  let blackSource = KasterTypesetter.typstSource(cardCount: 1, layout: .card(portrait: false, fontSize: 9, dotGrid: true), color: .black)
+  precondition(!blackSource.contains("rgb(") && !blackSource.contains("luma("), "Black only uses K-only CMYK ink everywhere")
+  precondition(blackSource.contains("fill: ink") && blackSource.contains("stroke: 0.5pt + ink"), "Text and table rules are pure black")
+  let colorSource = KasterTypesetter.typstSource(cardCount: 1, layout: .card(portrait: false, fontSize: 9, dotGrid: false), color: .color)
+  precondition(colorSource.contains("#6b40c2") && colorSource.contains("stroke: 0.5pt + ink"), "Color keeps purple links, black tables")
+  guard case .success = KasterTypesetter.render([card], layout: .card(portrait: false, fontSize: 9, dotGrid: false), engine: .typst, color: .color) else { fatalError("Color render failed") }
+
+  // Speed: a typical card typesets well inside the 150 ms preview budget.
+  _ = KasterTypesetter.render([card], layout: .card(portrait: false, fontSize: 9, dotGrid: false), engine: .typst)
+  let start = Date()
+  for _ in 0..<5 { _ = KasterTypesetter.render([card], layout: .card(portrait: false, fontSize: 9, dotGrid: false), engine: .typst) }
+  let average = Date().timeIntervalSince(start) / 5 * 1000
+  print(String(format: "Typst card render: %.0f ms average", average))
+  precondition(average < 150, "Card render should stay under 150 ms, took \(average) ms")
   print("Typst typesetting: tables, math, links, tasks, IDs, sizes, batches passed")
  }
 }
