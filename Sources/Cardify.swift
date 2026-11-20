@@ -852,13 +852,82 @@ struct ContentView: View {
                 }
                 }.frame(minWidth: 280)
                 }, preview: {
-                VStack(alignment: .leading) {
-                    HStack {
-                        Text("Preview").fontWeight(.semibold)
-                        Spacer()
-                        let count = activeLinkedTab == nil ? pageCount : 1
-                        Text("\(count) \(count == 1 ? "card" : "cards")").font(.caption).foregroundStyle(.secondary)
-                    }
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 15) {
+                        ForEach(["Preview", "Backlinks", "Info"], id: \.self) { tab in
+                            Button {
+                                inspectorTab = tab
+                                if tab != "Preview" { refreshInspector() }
+                            } label: {
+                                VStack(spacing: 5) {
+                                    Text(tab == "Backlinks" ? "Backlinks (\(inspectedBacklinks.count))" : tab)
+                                        .font(.system(size: 11, weight: inspectorTab == tab ? .semibold : .regular))
+                                        .foregroundStyle(inspectorTab == tab ? highlightColor : Color.secondary)
+                                    Rectangle()
+                                        .fill(inspectorTab == tab ? highlightColor : .clear)
+                                        .frame(height: 2)
+                                }
+                            }.buttonStyle(.plain)
+                        }
+                        Spacer(minLength: 0)
+                    }.padding(.horizontal, 12).padding(.top, 9)
+                    Divider()
+                    if inspectorTab == "Backlinks" {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 10) {
+                                if inspectedBacklinks.isEmpty {
+                                    Text("No backlinks to this card.")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                ForEach(inspectedBacklinks) { backlink in
+                                    Button {
+                                        _ = loadFile(backlink.url)
+                                    } label: {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(backlink.title).font(.system(size: 12, weight: .medium))
+                                                .foregroundStyle(Color.primary)
+                                            Text(backlink.cardID ?? backlink.path)
+                                                .font(.caption).foregroundStyle(.secondary)
+                                        }.frame(maxWidth: .infinity, alignment: .leading)
+                                    }.buttonStyle(.plain)
+                                    Divider()
+                                }
+                            }.padding(12)
+                        }
+                    } else if inspectorTab == "Info" {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("CARD INFORMATION")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                                Text(currentCardTitle).font(.headline)
+                                if cardMode == "markdown" {
+                                    TextField("Title", text: Binding(get: { NoteEditing.title(in: text, fileURL: fileURL) },
+                                        set: { text = NoteEditing.setTitle($0, in: text) }))
+                                        .textFieldStyle(.roundedBorder)
+                                }
+                                if let id = CardMetadata.parse(text).id {
+                                    LabeledContent("Card ID", value: id)
+                                }
+                                if let fileURL {
+                                    Text(fileURL.path)
+                                        .font(.caption).foregroundStyle(.secondary)
+                                        .textSelection(.enabled)
+                                }
+                                LabeledContent("Words", value: "\(text.split(whereSeparator: { $0.isWhitespace }).count)")
+                                LabeledContent("Backlinks", value: "\(inspectedBacklinks.count)")
+                                Divider()
+                                Button("Refresh information", action: refreshInspector)
+                            }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Preview").font(.system(size: 11, weight: .medium))
+                            Spacer()
+                            Text("\(activeLinkedTab == nil ? pageCount : 1) cards")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                     if !linkedTabs.isEmpty {
                         ScrollView(.horizontal) {
                             HStack(spacing: 6) {
@@ -915,7 +984,11 @@ struct ContentView: View {
                     }
                     Text("3 × 5 in · ⅜ in inset · Print at 100% scale")
                         .font(.caption).foregroundStyle(.secondary)
-                }.frame(minWidth: 230)
+                    }.padding(10)
+                    }
+                }
+                .frame(minWidth: 230)
+                .background(Color(red: 0.983, green: 0.980, blue: 0.989))
                 })
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
             Text(status).font(.caption).foregroundStyle(.secondary)
