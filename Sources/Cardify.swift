@@ -382,7 +382,8 @@ private struct EditorHeaderHeightKey: PreferenceKey {
 struct LinkedCardTab: Identifiable {
     let id = UUID()
     var url: URL
-    let content: String
+    var content: String
+    var savedContent: String = ""
     var title: String {
         let heading = NoteEditing.title(in: content).trimmingCharacters(in: .whitespacesAndNewlines)
         return heading.isEmpty ? url.deletingPathExtension().lastPathComponent : heading
@@ -420,6 +421,7 @@ struct ContentView: View {
     @AppStorage("kasterLastPrint") private var lastPrintTime = 0.0
     @AppStorage("kasterLastMode") private var lastMode = KasterMode.zettel.rawValue
     @AppStorage("kasterPrintMode") private var printMode = PrintColor.black.rawValue
+    @AppStorage("kasterThemes") private var themesEnabled = false
     @AppStorage("kasterArtifactFolder.habits") private var habitsFolder = ""
     @AppStorage("kasterArtifactFolder.todos") private var todosFolder = ""
     @AppStorage("kasterArtifactFolder.debates") private var debatesFolder = ""
@@ -427,6 +429,9 @@ struct ContentView: View {
     @State private var renameTask: Task<Void, Never>?
     @State private var showMigration = false
     @State private var newCardFolder: URL?
+    // Which file each editor mode had open, so a relaunch reconnects instead of treating
+    // the restored draft as a brand-new card (which then collides with its own Card ID).
+    @AppStorage("kasterOpenFiles") private var openFilesStore = ""
     @AppStorage("kasterEditorMode") private var editorMode = KasterEditorMode.live.rawValue
     @State private var openTabs: [URL] = []
     @AppStorage("kasterLayoutMigrated") private var kasterLayoutMigrated = false
@@ -454,6 +459,7 @@ struct ContentView: View {
     @State private var linkRequestID = UUID()
     @State private var linkedTabs: [LinkedCardTab] = []
     @State private var selectedLinkedTab: UUID?
+    @State private var sideTab: UUID?
     @State private var research: ResearchClip?
     @State private var status = "Draft saved on this Mac."
     @State private var sidebarRefreshToken = UUID()
@@ -584,8 +590,9 @@ struct ContentView: View {
                     Button("Settings…") { showSettings = true }
                 } label: { Image(systemName: "ellipsis.circle") }
                     .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("File")
-                Button { _ = saveMarkdown() } label: { Image(systemName: "square.and.arrow.down") }
-                    .keyboardShortcut("s").help("Save (⌘S)")
+                Button(action: savePDFBesideCard) { Image(systemName: "doc.richtext") }
+                    .help("Save a PDF of this card next to its Markdown file (cards autosave)")
+                Button { _ = saveMarkdown() } label: { EmptyView() }.keyboardShortcut("s").frame(width: 0, height: 0).opacity(0).accessibilityHidden(true)
                 Button(action: printCards) { Image(systemName: "printer") }
                     .keyboardShortcut("p").help("Print this card (⌘P)")
                 Picker("Print colors", selection: $printMode) {
@@ -622,9 +629,9 @@ struct ContentView: View {
                                 lastPrint: Date(timeIntervalSince1970: lastPrintTime),
                                 onNewFolder: createFolder, onRenameFolder: renameFolder,
                                 onNewCardIn: newCardHere, onReorder: saveManualOrder)
-                    Divider()
                 }
                 WorkspaceSplitView(arrangement: WorkspaceArrangement.stored(storedWorkspaceArrangement), editor: {
+                HStack(spacing: 0) {
                 VStack(spacing: 0) {
                 EditorTabBar(tabs: editorTabs, currentID: fileURL.map(KasterPathList.key) ?? "draft",
                              onSelect: { tab in if let url = tab.url { _ = loadFile(url) } },
@@ -757,7 +764,8 @@ struct ContentView: View {
                             outlineLinkCompletion = completion; showOutlineNotes = true
                         }).padding(.horizontal, 14)
                     } else {
-                    MarkdownEditor(text: $text, editor: editor, onFollowLink: followLink, live: (KasterEditorMode(rawValue: editorMode) ?? .live) == .live)
+                    MarkdownEditor(text: $text, editor: editor, onFollowLink: followLink, live: (KasterEditorMode(rawValue: editorMode) ?? .live) == .live,
+                                   onZotero: { showZotero = true })
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }
@@ -767,26 +775,26 @@ struct ContentView: View {
                 .background(paneBackground)
                 .clipped()
                 .frame(minWidth: 320)
+                if let index = linkedTabs.firstIndex(where: { $0.id == sideTab }) {
+                    Divider()
+                    SideEditorPane(tab: $linkedTabs[index], tabs: linkedTabs,
+                                   onSelect: { sideTab = $0 },
+                                   onClose: { closeLinkedTab(linkedTabs[index].id) },
+                                   onMakeMain: { let url = linkedTabs[index].url; closeLinkedTab(linkedTabs[index].id); _ = loadFile(url) },
+                                   onFollowLink: { target in followLinkFromTab(target, source: linkedTabs[index]) },
+                                   onSaved: { sidebarRefreshToken = UUID() })
+                        .frame(minWidth: 260)
+                }
+                }
                 }, preview: {
                 VStack(alignment: .leading, spacing: 0) {
                     if !linkedTabs.isEmpty {
-                        ScrollView(.horizontal) {
-                            HStack(spacing: 6) {
-                                Button("Current card") { selectedLinkedTab = nil }
-                                    .buttonStyle(.bordered)
-                                    .opacity(selectedLinkedTab == nil ? 1 : 0.65)
-                                ForEach(linkedTabs) { tab in
-                                    HStack(spacing: 2) {
-                                        Button(tab.title) { selectedLinkedTab = tab.id }
-                                            .lineLimit(1).frame(maxWidth: 160)
-                                        Button { closeLinkedTab(tab.id) } label: { Image(systemName: "xmark") }
-                                            .buttonStyle(.plain).accessibilityLabel("Close \(tab.title)")
-                                    }
-                                    .padding(.horizontal, 6).padding(.vertical, 4)
-                                    .background(tab.id == selectedLinkedTab ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 6))
-                                }
-                            }
-                        }.scrollIndicators(.hidden).padding(.horizontal, 12).padding(.vertical, 6)
+                        // Which card the preview shows: the main card or one open beside it.
+                        Picker("Preview card", selection: $selectedLinkedTab) {
+                            Text("Current card: \(currentCardTitle)").tag(UUID?.none)
+                            ForEach(linkedTabs) { tab in Text("Beside: \(tab.title)").tag(Optional(tab.id)) }
+                        }
+                        .pickerStyle(.menu).labelsHidden().padding(.horizontal, 12).padding(.vertical, 6)
                         Divider()
                     }
                     KasterInspector(store: library, markdown: activeLinkedTab?.content ?? currentDraftContents(),
@@ -796,9 +804,9 @@ struct ContentView: View {
                                         if let linked = activeLinkedTab { followLinkFromTab(target, source: linked) } else { followLink(target) }
                                     },
                                     onOpen: { url in _ = loadFile(url) },
-                                    documentPDF: activeLinkedTab == nil && typesetSource != nil ? typeset.documentPDF : nil,
+                                    documentPDF: typesetSource != nil ? typeset.documentPDF : nil,
                                     documentRevision: PDFPreviewRevision(mode: "document", content: "\(typeset.generation)", portrait: false, fontSize: 11, dotGrid: false, filePath: fileURL?.path),
-                                    typesetError: activeLinkedTab == nil && typesetSource != nil ? typeset.error : nil,
+                                    typesetError: typesetSource != nil ? typeset.error : nil,
                                     onPrintCard: printCards) {
                     VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 8) {
@@ -806,18 +814,17 @@ struct ContentView: View {
                             Text("Landscape · 5 × 3").tag(false)
                             Text("Portrait · 3 × 5").tag(true)
                         }.labelsHidden().frame(maxWidth: 190)
+                        Picker("Text size", selection: $fontSize) {
+                            ForEach([7.0, 8, 9, 10, 11, 12, 14, 16, 18], id: \.self) { size in Text("\(Int(size)) pt").tag(size) }
+                        }
+                        .labelsHidden().fixedSize().help("Text size on the card")
                         Spacer(minLength: 0)
-                        let count = activeLinkedTab == nil ? pageCount : 1
+                        let count = pageCount
                         Text("\(count) \(count == 1 ? "card" : "cards")").font(.caption).foregroundStyle(.secondary)
                     }
-                    HStack(spacing: 8) {
-                        Text("Text size").font(.caption).foregroundStyle(.secondary)
-                        Slider(value: $fontSize, in: 7...18, step: 1).help("Text size")
-                        Text("\(Int(fontSize)) pt").font(.caption).monospacedDigit().frame(width: 38, alignment: .trailing)
-                    }
                     let linked = activeLinkedTab
-                    let previewData = linked == nil ? currentPreviewData : linked.flatMap { CardDocument(text: $0.content, portrait: portrait, fontSize: fontSize, dotGrid: dotGrid).pdf(includeLinks: true) }
-                    let revision = linked.map { PDFPreviewRevision(mode: "markdown", content: $0.content, portrait: portrait, fontSize: fontSize, dotGrid: dotGrid, filePath: $0.url.path) } ?? currentPreviewRevision
+                    let previewData = currentPreviewData
+                    let revision = currentPreviewRevision
                     PDFPreview(data: previewData, revision: revision, onFollowLink: { target in
                         if let linked { followLinkFromTab(target, source: linked) }
                         else { followLink(target) }
@@ -825,7 +832,7 @@ struct ContentView: View {
                         .border(Color.secondary.opacity(0.2)).help("Click an underlined link to open it.")
                         .allowsHitTesting(previewData != nil)
                         .overlay(alignment: .top) {
-                            if linked == nil, typesetSource != nil, let problem = typeset.error {
+                            if typesetSource != nil, let problem = typeset.error {
                                 Label(problem, systemImage: "exclamationmark.triangle")
                                     .font(.caption).lineLimit(3).padding(8).frame(maxWidth: .infinity, alignment: .leading)
                                     .background(.regularMaterial).allowsHitTesting(false)
@@ -835,19 +842,6 @@ struct ContentView: View {
                                     .background(.regularMaterial).allowsHitTesting(false)
                             }
                         }
-                    if let linked {
-                        HStack {
-                            Text(linked.url.lastPathComponent).lineLimit(1).font(.caption).foregroundStyle(.secondary)
-                            Spacer()
-                            Button("Edit") { _ = loadFile(linked.url) }.font(.caption)
-                        }
-                    }
-                    HStack {
-                        Text("3 × 5 in · ⅜ in inset · Print at 100% scale")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Spacer()
-                        Button("Print…", action: printCards).controlSize(.small)
-                    }
                     }
                     }
                 }
@@ -867,6 +861,7 @@ struct ContentView: View {
         .onAppear {
             if storedIDMode.isEmpty { storedIDMode = (autoTimestampID ? IDMode.timestamp : IDMode.titleOnly).rawValue }
             ensureDefaultVault()
+            reattachOpenFiles()
             rememberTab(fileURL)
             refreshTypeset()
             kasterMode = fileURL == nil ? KasterMode.stored(lastMode) : KasterMode.infer(url: fileURL, root: vaultRoot, text: text)
@@ -877,6 +872,7 @@ struct ContentView: View {
         }
         .onChange(of: text) { _ in if cardMode == "markdown" { scheduleAutosave() } }
         .onChange(of: fileURL) { url in
+            rememberOpenFile(url)
             rememberTab(url)
             if url != nil { newCardFolder = nil }
             if let url, cardMode == "markdown" {
@@ -948,11 +944,11 @@ struct ContentView: View {
         }
         if kasterMode == .zettel {
             Button { relatedFromCurrent(continuation: true) } label: { if labels { Label("Continue", systemImage: "arrow.down.to.line") } else { Image(systemName: "arrow.down.to.line") } }
-                .fixedSize().help("Create the next card in this sequence (21 → 21/1, 21/1 → 21/2)")
+                .fixedSize().help("Continue: the next card at the same level (21 → 22, 21/1 → 21/2)")
         }
         if kasterMode == .zettel {
             Button { relatedFromCurrent(continuation: false) } label: { if labels { Label("Branch", systemImage: "arrow.triangle.branch") } else { Image(systemName: "arrow.triangle.branch") } }
-                .fixedSize().help("Branch from this card (21/1 → 21/1a → 21/1a1)")
+                .fixedSize().help("Branch: one level deeper (21 → 21/1, 21/1 → 21/1a)")
         }
     }
     // MARK: Card types and the vault
@@ -1075,6 +1071,41 @@ struct ContentView: View {
     }
 
     // MARK: Folders
+
+    func rememberOpenFile(_ url: URL?) {
+        var map = (try? JSONSerialization.jsonObject(with: Data(openFilesStore.utf8))) as? [String: String] ?? [:]
+        map[cardMode] = url?.path
+        if let data = try? JSONSerialization.data(withJSONObject: map), let json = String(data: data, encoding: .utf8) { openFilesStore = json }
+    }
+
+    /// At launch, reconnect each restored draft to the file it came from. Unsaved edits are
+    /// kept (and autosaved into that same file); a file that vanished leaves a plain draft.
+    func reattachOpenFiles() {
+        guard let map = (try? JSONSerialization.jsonObject(with: Data(openFilesStore.utf8))) as? [String: String] else { return }
+        for (mode, path) in map where fileURLs[mode] == nil {
+            let url = URL(fileURLWithPath: path)
+            guard let data = try? Data(contentsOf: url), let disk = try? decodeMarkdown(data) else { continue }
+            fileURLs[mode] = url
+            diskSnapshots[mode] = data
+            newDraftBaselines.removeValue(forKey: mode)
+            switch mode {
+            case "markdown": savedMarkdownSnapshot = disk
+            case "outline": savedOutlineSnapshot = OutlineDocument.fromMarkdown(disk)?.markdown ?? disk
+            case "habits": savedHabitSnapshot = HabitTracker.fromMarkdown(disk)?.markdown ?? disk
+            case "todos": savedTodoSnapshot = TodoList.fromMarkdown(disk)?.markdown ?? disk
+            default: break
+            }
+        }
+        if fileURL != nil {
+            history.visit(fileURL!)
+            if Data(currentDraftContents().utf8) != Data((currentDraftSnapshot() ?? "").utf8) {
+                status = "Reopened \(fileURL!.lastPathComponent) with your unsaved changes."
+                scheduleAutosave()
+            } else {
+                status = "Reopened \(fileURL!.lastPathComponent)."
+            }
+        }
+    }
 
     /// If no notes folder is set (or it no longer exists), create ~/Documents/Kaster with a
     /// folder for each card type and use it.
@@ -1205,6 +1236,10 @@ struct ContentView: View {
         var name: String?
         if cardMode == "markdown" && !showDebate {
             guard let root = vaultRoot else { return nil }
+            if let uid = KasterFrontmatter.value("uid", in: text),
+               let same = library.snapshot.cards.first(where: { KasterFrontmatter.value("uid", in: $0.content) == uid }) {
+                return same.url
+            }
             name = KasterVault.filename(mode: kasterMode, id: CardMetadata.parse(text).id, title: NoteEditing.title(in: text))
             folder = newCardFolder ?? root.appendingPathComponent(kasterMode.folder, isDirectory: true)
         } else if cardMode == "habits" || cardMode == "todos" {
@@ -1291,11 +1326,16 @@ struct ContentView: View {
 
     @ViewBuilder var cardTypeControls: some View {
         if cardMode == "markdown" && !showDebate {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) { modePicker(labels: true); Spacer(minLength: 4); artifactsMenu }
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 8) { modeSpecificControls(labels: true); Spacer(minLength: 0) }
-                    HStack(spacing: 6) { modeSpecificControls(labels: false); Spacer(minLength: 0) }
+            // One row when it fits; the type's own controls wrap below only in a narrow window.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { modePicker(labels: true); modeSpecificControls(labels: true); Spacer(minLength: 4); artifactsMenu }
+                HStack(spacing: 6) { modePicker(labels: true); modeSpecificControls(labels: false); Spacer(minLength: 4); artifactsMenu }
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) { modePicker(labels: true); Spacer(minLength: 4); artifactsMenu }
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) { modeSpecificControls(labels: true); Spacer(minLength: 0) }
+                        HStack(spacing: 6) { modeSpecificControls(labels: false); Spacer(minLength: 0) }
+                    }
                 }
             }
         } else {
@@ -1314,18 +1354,41 @@ struct ContentView: View {
         if cardMode == "markdown" { showDebate = false } else { switchMode(to: "markdown"); if cardMode == "markdown" { showDebate = false } }
     }
 
+    /// Card types with icons, so each kind is recognizable at a glance.
     func modePicker(labels: Bool) -> some View {
-        Picker("Card type", selection: Binding(get: { kasterMode }, set: { changeMode($0) })) {
+        let accent = AppearancePreference.accent(for: storedAppearance) ?? AppearancePreference.kasterPurple
+        return HStack(spacing: 0) {
             ForEach(KasterMode.allCases) { mode in
-                (labels ? Label(mode.title, systemImage: mode.systemImage) : Label(mode.title, systemImage: mode.systemImage))
-                    .labelStyle(.titleOnly).tag(mode).help(mode.summary)
+                let selected = mode == kasterMode
+                Button { changeMode(mode) } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: mode.systemImage).font(.system(size: 11, weight: .semibold))
+                        if labels { Text(mode.title).font(.system(size: 12, weight: selected ? .semibold : .regular)) }
+                    }
+                    .foregroundColor(selected ? .white : .primary)
+                    .padding(.horizontal, labels ? 9 : 7).padding(.vertical, 4)
+                    .background(selected ? accent : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).help("\(mode.title): \(mode.summary)")
+                .accessibilityLabel(mode.title).accessibilityAddTraits(selected ? .isSelected : [])
             }
         }
-        .pickerStyle(.segmented).labelsHidden().fixedSize()
-        .help("Research · Zettel · Quick · Bibliography. ⌘N makes a new card of the last type you used.")
+        .padding(2)
+        .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+        .fixedSize()
     }
 
     @ViewBuilder func modeSpecificControls(labels: Bool) -> some View {
+        if themesEnabled {
+            let theme = KasterTypesetter.firstTag(in: text)
+            Text(theme.map { "#" + $0 } ?? "No theme")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(theme == nil ? .secondary : AppearancePreference.kasterPurple)
+                .padding(.horizontal, 7).padding(.vertical, 2)
+                .background((theme == nil ? Color.secondary : AppearancePreference.kasterPurple).opacity(0.12), in: Capsule())
+                .help("Holiday–Greene theme: this card's first #tag")
+        }
         switch kasterMode {
         case .zettel: researchIDRow(labels: labels)
         case .research: sourceControls(labels: labels)
@@ -1450,6 +1513,7 @@ struct ContentView: View {
 
     /// Markdown that Kaster typesets for the current card, or nil for artifacts (habits, to-dos).
     var typesetSource: String? {
+        if let linked = activeLinkedTab { return linked.content }
         if cardMode == "markdown" { return text }
         if cardMode == "outline" { return outlineCard?.text }
         return nil
@@ -1457,8 +1521,8 @@ struct ContentView: View {
     var engine: TypesetEngine { TypesetEngine.stored(typesetEngine) }
     var typesetRequest: TypesetPreview.Request? {
         guard let source = typesetSource, KasterTypesetter.isAvailable(engine) else { return nil }
-        return .init(text: source, cardURL: fileURL, portrait: portrait, fontSize: fontSize, dotGrid: dotGrid,
-                     engine: engine, wantsDocument: previewStyle == PreviewStyle.document.rawValue, color: PrintColor.stored(printMode))
+        return .init(text: source, cardURL: activeLinkedTab?.url ?? fileURL, portrait: portrait, fontSize: fontSize, dotGrid: dotGrid,
+                     engine: engine, wantsDocument: previewStyle == PreviewStyle.document.rawValue, color: PrintColor.stored(printMode), themes: themesEnabled)
     }
     func refreshTypeset() { if let request = typesetRequest { typeset.request(request) } }
     var currentPreviewData: Data? {
@@ -1549,8 +1613,8 @@ struct ContentView: View {
         let label = Label("Save & Print", systemImage: "printer.fill").labelStyle(.titleAndIcon)
         if storedAppearance == AppearancePreference.charcoal.rawValue {
             Button { if saveMarkdown() { printCards() } } label: { label }.fixedSize().buttonStyle(CharcoalPrimaryButtonStyle())
-        } else if storedAppearance == AppearancePreference.slate.rawValue {
-            Button { if saveMarkdown() { printCards() } } label: { label }.fixedSize().buttonStyle(SlatePrimaryButtonStyle())
+        } else if storedAppearance == AppearancePreference.slate.rawValue || storedAppearance == AppearancePreference.midnight.rawValue {
+            Button { if saveMarkdown() { printCards() } } label: { label }.fixedSize().buttonStyle(SlatePrimaryButtonStyle(midnight: storedAppearance == AppearancePreference.midnight.rawValue))
         } else {
             Button { if saveMarkdown() { printCards() } } label: { label }.fixedSize().buttonStyle(.borderedProminent).controlSize(.regular)
         }
@@ -1683,14 +1747,16 @@ struct ContentView: View {
                 return
             }
             linkedTabs.removeAll(where: { $0.url.standardizedFileURL == url.standardizedFileURL })
-            let tab = LinkedCardTab(url: url, content: content)
-            linkedTabs.append(tab); selectedLinkedTab = tab.id
+            guard fileURL.map({ KasterPathList.key($0) }) != KasterPathList.key(url) else { status = "That card is already open in the main editor."; return }
+            let tab = LinkedCardTab(url: url, content: content, savedContent: content)
+            linkedTabs.append(tab); sideTab = tab.id
             status = "Opened \(tab.title) beside the current card."
         } catch { linkError("Could not open linked note: \(error.localizedDescription)") }
     }
     func closeLinkedTab(_ id: UUID) {
         linkedTabs.removeAll(where: { $0.id == id })
-        if selectedLinkedTab == id { selectedLinkedTab = linkedTabs.last?.id }
+        if selectedLinkedTab == id { selectedLinkedTab = nil }
+        if sideTab == id { sideTab = linkedTabs.last?.id }
     }
     func followLinkFromTab(_ target: CardLinkTarget, source: LinkedCardTab) {
         let folderPath = notesFolder.isEmpty ? saveFolder : notesFolder
@@ -2231,6 +2297,19 @@ struct ContentView: View {
             guard Data(latest.utf8) == Data(current.utf8) else { return }
             _ = saveMarkdown(automatic: true)
         }
+    }
+    /// Writes Card.pdf next to Card.md (same folder, same name), typeset as it prints.
+    func savePDFBesideCard() {
+        guard let url = fileURL else {
+            if saveMarkdown(), fileURL != nil { savePDFBesideCard() } else { exportPDF() }
+            return
+        }
+        guard flushExistingDraft(), let data = outputPDF() else { status = "Could not create the PDF."; return }
+        let pdf = url.deletingPathExtension().appendingPathExtension("pdf")
+        do {
+            try data.write(to: pdf, options: .atomic)
+            status = "Saved \(pdf.lastPathComponent) next to the card."
+        } catch { status = "Could not save the PDF: \(error.localizedDescription)" }
     }
     func exportPDF() {
         guard let data = outputPDF() else { status = cardMode == "habits" ? "Shorten the heading to create a PDF." : "Could not create PDF."; return }

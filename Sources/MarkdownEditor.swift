@@ -203,7 +203,7 @@ final class LinkCompletionTextView: NSTextView {
         setSelectedRange(NSRange(location: start, length: (string as NSString).length - start))
     }
 
-    enum SelectionFormat { case bold, italic, heading, bullet, task, link, highlight, code, math }
+    enum SelectionFormat { case bold, italic, heading, heading2, heading3, bullet, task, link, highlight, code, math }
 
     // One replacement keeps each toolbar action as an ordinary text edit, so
     // AppKit's undo and UTF-16 selections continue to work as they do while typing.
@@ -241,7 +241,10 @@ final class LinkCompletionTextView: NSTextView {
                 replacement = prefix + selected + suffix
                 nextSelection = NSRange(location: range.location + before, length: range.length)
             }
-        case .heading, .bullet, .task:
+        case .heading, .heading2, .heading3, .bullet, .task:
+            let isHeading = format == .heading || format == .heading2 || format == .heading3
+            let hashes = format == .heading3 ? "### " : format == .heading2 ? "## " : "# "
+            func strippedHeading(_ body: String) -> String { body.replacingOccurrences(of: "^#{1,6} ", with: "", options: .regularExpression) }
             let first = source.lineRange(for: NSRange(location: range.location, length: 0))
             let last = source.lineRange(for: NSRange(location: NSMaxRange(range) - 1, length: 0))
             replaceRange = NSRange(location: first.location, length: NSMaxRange(last) - first.location)
@@ -271,17 +274,18 @@ final class LinkCompletionTextView: NSTextView {
             }
             // Replacing a list marker with a heading would discard task state.
             // Leave list lines untouched until their list formatting is removed.
-            if format == .heading && nonblank.contains(where: { parts($0).bullet != nil }) { return false }
+            if isHeading && nonblank.contains(where: { parts($0).bullet != nil }) { return false }
             let remove: Bool
-            if format == .heading { remove = nonblank.allSatisfy { parts($0).body.hasPrefix("# ") } }
+            // Applying the same level again removes it; another level replaces it (## → #).
+            if isHeading { remove = nonblank.allSatisfy { parts($0).body.hasPrefix(hashes) } }
             else if format == .bullet { remove = nonblank.allSatisfy { parts($0).bullet != nil && !parts($0).task } }
             else { remove = nonblank.allSatisfy { parts($0).task } }
             replacement = lines.map { line, ending in
                 guard !line.trimmingCharacters(in: .whitespaces).isEmpty else { return line + ending }
                 let item = parts(line)
-                if format == .heading {
-                    if remove { return item.indent + String(item.body.dropFirst(2)) + ending }
-                    return item.indent + (item.body.hasPrefix("# ") ? "" : "# ") + item.body + ending
+                if isHeading {
+                    if remove { return item.indent + strippedHeading(item.body) + ending }
+                    return item.indent + hashes + strippedHeading(item.body) + ending
                 }
                 if format == .bullet {
                     if remove { return item.indent + item.body + ending }
@@ -757,6 +761,7 @@ struct MarkdownEditor: View {
     let editor: EditorState
     let onFollowLink: (CardLinkTarget) -> Void
     var live: Bool = true
+    var onZotero: (() -> Void)? = nil
     @StateObject private var completion = LinkCompletionState()
     @StateObject private var selectionToolbar = SelectionToolbarState()
     @AppStorage("hideEditorFrontmatter") private var hideFrontmatter = true
@@ -786,7 +791,7 @@ struct MarkdownEditor: View {
                     GeometryReader { geometry in
                         if let anchor = selectionToolbar.anchor {
                             selectionToolbarView
-                                .position(x: min(max(anchor.x, 142), max(142, geometry.size.width - 142)),
+                                .position(x: min(max(anchor.x, 190), max(190, geometry.size.width - 190)),
                                           y: anchor.y >= 38 ? anchor.y - 19 : min(geometry.size.height - 18, anchor.y + 38))
                         }
                     }
@@ -827,13 +832,18 @@ struct MarkdownEditor: View {
             SelectionToolbarButton(title: "B", font: .boldSystemFont(ofSize: 12), help: "Bold") { selectionToolbar.apply(.bold) }.frame(width: 34, height: 28)
             SelectionToolbarButton(title: "I", font: NSFontManager.shared.convert(.systemFont(ofSize: 12), toHaveTrait: .italicFontMask), help: "Italic") { selectionToolbar.apply(.italic) }.frame(width: 34, height: 28)
             SelectionToolbarButton(title: "", symbol: "highlighter", help: "Highlight (==text==)") { selectionToolbar.apply(.highlight) }.frame(width: 34, height: 28)
-            SelectionToolbarButton(title: "H1", font: .boldSystemFont(ofSize: 11), help: selectionToolbar.canHeading ? "Heading" : "Remove list formatting first", enabled: selectionToolbar.canHeading) { selectionToolbar.apply(.heading) }.frame(width: 34, height: 28)
+            SelectionToolbarButton(title: "H1", font: .boldSystemFont(ofSize: 11), help: selectionToolbar.canHeading ? "Heading 1" : "Remove list formatting first", enabled: selectionToolbar.canHeading) { selectionToolbar.apply(.heading) }.frame(width: 30, height: 28)
+            SelectionToolbarButton(title: "H2", font: .boldSystemFont(ofSize: 10.5), help: selectionToolbar.canHeading ? "Heading 2" : "Remove list formatting first", enabled: selectionToolbar.canHeading) { selectionToolbar.apply(.heading2) }.frame(width: 30, height: 28)
+            SelectionToolbarButton(title: "H3", font: .boldSystemFont(ofSize: 10), help: selectionToolbar.canHeading ? "Heading 3" : "Remove list formatting first", enabled: selectionToolbar.canHeading) { selectionToolbar.apply(.heading3) }.frame(width: 30, height: 28)
             SelectionToolbarButton(title: "", symbol: "list.bullet", help: "Bullet list") { selectionToolbar.apply(.bullet) }.frame(width: 34, height: 28)
             SelectionToolbarButton(title: "", symbol: "chevron.left.forwardslash.chevron.right", help: "Inline code") { selectionToolbar.apply(.code) }.frame(width: 34, height: 28)
             SelectionToolbarButton(title: "", symbol: "link", help: "Wrap selection in a [[card link]]", enabled: selectionToolbar.canLink) { selectionToolbar.apply(.link) }.frame(width: 34, height: 28)
             SelectionToolbarButton(title: "", symbol: "function", help: mathHelp) { selectionToolbar.apply(.math) }.frame(width: 34, height: 28)
+            if let onZotero {
+                SelectionToolbarButton(title: "", symbol: "books.vertical", help: "Add a Zotero source") { selectionToolbar.dismiss(); onZotero() }.frame(width: 34, height: 28)
+            }
         }
-        .frame(width: 280, height: 32)
+        .frame(width: onZotero == nil ? 340 : 374, height: 32)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 7))
         .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.secondary.opacity(0.25)))
         .shadow(color: .black.opacity(0.18), radius: 5, y: 2)

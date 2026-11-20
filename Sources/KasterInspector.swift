@@ -157,6 +157,8 @@ struct KasterInspector<CardPreview: View>: View {
                 if let card { infoRow("Folder", (card.path as NSString).deletingLastPathComponent.isEmpty ? "Notes folder" : (card.path as NSString).deletingLastPathComponent) }
                 infoRow("Created", KasterDates.full(card.flatMap { store.created[$0.path] }))
                 infoRow("Modified", KasterDates.full(card.flatMap { store.modified[$0.path] }))
+                infoRow("Card size", "3 × 5 in · ⅜ in inset")
+                infoRow("Printing", "Print at 100% scale")
                 infoRow("Words", "\(KasterText.wordCount(markdown))")
                 infoRow("Characters", "\(markdown.count)")
                 infoRow("Links out", "\(CardLinkParser.links(in: markdown).count)")

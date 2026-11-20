@@ -65,6 +65,14 @@ import Foundation
   precondition(colorSource.contains("#6b40c2") && colorSource.contains("stroke: 0.5pt + ink"), "Color keeps purple links, black tables")
   guard case .success = KasterTypesetter.render([card], layout: .card(portrait: false, fontSize: 9, dotGrid: false), engine: .typst, color: .color) else { fatalError("Color render failed") }
 
+  // Themes: the first #tag is printed in the top-left corner when Themes is on.
+  let themed = KasterTypesetter.prepare("# Observe first\n\nWatch before acting. #strategy #learning", links: false, themes: true)
+  precondition(themed.theme == "strategy", "First tag is the theme")
+  precondition(KasterTypesetter.prepare("# T\n\n#strategy", links: false, themes: false).theme == nil, "No theme when Themes is off")
+  guard case .success(let themedData) = KasterTypesetter.render([themed], layout: .card(portrait: false, fontSize: 9, dotGrid: false), engine: .typst),
+        let themedText = PDFDocument(data: themedData)?.page(at: 0)?.string else { fatalError("Themed render failed") }
+  precondition(themedText.contains("STRATEGY"), "Theme prints in capitals: \(themedText)")
+
   // Speed: a typical card typesets well inside the 150 ms preview budget.
   _ = KasterTypesetter.render([card], layout: .card(portrait: false, fontSize: 9, dotGrid: false), engine: .typst)
   let start = Date()

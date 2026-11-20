@@ -8,6 +8,8 @@ final class LibraryStore: ObservableObject {
     @Published private(set) var folderPaths: [String] = []
     @Published private(set) var modified: [String: Date] = [:]
     @Published private(set) var created: [String: Date] = [:]
+    /// Holiday–Greene themes: each card's first #tag → the card paths carrying it.
+    @Published private(set) var themes: [String: [String]] = [:]
     @Published private(set) var loading = false
     @Published var message = "Choose a notes folder."
     @Published private(set) var loadedFolder = ""
@@ -35,6 +37,10 @@ final class LibraryStore: ObservableObject {
             let folders = found == nil ? [] : SidebarFolders.paths(in: root)
             var modified: [String: Date] = [:]
             var created: [String: Date] = [:]
+            var themes: [String: [String]] = [:]
+            for card in found?.cards ?? [] {
+                if let theme = KasterTypesetter.firstTag(in: card.content) { themes[theme.lowercased(), default: []].append(card.path) }
+            }
             for card in found?.cards ?? [] {
                 let values = try? card.url.resourceValues(forKeys: [.contentModificationDateKey, .creationDateKey])
                 modified[card.path] = values?.contentModificationDate
@@ -49,7 +55,7 @@ final class LibraryStore: ObservableObject {
                     self.message = "Can't read this folder. Choose it again."
                     return
                 }
-                self.snapshot = found; self.folderPaths = folders; self.modified = modified; self.created = created
+                self.snapshot = found; self.folderPaths = folders; self.modified = modified; self.created = created; self.themes = themes
                 self.loadedFolder = root.path
                 self.message = found.unreadable > 0 ? "Some notes could not be read." : ""
                 completion(rootChanged)
