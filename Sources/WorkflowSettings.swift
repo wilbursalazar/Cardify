@@ -53,64 +53,116 @@ struct WorkflowSettings: View {
     @AppStorage("kasterArtifactFolder.todos") private var todosFolder = ""
     @AppStorage("kasterArtifactFolder.debates") private var debatesFolder = ""
 
-    private func artifactPath(_ artifact: KasterArtifact) -> String {
-        switch artifact {
-        case .habits: return habitsFolder
-        case .todos: return todosFolder
-        case .debates: return debatesFolder
-        }
-    }
+    @AppStorage("notesFolder") private var notesFolder = ""
+    @AppStorage("saveFolder") private var saveFolder = ""
 
-    private func chooseFolder(for artifact: KasterArtifact) {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true
-        panel.prompt = "Use This Folder"; panel.message = "Where should \(artifact.title) files be kept?"
-        let current = artifactPath(artifact)
-        if !current.isEmpty { panel.directoryURL = URL(fileURLWithPath: current, isDirectory: true) }
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+    private func artifactBinding(_ artifact: KasterArtifact) -> Binding<String> {
         switch artifact {
-        case .habits: habitsFolder = url.path
-        case .todos: todosFolder = url.path
-        case .debates: debatesFolder = url.path
+        case .habits: return $habitsFolder
+        case .todos: return $todosFolder
+        case .debates: return $debatesFolder
         }
     }
-    private var preference: WorkflowPreference { WorkflowPreference(rawValue: storedWorkflow) ?? .configured }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Settings").font(.title2.bold())
-            Text("Appearance").font(.headline)
-            AppearanceSettings()
-            Toggle("Dot grid on cards", isOn: $dotGrid)
-                .help("Show a light dot grid in the preview and on printed cards.")
-            Text("Typesetting").font(.headline)
-            Picker("Engine", selection: $typesetEngine) {
-                ForEach(TypesetEngine.allCases) { engine in
-                    Text(engine.title + (KasterTypesetter.isAvailable(engine) ? "" : " — not installed")).tag(engine.rawValue)
-                }
+        VStack(alignment: .leading, spacing: 12) {
+            TabView {
+                general.tabItem { Label("General", systemImage: "gearshape") }
+                cards.tabItem { Label("Cards", systemImage: "rectangle.stack") }
+                folders.tabItem { Label("Folders", systemImage: "folder") }
             }
-            Text(TypesetEngine.stored(typesetEngine) == .typst
-                 ? "Previews and printed cards are typeset by Typst, built into Kaster. Write tables with | pipes | and math as $x^2$ or $$…$$ in LaTeX notation."
-                 : "Uses your installed Pandoc and XeLaTeX (MacTeX). Slower to preview; same Markdown and $math$ syntax.")
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Text("Cards").font(.headline)
-            Text("Research · Zettel · Quick · Bibliography. ⌘N makes a new card of the type you used last; it saves itself into its folder once it has a title.")
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Toggle("Themes (Holiday–Greene)", isOn: $themesEnabled)
-            Text("Each card's first #tag becomes its theme: printed in the card's top-left corner, with a Themes list in the sidebar to gather, reorder and print a theme's cards.")
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Text("Artifact folders").font(.headline)
-            ForEach(KasterArtifact.allCases) { artifact in
-                HStack {
-                    Label(artifact.title, systemImage: artifact.systemImage).frame(width: 140, alignment: .leading)
-                    Text(artifactPath(artifact).isEmpty ? "Asked the first time you make one" : (artifactPath(artifact) as NSString).abbreviatingWithTildeInPath)
-                        .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                    Spacer()
-                    Button("Change…") { chooseFolder(for: artifact) }
-                }
-            }
-            Spacer()
             HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
-        }.padding(24).frame(width: 560, height: 640)
+        }
+        .padding(20).frame(width: 600, height: 520)
+    }
+
+    // MARK: Tabs
+
+    private var general: some View {
+        Form {
+            Section("Appearance") {
+                AppearanceSettings()
+                AccentColorSetting()
+                Toggle("Dot grid on cards", isOn: $dotGrid)
+                    .help("Show a light dot grid in the preview and on printed cards.")
+            }
+            Section("Typesetting") {
+                Picker("Engine", selection: $typesetEngine) {
+                    ForEach(TypesetEngine.allCases) { engine in
+                        Text(engine.title + (KasterTypesetter.isAvailable(engine) ? "" : " — not installed")).tag(engine.rawValue)
+                    }
+                }
+                Text(TypesetEngine.stored(typesetEngine) == .typst
+                     ? "Previews and printed cards are typeset by Typst, built into Kaster. Write tables with | pipes | and math as $x^2$ or $$…$$."
+                     : "Uses your installed Pandoc and XeLaTeX (MacTeX). Slower to preview; same Markdown and $math$ syntax.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var cards: some View {
+        Form {
+            Section("Card types") {
+                Text("Research · Zettel · Quick · Bibliography. ⌘N makes a new card of the type you used last; it saves itself into its folder once it has a title.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Section("Themes") {
+                Toggle("Themes", isOn: $themesEnabled)
+                Text("Each card's first #tag becomes its theme: printed in the card's top-left corner, with a Themes list in the sidebar to gather, reorder and print a theme's cards.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var folders: some View {
+        Form {
+            Section {
+                folderRow("Notes folder", systemImage: "books.vertical", path: $notesFolder,
+                          empty: "Not set — ~/Documents/Kaster is used",
+                          help: "Your slip box: Kaster reads and organizes cards here (Research, Zettel, Quick, Bibliography).", clearable: false)
+                folderRow("Default save folder", systemImage: "square.and.arrow.down", path: $saveFolder,
+                          empty: "Same as the notes folder",
+                          help: "Offered when you export a PDF or use Save As.", clearable: true)
+            } header: { Text("Slip box") }
+            Section {
+                ForEach(KasterArtifact.allCases) { artifact in
+                    folderRow(artifact.title, systemImage: artifact.systemImage, path: artifactBinding(artifact),
+                              empty: "Asked the first time you make one",
+                              help: "Where \(artifact.title) files are kept.", clearable: true)
+                }
+            } header: { Text("Artifacts") }
+        }
+        .formStyle(.grouped)
+    }
+
+    private func folderRow(_ title: String, systemImage: String, path: Binding<String>, empty: String, help: String, clearable: Bool) -> some View {
+        HStack(spacing: 8) {
+            Label(title, systemImage: systemImage).frame(width: 170, alignment: .leading)
+            Text(path.wrappedValue.isEmpty ? empty : (path.wrappedValue as NSString).abbreviatingWithTildeInPath)
+                .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .help(path.wrappedValue.isEmpty ? help : path.wrappedValue)
+            if !path.wrappedValue.isEmpty {
+                Button { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path.wrappedValue, isDirectory: true)]) } label: { Image(systemName: "arrow.right.circle") }
+                    .buttonStyle(.borderless).help("Show in Finder")
+                if clearable {
+                    Button { path.wrappedValue = "" } label: { Image(systemName: "xmark.circle") }
+                        .buttonStyle(.borderless).help("Clear")
+                }
+            }
+            Button("Choose…") { choose(title, path: path) }
+        }
+        .help(help)
+    }
+
+    private func choose(_ title: String, path: Binding<String>) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true
+        panel.prompt = "Use This Folder"; panel.message = "Choose the \(title.lowercased())."
+        if !path.wrappedValue.isEmpty { panel.directoryURL = URL(fileURLWithPath: path.wrappedValue, isDirectory: true) }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        path.wrappedValue = url.path
     }
 }

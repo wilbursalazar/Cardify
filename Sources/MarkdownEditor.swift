@@ -959,8 +959,9 @@ extension LinkCompletionTextView {
     static let liveBodyFont = NSFont.systemFont(ofSize: 15)
     static let sourceFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
     private static let hiddenFont = NSFont.systemFont(ofSize: 0.01)
-    private static let purple = NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+    private static let defaultPurple = NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         ? NSColor(red: 0.71, green: 0.56, blue: 0.94, alpha: 1) : NSColor(red: 0.42, green: 0.25, blue: 0.76, alpha: 1) }
+    private static var purple: NSColor { AppearancePreference.customAccentNSColor() ?? defaultPurple }
 
     private func baseParagraph(live: Bool) -> NSParagraphStyle {
         let style = NSMutableParagraphStyle()

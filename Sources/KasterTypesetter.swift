@@ -236,7 +236,7 @@ enum KasterTypesetter {
         #let ids = json("ids.json")
         // Pure black ink (K only) so printers never mix black, gray or tables from color inks.
         #let ink = cmyk(0%, 0%, 0%, 100%)
-        #let kpurple = \(color == .black ? "ink" : "rgb(\"#6b40c2\")")
+        #let kpurple = \(color == .black ? "ink" : "rgb(\"\(UserDefaults.standard.string(forKey: "kasterAccentHex").flatMap { $0.range(of: "^#?[0-9A-Fa-f]{6}$", options: .regularExpression) != nil ? ($0.hasPrefix("#") ? $0 : "#" + $0) : nil } ?? "#6b40c2")\")")
         #let marker = \(color == .black ? "cmyk(0%, 0%, 0%, 18%)" : "rgb(\"#fff3a0\")")
         #set document(title: none)
         #set page(\(page), background: \(background))

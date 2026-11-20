@@ -422,6 +422,7 @@ struct ContentView: View {
     @AppStorage("kasterLastMode") private var lastMode = KasterMode.zettel.rawValue
     @AppStorage("kasterPrintMode") private var printMode = PrintColor.black.rawValue
     @AppStorage("kasterThemes") private var themesEnabled = false
+    @AppStorage(AppearancePreference.accentKey) private var accentHex = ""
     @AppStorage("kasterArtifactFolder.habits") private var habitsFolder = ""
     @AppStorage("kasterArtifactFolder.todos") private var todosFolder = ""
     @AppStorage("kasterArtifactFolder.debates") private var debatesFolder = ""
@@ -628,7 +629,7 @@ struct ContentView: View {
                                 onPrint: { urls, label in printBatch(urls, label: label) },
                                 lastPrint: Date(timeIntervalSince1970: lastPrintTime),
                                 onNewFolder: createFolder, onRenameFolder: renameFolder,
-                                onNewCardIn: newCardHere, onReorder: saveManualOrder)
+                                onNewCardIn: newCardHere, onNewFolderInFinder: makeFolderInFinder, onReorder: saveManualOrder)
                 }
                 WorkspaceSplitView(arrangement: WorkspaceArrangement.stored(storedWorkspaceArrangement), editor: {
                 HStack(spacing: 0) {
@@ -1176,6 +1177,27 @@ struct ContentView: View {
         catch { status = "Could not create the folder: \(error.localizedDescription)" }
     }
 
+    /// Opens a Finder panel inside the vault (or the selected folder) where "New Folder"
+    /// works as in Finder; the folder you make or pick appears in the sidebar.
+    func makeFolderInFinder(inside path: String) {
+        guard let root = vaultRoot else { return }
+        let start = path.isEmpty ? root : root.appendingPathComponent(path, isDirectory: true)
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = start
+        panel.prompt = "Done"
+        panel.message = "Make a folder with New Folder (⇧⌘N), or pick one. Folders inside your notes folder appear in the sidebar."
+        let response = panel.runModal()
+        sidebarRefreshToken = UUID()
+        guard response == .OK, let url = panel.url else { return }
+        if let relative = KasterVault.relativePath(of: url, in: root) {
+            status = relative.isEmpty ? "Notes folder selected." : "Folder ready: \(relative)."
+        } else {
+            status = "\(url.lastPathComponent) is outside your notes folder, so it won't appear in the sidebar."
+        }
+    }
+
     func renameFolder(_ path: String) {
         guard let root = vaultRoot else { return }
         let old = root.appendingPathComponent(path, isDirectory: true)
@@ -1386,9 +1408,9 @@ struct ContentView: View {
             let theme = KasterTypesetter.firstTag(in: text)
             Text(theme.map { "#" + $0 } ?? "No theme")
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(theme == nil ? .secondary : AppearancePreference.kasterPurple)
+                .foregroundColor(theme == nil ? .secondary : AppearancePreference.currentAccent)
                 .padding(.horizontal, 7).padding(.vertical, 2)
-                .background((theme == nil ? Color.secondary : AppearancePreference.kasterPurple).opacity(0.12), in: Capsule())
+                .background((theme == nil ? Color.secondary : AppearancePreference.currentAccent).opacity(0.12), in: Capsule())
                 .help("Holiday–Greene theme: this card's first #tag")
         }
         switch kasterMode {

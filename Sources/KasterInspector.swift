@@ -24,6 +24,7 @@ struct KasterInspector<CardPreview: View>: View {
 
     private var tab: InspectorTab { InspectorTab(rawValue: storedTab) ?? .preview }
     private var style: PreviewStyle { isMarkdownMode ? (PreviewStyle(rawValue: storedStyle) ?? .document) : .card }
+    @AppStorage(AppearancePreference.accentKey) private var accentHex = ""
     private var accent: Color { AppearancePreference.accent(for: appearance) ?? AppearancePreference.kasterPurple }
 
     var body: some View {
@@ -263,7 +264,7 @@ struct KasterDocumentView: View {
             }
         case .quote(let text):
             HStack(spacing: 10) {
-                RoundedRectangle(cornerRadius: 1).fill(AppearancePreference.kasterPurple.opacity(0.5)).frame(width: 3)
+                RoundedRectangle(cornerRadius: 1).fill(AppearancePreference.currentAccent.opacity(0.5)).frame(width: 3)
                 inline(text).font(.system(size: 13)).italic().foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         case .code(let text):
@@ -298,7 +299,7 @@ struct KasterDocumentView: View {
                     cell(column < header.count ? header[column] : "", header: true)
                 }
             }
-            .background(AppearancePreference.kasterSelection)
+            .background(AppearancePreference.customAccent()?.opacity(0.2) ?? AppearancePreference.kasterSelection)
             ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                 GridRow {
                     ForEach(0..<columns, id: \.self) { column in cell(column < row.count ? row[column] : "", header: false) }
@@ -340,7 +341,7 @@ struct KasterDocumentView: View {
         }
         var attributed = (try? AttributedString(markdown: source, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
         for run in attributed.runs where run.link != nil {
-            attributed[run.range].foregroundColor = AppearancePreference.kasterPurple
+            attributed[run.range].foregroundColor = AppearancePreference.currentAccent
             attributed[run.range].underlineStyle = .single
         }
         return attributed

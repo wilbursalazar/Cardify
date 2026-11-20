@@ -10,6 +10,7 @@ struct EditorTab: Identifiable, Equatable {
 }
 
 struct EditorTabBar: View {
+    @AppStorage(AppearancePreference.accentKey) private var accentHex = ""
     let tabs: [EditorTab]
     let currentID: String
     let onSelect: (EditorTab) -> Void
@@ -60,6 +61,7 @@ enum KasterEditorMode: String, CaseIterable {
 }
 
 struct KasterFormatBar: View {
+    @AppStorage(AppearancePreference.accentKey) private var accentHex = ""
     let editor: EditorState
     @Binding var mode: String
     let onLinkNote: () -> Void
@@ -168,6 +170,7 @@ struct KasterFormatBar: View {
 }
 
 struct KasterModePicker: View {
+    @AppStorage(AppearancePreference.accentKey) private var accentHex = ""
     @Binding var mode: String
     @AppStorage("cardifyAppearance") private var appearance = AppearancePreference.system.rawValue
     var body: some View {

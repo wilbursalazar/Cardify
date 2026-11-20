@@ -65,7 +65,43 @@ enum AppearancePreference: String, CaseIterable, Identifiable {
         if stored == midnight.rawValue { return midnightText }
         return nil
     }
+    // MARK: Custom accent (Settings → Accent color). Empty = the theme's own accent.
+    static let accentKey = "kasterAccentHex"
+
+    /// "#6B40C2", "6b40c2" or "#abc" → (r, g, b) in 0…1.
+    static func rgb(hex: String) -> (Double, Double, Double)? {
+        var value = hex.trimmingCharacters(in: .whitespaces)
+        if value.hasPrefix("#") { value.removeFirst() }
+        if value.count == 3 { value = value.map { "\($0)\($0)" }.joined() }
+        guard value.count == 6, let number = UInt32(value, radix: 16) else { return nil }
+        return (Double((number >> 16) & 0xff) / 255, Double((number >> 8) & 0xff) / 255, Double(number & 0xff) / 255)
+    }
+    static func hex(of color: NSColor) -> String? {
+        guard let srgb = color.usingColorSpace(.sRGB) else { return nil }
+        return String(format: "#%02X%02X%02X", Int(round(srgb.redComponent * 255)), Int(round(srgb.greenComponent * 255)), Int(round(srgb.blueComponent * 255)))
+    }
+    static var customAccentHex: String? {
+        guard let stored = UserDefaults.standard.string(forKey: accentKey), rgb(hex: stored) != nil else { return nil }
+        return stored
+    }
+    static func customAccent() -> Color? {
+        guard let hex = customAccentHex, let (r, g, b) = rgb(hex: hex) else { return nil }
+        return Color(.sRGB, red: r, green: g, blue: b)
+    }
+    static func customAccentNSColor() -> NSColor? {
+        guard let hex = customAccentHex, let (r, g, b) = rgb(hex: hex) else { return nil }
+        return NSColor(srgbRed: r, green: g, blue: b, alpha: 1)
+    }
+    /// The accent in use everywhere: the custom color if set, otherwise Kaster purple.
+    static var currentAccent: Color { customAccent() ?? kasterPurple }
+    /// Fill for selected rows: a soft wash of the accent.
+    static func selectionFill(for stored: String) -> Color {
+        if let custom = customAccent() { return custom.opacity(0.2) }
+        return foreground(for: stored) == nil ? kasterSelection : (accent(for: stored) ?? kasterPurple).opacity(0.22)
+    }
+
     static func tint(for stored: String) -> Color? {
+        if let custom = customAccent() { return custom }
         if stored == charcoal.rawValue { return charcoalBlue }
         if stored == slate.rawValue { return slateAccent }
         if stored == midnight.rawValue { return midnightAccent }
@@ -90,6 +126,46 @@ struct SlatePrimaryButtonStyle: ButtonStyle {
             .foregroundColor(midnight ? AppearancePreference.midnightBackground : AppearancePreference.slateBackground)
             .padding(.horizontal, 10).padding(.vertical, 5)
             .background((midnight ? AppearancePreference.midnightAccent : AppearancePreference.slateAccent).opacity(configuration.isPressed ? 0.85 : 1), in: RoundedRectangle(cornerRadius: 6))
+    }
+}
+
+/// Settings: a small color dot to pick any accent, its hex value, and Reset.
+struct AccentColorSetting: View {
+    @AppStorage(AppearancePreference.accentKey) private var accentHex = ""
+    @State private var field = ""
+    @State private var invalid = false
+
+    private var current: Color { AppearancePreference.customAccent() ?? AppearancePreference.kasterPurple }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text("Accent color")
+            ColorPicker("Accent color", selection: Binding(
+                get: { current },
+                set: { color in
+                    if let hex = AppearancePreference.hex(of: NSColor(color)) { accentHex = hex; field = hex; invalid = false }
+                }), supportsOpacity: false)
+                .labelsHidden()
+                .help("Pick any accent color")
+            TextField("#6B40C2", text: $field)
+                .frame(width: 90).font(.system(.body, design: .monospaced))
+                .onSubmit(apply)
+                .help("Type a hex color such as #2F80ED and press Return")
+            if invalid { Text("Use a hex color like #2F80ED").font(.caption).foregroundStyle(.red) }
+            Spacer()
+            Button("Reset") { accentHex = ""; field = ""; invalid = false }
+                .disabled(accentHex.isEmpty)
+                .help("Restore the theme's default accent")
+        }
+        .onAppear { field = accentHex }
+    }
+
+    private func apply() {
+        let value = field.trimmingCharacters(in: .whitespaces)
+        if value.isEmpty { accentHex = ""; invalid = false; return }
+        guard let (r, g, b) = AppearancePreference.rgb(hex: value) else { invalid = true; return }
+        let normalized = String(format: "#%02X%02X%02X", Int(round(r * 255)), Int(round(g * 255)), Int(round(b * 255)))
+        accentHex = normalized; field = normalized; invalid = false
     }
 }
 

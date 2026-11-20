@@ -48,6 +48,7 @@ struct CardSidebar: View {
     let onNewFolder: (String) -> Void
     let onRenameFolder: (String) -> Void
     let onNewCardIn: (String) -> Void
+    let onNewFolderInFinder: (String) -> Void
     let onReorder: ([URL]) -> Void
 
     @AppStorage("cardifyAppearance") private var appearance = AppearancePreference.system.rawValue
@@ -66,9 +67,8 @@ struct CardSidebar: View {
 
     private var folder: String { notesFolder.isEmpty ? saveFolder : notesFolder }
     private var accent: Color { AppearancePreference.accent(for: appearance) ?? AppearancePreference.kasterPurple }
-    private var selectionFill: Color {
-        AppearancePreference.foreground(for: appearance) == nil ? AppearancePreference.kasterSelection : accent.opacity(0.22)
-    }
+    @AppStorage(AppearancePreference.accentKey) private var accentHex = ""
+    private var selectionFill: Color { AppearancePreference.selectionFill(for: appearance) }
     private var sort: NoteListSort { NoteListSort(rawValue: storedSort) ?? .modified }
 
     var body: some View {
@@ -123,8 +123,8 @@ struct CardSidebar: View {
                     HStack {
                         Text("Folders").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
                         Spacer()
-                        Button { onNewFolder(selectedFolderPath ?? "") } label: { Image(systemName: "folder.badge.plus").font(.system(size: 11)) }
-                            .buttonStyle(.borderless).help(selectedFolderPath.map { "New folder inside \(($0 as NSString).lastPathComponent)" } ?? "New folder")
+                        Button { onNewFolderInFinder(selectedFolderPath ?? "") } label: { Image(systemName: "folder.badge.plus").font(.system(size: 11)) }
+                            .buttonStyle(.borderless).help("Open a Finder panel to make or pick a folder" + (selectedFolderPath.map { " inside \(($0 as NSString).lastPathComponent)" } ?? ""))
                             .disabled(folder.isEmpty)
                     }
                     .padding(.horizontal, 10).padding(.top, 16).padding(.bottom, 4)
