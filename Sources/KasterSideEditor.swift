@@ -16,6 +16,7 @@ struct SideEditorPane: View {
     @AppStorage("cardifyAppearance") private var appearance = AppearancePreference.system.rawValue
     @State private var saveTask: Task<Void, Never>?
     @State private var note = ""
+    @State private var closed = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -33,7 +34,7 @@ struct SideEditorPane: View {
                 Text(note).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
                 Button(action: onMakeMain) { Image(systemName: "arrow.left.square") }
                     .buttonStyle(.borderless).help("Edit this card in the main editor")
-                Button(action: { flush(); onClose() }) { Image(systemName: "xmark") }
+                Button(action: { flush(); closed = true; onClose() }) { Image(systemName: "xmark") }
                     .buttonStyle(.borderless).help("Close this side card")
             }
             .padding(.horizontal, 10).frame(height: 36)
@@ -45,7 +46,7 @@ struct SideEditorPane: View {
         }
         .background(AppearancePreference.foreground(for: appearance) == nil ? Color(nsColor: .textBackgroundColor) : Color.clear)
         .onChange(of: tab.content) { _ in scheduleSave() }
-        .onDisappear { flush() }
+        .onDisappear { if !closed { flush() } }
     }
 
     private func scheduleSave() {

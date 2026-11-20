@@ -775,13 +775,15 @@ struct ContentView: View {
                 .background(paneBackground)
                 .clipped()
                 .frame(minWidth: 320)
-                if let index = linkedTabs.firstIndex(where: { $0.id == sideTab }) {
+                if let side = linkedTabs.first(where: { $0.id == sideTab }) {
                     Divider()
-                    SideEditorPane(tab: $linkedTabs[index], tabs: linkedTabs,
+                    // Bound by id, not array position: the pane saves once more as it closes,
+                    // after its tab may already be gone from the list.
+                    SideEditorPane(tab: sideBinding(side), tabs: linkedTabs,
                                    onSelect: { sideTab = $0 },
-                                   onClose: { closeLinkedTab(linkedTabs[index].id) },
-                                   onMakeMain: { let url = linkedTabs[index].url; closeLinkedTab(linkedTabs[index].id); _ = loadFile(url) },
-                                   onFollowLink: { target in followLinkFromTab(target, source: linkedTabs[index]) },
+                                   onClose: { closeLinkedTab(side.id) },
+                                   onMakeMain: { closeLinkedTab(side.id); _ = loadFile(side.url) },
+                                   onFollowLink: { target in followLinkFromTab(target, source: linkedTabs.first(where: { $0.id == side.id }) ?? side) },
                                    onSaved: { sidebarRefreshToken = UUID() })
                         .frame(minWidth: 260)
                 }
@@ -1752,6 +1754,14 @@ struct ContentView: View {
             linkedTabs.append(tab); sideTab = tab.id
             status = "Opened \(tab.title) beside the current card."
         } catch { linkError("Could not open linked note: \(error.localizedDescription)") }
+    }
+    /// A binding to one side card that stays safe after the card is closed.
+    func sideBinding(_ initial: LinkedCardTab) -> Binding<LinkedCardTab> {
+        Binding(
+            get: { linkedTabs.first(where: { $0.id == initial.id }) ?? initial },
+            set: { updated in
+                if let index = linkedTabs.firstIndex(where: { $0.id == updated.id }) { linkedTabs[index] = updated }
+            })
     }
     func closeLinkedTab(_ id: UUID) {
         linkedTabs.removeAll(where: { $0.id == id })
