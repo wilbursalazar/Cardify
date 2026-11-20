@@ -6,7 +6,7 @@ import SwiftUI
         let app = NSApplication.shared; app.setActivationPolicy(.prohibited)
         var draft = "# Card\n\nSelect this phrase for editing."
         let editor = EditorState()
-        let host = NSHostingView(rootView: MarkdownEditor(text: Binding(get: { draft }, set: { draft = $0 }), editor: editor, onFollowLink: { _ in }))
+        let host = NSHostingView(rootView: MarkdownEditor(text: Binding(get: { draft }, set: { draft = $0 }), editor: editor, onFollowLink: { _ in }, presentation: .source))
         let window = NSWindow(contentRect: NSRect(x: 120, y: 120, width: 300, height: 250), styleMask: [.titled], backing: .buffered, defer: false)
         window.contentView = host; window.makeKeyAndOrderFront(nil); host.layoutSubtreeIfNeeded()
         RunLoop.main.run(until: Date().addingTimeInterval(0.1))
