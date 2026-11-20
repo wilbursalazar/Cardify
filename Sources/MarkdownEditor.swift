@@ -48,6 +48,18 @@ struct LinkCompletionContext: Equatable {
     }
 }
 
+enum EditorPresentationMode: String, CaseIterable {
+    case visual, live, source
+    var label: String { rawValue.capitalized }
+    var description: String {
+        switch self {
+        case .visual: return "Format Markdown and conceal syntax"
+        case .live: return "Reveal Markdown syntax in the active line"
+        case .source: return "Edit the original Markdown source"
+        }
+    }
+}
+
 final class EditorState: ObservableObject {
     weak var view: NSTextView?
     private var pendingSelection: (range: NSRange, text: String)?
@@ -105,6 +117,81 @@ final class LinkCompletionTextView: NSTextView {
     private var wantsHiddenFrontmatter = false
     private var hiddenFrontmatterRange: NSRange?
     private var originalFrontmatterAttributes: [(NSRange, [NSAttributedString.Key: Any])] = []
+    private var presentation: EditorPresentationMode = .source
+    private var markdownAttributes: [(NSRange, [NSAttributedString.Key: Any])] = []
+    private var applyingMarkdown = false
+
+    // Presentation is entirely attribute-based; the underlying Markdown,
+    // character offsets, selections and undo stack remain source-based.
+    func setPresentationMode(_ next: EditorPresentationMode) {
+        guard presentation != next else { return }
+        presentation = next
+        refreshMarkdownPresentation()
+    }
+
+    private func restoreMarkdownPresentation() {
+        guard !markdownAttributes.isEmpty, let storage = textStorage else { return }
+        storage.beginEditing()
+        for (range, attributes) in markdownAttributes.reversed() where NSMaxRange(range) <= storage.length {
+            storage.setAttributes(attributes, range: range)
+        }
+        storage.endEditing()
+        markdownAttributes.removeAll()
+    }
+
+    func refreshMarkdownPresentation() {
+        guard !applyingMarkdown, let storage = textStorage else { return }
+        applyingMarkdown = true
+        defer { applyingMarkdown = false }
+        restoreMarkdownPresentation()
+        guard presentation != .source else { return }
+        let source = string as NSString
+        guard source.length > 0 && source.length < 100_000 else { return }
+        let bodyStart = hiddenFrontmatterRange.map(NSMaxRange) ?? 0
+        let caret = min(selectedRange().location, max(0, source.length - 1))
+        let activeLine = source.lineRange(for: NSRange(location: caret, length: 0))
+
+        func apply(_ attributes: [NSAttributedString.Key: Any], to range: NSRange) {
+            guard range.length > 0, range.location >= bodyStart,
+                  NSMaxRange(range) <= storage.length else { return }
+            storage.enumerateAttributes(in: range, options: []) { attrs, segment, _ in
+                markdownAttributes.append((segment, attrs))
+            }
+            storage.addAttributes(attributes, range: range)
+        }
+        func conceal(_ range: NSRange, whole: NSRange) {
+            guard presentation == .visual || NSIntersectionRange(activeLine, whole).length == 0 else { return }
+            apply([.font: NSFont.systemFont(ofSize: 0.1), .foregroundColor: NSColor.clear], to: range)
+        }
+        let heading = try! NSRegularExpression(pattern: #"(?m)^[ \\t]{0,3}(#{1,6})[ \\t]+([^\\r\\n]+)"#)
+        for match in heading.matches(in: string, range: NSRange(location: 0, length: source.length)) {
+            let markers = NSRange(location: match.range(at: 1).location,
+                                  length: match.range(at: 2).location - match.range(at: 1).location)
+            let level = match.range(at: 1).length
+            apply([.font: NSFont.systemFont(ofSize: level == 1 ? 20 : level == 2 ? 17 : 15, weight: .bold)], to: match.range(at: 2))
+            conceal(markers, whole: match.range)
+        }
+
+        let patterns: [(String, NSFont)] = [
+            (#"(\\*\\*|__)([^\\r\\n]+?)\\1"#, NSFont.boldSystemFont(ofSize: 14)),
+            (#"(?<!\\w)_(?!_)([^_\\r\\n]+)_(?!\\w)"#, NSFontManager.shared.convert(NSFont.systemFont(ofSize: 14), toHaveTrait: .italicFontMask)),
+            (#"(?<!\\*)\\*(?!\\*)([^*\\r\\n]+)\\*(?!\\*)"#, NSFontManager.shared.convert(NSFont.systemFont(ofSize: 14), toHaveTrait: .italicFontMask))
+        ]
+        for (index, pair) in patterns.enumerated() {
+            let regex = try! NSRegularExpression(pattern: pair.0)
+            for match in regex.matches(in: string, range: NSRange(location: 0, length: source.length)) {
+                let interior = match.range(at: index == 0 ? 2 : 1)
+                guard interior.location != NSNotFound else { continue }
+                apply([.font: pair.1], to: interior)
+                let before = NSRange(location: match.range.location, length: interior.location - match.range.location)
+                let after = NSRange(location: NSMaxRange(interior),
+                                    length: NSMaxRange(match.range) - NSMaxRange(interior))
+                conceal(before, whole: match.range)
+                conceal(after, whole: match.range)
+            }
+        }
+        needsDisplay = true
+    }
 
     static func frontmatterRange(in text: String) -> NSRange? { frontmatterInfo(in: text)?.range }
 
@@ -306,12 +393,14 @@ final class LinkCompletionTextView: NSTextView {
                 return false
             }
         }
+        restoreMarkdownPresentation()
         return super.shouldChangeText(in: affectedCharRange, replacementString: replacementString)
     }
 
     override func didChangeText() {
         super.didChangeText()
         if wantsHiddenFrontmatter && hiddenFrontmatterRange == nil { hideFrontmatterIfPossible() }
+        DispatchQueue.main.async { [weak self] in self?.refreshMarkdownPresentation() }
     }
 
     // List continuation operates on the actual UTF-16 source, including CRLF.
@@ -526,11 +615,13 @@ final class LinkCompletionTextView: NSTextView {
     // ranges and targets captured by previous AppKit text undo operations.
     func replaceEditorText(_ text: String) {
         guard string != text else { return }
+        restoreMarkdownPresentation()
         restoreFrontmatterAttributes()
         breakUndoCoalescing()
         textUndoManager.removeAllActions()
         string = text
         hideFrontmatterIfPossible()
+        refreshMarkdownPresentation()
     }
     func discardEditorUndo() {
         breakUndoCoalescing()
@@ -762,6 +853,7 @@ struct MarkdownEditor: View {
     @Binding var text: String
     let editor: EditorState
     let onFollowLink: (CardLinkTarget) -> Void
+    let presentation: EditorPresentationMode
     @StateObject private var completion = LinkCompletionState()
     @StateObject private var selectionToolbar = SelectionToolbarState()
     @AppStorage("hideEditorFrontmatter") private var hideFrontmatter = true
@@ -786,7 +878,7 @@ struct MarkdownEditor: View {
                 }.padding(.horizontal, 12).padding(.vertical, 6)
                 Divider()
             }
-            MarkdownTextView(text: $text, editor: editor, completion: completion, selectionToolbar: selectionToolbar, hideFrontmatter: isHidden, onFollowLink: onFollowLink)
+            MarkdownTextView(text: $text, editor: editor, completion: completion, selectionToolbar: selectionToolbar, hideFrontmatter: isHidden, onFollowLink: onFollowLink, presentation: presentation)
                 .overlay(alignment: .topLeading) {
                     GeometryReader { geometry in
                         if let anchor = selectionToolbar.anchor {
@@ -848,6 +940,7 @@ private struct MarkdownTextView: NSViewRepresentable {
     @ObservedObject var selectionToolbar: SelectionToolbarState
     let hideFrontmatter: Bool
     let onFollowLink: (CardLinkTarget) -> Void
+    let presentation: EditorPresentationMode
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSScrollView()
@@ -874,6 +967,7 @@ private struct MarkdownTextView: NSViewRepresentable {
         view.followLink = { [weak coordinator = context.coordinator] target in coordinator?.parent.onFollowLink(target) }
         scroll.documentView = view; editor.view = view; completion.view = view
         view.setFrontmatterHidden(hideFrontmatter)
+        view.setPresentationMode(presentation)
         editor.applyPendingSelection()
         return scroll
     }
@@ -882,6 +976,7 @@ private struct MarkdownTextView: NSViewRepresentable {
         guard let view = scroll.documentView as? LinkCompletionTextView else { return }
         if view.string != text { selectionToolbar.clear(); view.replaceEditorText(text); completion.close() }
         view.setFrontmatterHidden(hideFrontmatter)
+        view.setPresentationMode(presentation)
         editor.view = view; completion.view = view
         editor.applyPendingSelection()
     }
@@ -917,7 +1012,7 @@ private struct MarkdownTextView: NSViewRepresentable {
         }
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let view = notification.object as? NSTextView else { return }
-            DispatchQueue.main.async { [weak self, weak view] in if let view { self?.parent.completion.refresh(in: view); self?.updateToolbar(view) } }
+            DispatchQueue.main.async { [weak self, weak view] in if let view { view.refreshMarkdownPresentation(); self?.parent.completion.refresh(in: view); self?.updateToolbar(view) } }
         }
         func textDidEndEditing(_ notification: Notification) {
             guard let view = notification.object as? NSTextView else { return }
