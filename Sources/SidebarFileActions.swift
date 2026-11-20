@@ -9,7 +9,7 @@ enum SidebarFileActions {
             switch self {
             case .unavailable: return "This note is no longer available in the selected notes folder. Refresh and try again."
             case .changed: return "The note changed while the action was open. Refresh and try again."
-            case .open: return "This note is open in Cardify. Open a different note before changing its file."
+            case .open: return "This note is open in Kaster. Open a different note before changing its file."
             case .invalidName: return "Choose a valid Markdown filename without slashes or control characters."
             case .filenameID: return "Keep the existing filename card ID unchanged. A filename without an ID cannot gain one through Rename."
             case .invalidMarkdown: return "This note's metadata or UTF-8 encoding cannot be safely duplicated."

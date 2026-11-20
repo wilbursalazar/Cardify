@@ -36,7 +36,7 @@ enum CardLinkNavigation {
             let pieces = value.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)
             guard let path = String(pieces[0]).removingPercentEncoding,
                   let fragment = pieces.count == 2 ? String(pieces[1]).removingPercentEncoding : "" else { return .failure("The note link is invalid.") }
-            guard path.isEmpty || (path as NSString).pathExtension.lowercased() == "md" else { return .failure("Only Markdown note links can be opened in Cardify.") }
+            guard path.isEmpty || (path as NSString).pathExtension.lowercased() == "md" else { return .failure("Only Markdown note links can be opened in Kaster.") }
             return note(path + (pieces.count == 2 ? "#" + fragment : ""), folder: folder, currentFile: currentFile, relativeToCurrent: true)
         }
     }

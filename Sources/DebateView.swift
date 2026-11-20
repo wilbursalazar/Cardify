@@ -230,7 +230,7 @@ private struct DebateBrowser: View {
                 VStack(spacing: 10) {
                     Image(systemName: "folder").font(.system(size: 30)).foregroundStyle(.secondary)
                     Text("Choose a notes folder").font(.headline)
-                    Text("Cardify uses this folder to save and connect your debate cards as Markdown.")
+                    Text("Kaster uses this folder to save and connect your debate cards as Markdown.")
                         .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
                     Button("Choose Notes Folder…", action: chooseFolder).buttonStyle(.borderedProminent).modifier(CharcoalPrimaryTint())
                 }.frame(maxWidth: .infinity, maxHeight: .infinity).padding()

@@ -92,7 +92,7 @@ struct GraphView: View {
             HStack {
                 Text("Graph").font(.title2.bold())
                 Spacer()
-                Button("Choose Notes Folder…", action: chooseFolder).help("Changes the notes folder used throughout Cardify")
+                Button("Choose Notes Folder…", action: chooseFolder).help("Changes the notes folder used throughout Kaster")
                 Button("Refresh", action: load).disabled(folder.isEmpty || loading)
             }
             Text(folder.isEmpty ? "No notes folder selected" : folder)

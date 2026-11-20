@@ -15,7 +15,7 @@ final class GraphWindowManager: NSObject, ObservableObject, NSWindowDelegate {
             return
         }
         let window = NSWindow(contentViewController: host)
-        window.title = "Cardify Graph"
+        window.title = "Kaster Graph"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         window.setContentSize(NSSize(width: 1000, height: 700))
         window.minSize = NSSize(width: 840, height: 600)
