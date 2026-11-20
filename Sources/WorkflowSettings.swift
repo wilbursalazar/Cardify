@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct WorkflowDefaults {
     let idMode: IDMode
@@ -47,6 +48,31 @@ struct WorkflowSettings: View {
     @AppStorage("timestampDateStyle") private var timestampDateStyle = TimestampDateStyle.sortable.rawValue
     @AppStorage("timestampIncludeTime") private var timestampIncludeTime = true
     @AppStorage("kasterTypesetEngine") private var typesetEngine = TypesetEngine.typst.rawValue
+    @AppStorage("kasterArtifactFolder.habits") private var habitsFolder = ""
+    @AppStorage("kasterArtifactFolder.todos") private var todosFolder = ""
+    @AppStorage("kasterArtifactFolder.debates") private var debatesFolder = ""
+
+    private func artifactPath(_ artifact: KasterArtifact) -> String {
+        switch artifact {
+        case .habits: return habitsFolder
+        case .todos: return todosFolder
+        case .debates: return debatesFolder
+        }
+    }
+
+    private func chooseFolder(for artifact: KasterArtifact) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true
+        panel.prompt = "Use This Folder"; panel.message = "Where should \(artifact.title) files be kept?"
+        let current = artifactPath(artifact)
+        if !current.isEmpty { panel.directoryURL = URL(fileURLWithPath: current, isDirectory: true) }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        switch artifact {
+        case .habits: habitsFolder = url.path
+        case .todos: todosFolder = url.path
+        case .debates: debatesFolder = url.path
+        }
+    }
     private var preference: WorkflowPreference { WorkflowPreference(rawValue: storedWorkflow) ?? .configured }
 
     var body: some View {
@@ -66,19 +92,19 @@ struct WorkflowSettings: View {
                  ? "Previews and printed cards are typeset by Typst, built into Kaster. Write tables with | pipes | and math as $x^2$ or $$…$$ in LaTeX notation."
                  : "Uses your installed Pandoc and XeLaTeX (MacTeX). Slower to preview; same Markdown and $math$ syntax.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Text("New Markdown cards").font(.headline)
-            Picker("Starting workflow", selection: Binding(get: { preference }, set: { storedWorkflow = $0.rawValue })) {
-                ForEach(WorkflowPreference.allCases) { choice in Text(choice.name).tag(choice) }
-            }
-            Text(preference.description).foregroundStyle(.secondary)
-            Picker("Timestamp date", selection: Binding(get: { TimestampDateStyle(rawValue: timestampDateStyle) ?? .sortable }, set: { timestampDateStyle = $0.rawValue })) {
-                ForEach(TimestampDateStyle.allCases) { choice in Text(choice.title).tag(choice) }
-            }
-            Toggle("Include hours and minutes in timestamp", isOn: $timestampIncludeTime)
-            Text("Examples: 20261113, 13-11-26, or 11-13-26. Time adds hours and minutes. Existing IDs stay the same.")
+            Text("Cards").font(.headline)
+            Text("Research · Zettel · Quick · Bibliography. ⌘N makes a new card of the type you used last; it saves itself into its folder once it has a title.")
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Text("These are starting defaults for New Card. You can still use any template, ID style, source, or link. Existing cards and the current draft are not changed.")
-                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text("Artifact folders").font(.headline)
+            ForEach(KasterArtifact.allCases) { artifact in
+                HStack {
+                    Label(artifact.title, systemImage: artifact.systemImage).frame(width: 140, alignment: .leading)
+                    Text(artifactPath(artifact).isEmpty ? "Asked the first time you make one" : (artifactPath(artifact) as NSString).abbreviatingWithTildeInPath)
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    Spacer()
+                    Button("Change…") { chooseFolder(for: artifact) }
+                }
+            }
             Spacer()
             HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
         }.padding(24).frame(width: 560, height: 580)

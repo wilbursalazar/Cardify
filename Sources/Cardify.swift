@@ -418,6 +418,15 @@ struct ContentView: View {
     @AppStorage("kasterTypesetEngine") private var typesetEngine = TypesetEngine.typst.rawValue
     @AppStorage("kasterPreviewStyle") private var previewStyle = PreviewStyle.document.rawValue
     @AppStorage("kasterLastPrint") private var lastPrintTime = 0.0
+    @AppStorage("kasterLastMode") private var lastMode = KasterMode.zettel.rawValue
+    @AppStorage("kasterPrintMode") private var printMode = PrintColor.black.rawValue
+    @AppStorage("kasterArtifactFolder.habits") private var habitsFolder = ""
+    @AppStorage("kasterArtifactFolder.todos") private var todosFolder = ""
+    @AppStorage("kasterArtifactFolder.debates") private var debatesFolder = ""
+    @State private var kasterMode: KasterMode = .zettel
+    @State private var renameTask: Task<Void, Never>?
+    @State private var showMigration = false
+    @State private var newCardFolder: URL?
     @AppStorage("kasterEditorMode") private var editorMode = KasterEditorMode.live.rawValue
     @State private var openTabs: [URL] = []
     @AppStorage("kasterLayoutMigrated") private var kasterLayoutMigrated = false
@@ -528,6 +537,7 @@ struct ContentView: View {
                     .accessibilityLabel(showNotesSidebar ? "Hide sidebar" : "Show sidebar")
                 Image(nsImage: NSApp.applicationIconImage).resizable().interpolation(.high).frame(width: 22, height: 22)
                     .accessibilityHidden(true)
+                Button(action: newCard) { EmptyView() }.keyboardShortcut("n").frame(width: 0, height: 0).opacity(0).accessibilityHidden(true)
                 Text("Kaster").font(.system(size: 15, weight: .semibold))
                     .foregroundColor(AppearancePreference.foreground(for: storedAppearance))
                 HStack(spacing: 4) {
@@ -569,6 +579,7 @@ struct ContentView: View {
                     Divider()
                     Button("Choose Save Folder…", action: chooseFolder)
                     Button("Choose Notes Folder…", action: chooseNotesFolder)
+                    Button("Organize Vault into Kaster Folders…") { if flushExistingDraft() { showMigration = true } }.disabled(vaultRoot == nil)
                     Divider()
                     Button("Settings…") { showSettings = true }
                 } label: { Image(systemName: "ellipsis.circle") }
@@ -577,6 +588,13 @@ struct ContentView: View {
                     .keyboardShortcut("s").help("Save (⌘S)")
                 Button(action: printCards) { Image(systemName: "printer") }
                     .keyboardShortcut("p").help("Print this card (⌘P)")
+                Picker("Print colors", selection: $printMode) {
+                    ForEach(PrintColor.allCases) { mode in
+                        Label(mode.title, systemImage: mode == .black ? "circle.lefthalf.filled" : "paintpalette").tag(mode.rawValue)
+                    }
+                }
+                .pickerStyle(.menu).labelsHidden().fixedSize()
+                .help("Black only: pure black ink for everything, images in grayscale. Color: black text, purple links, color images. The preview shows what will print.")
                 saveAndPrintButton
             }
             .buttonStyle(.borderless)
@@ -598,10 +616,12 @@ struct ContentView: View {
                                     return loadFile(url, validating: { CardGraph.canOpen(url, in: root) })
                                 }, onOpenParallel: { url in openLinkedTab(url) }, onReveal: revealSidebarNote, onDuplicate: duplicateSidebarNote,
                                 onRename: renameSidebarNote, onTrash: trashSidebarNote,
-                                onCopyPath: copySidebarPath, onMove: moveSidebarNote, onNew: newCard, onChooseFolder: chooseNotesFolder,
+                                onCopyPath: copySidebarPath, onMove: { url, destination in moveSidebarItem(url, to: destination) }, onNew: newCard, onChooseFolder: chooseNotesFolder,
                                 onGraph: showGraph, onSettings: { showSettings = true },
                                 onPrint: { urls, label in printBatch(urls, label: label) },
-                                lastPrint: Date(timeIntervalSince1970: lastPrintTime))
+                                lastPrint: Date(timeIntervalSince1970: lastPrintTime),
+                                onNewFolder: createFolder, onRenameFolder: renameFolder,
+                                onNewCardIn: newCardHere, onReorder: saveManualOrder)
                     Divider()
                 }
                 WorkspaceSplitView(arrangement: WorkspaceArrangement.stored(storedWorkspaceArrangement), editor: {
@@ -619,34 +639,7 @@ struct ContentView: View {
                     ScrollView(.vertical) {
                     VStack(alignment: .leading) {
                     HStack(spacing: 8) {
-                        Picker("Card type", selection: Binding(get: { cardMode == "markdown" && showDebate ? "debate" : cardMode }, set: { mode in
-                            if mode == "debate" {
-                                switchMode(to: "markdown")
-                                if cardMode == "markdown" { showDebate = true }
-                            } else {
-                                switchMode(to: mode)
-                                if mode == "markdown" && cardMode == "markdown" { showDebate = false }
-                            }
-                        })) {
-                            Text("Research").tag("markdown"); Text("Habit").tag("habits"); Text("To Do").tag("todos"); Text("Debate").tag("debate")
-                            if cardMode == "outline" { Text("Outline").tag("outline") }
-                        }.pickerStyle(.menu).labelsHidden().fixedSize().help("Choose Research, Habit, To Do, or Debate")
-                        if cardMode == "markdown" && !showDebate { researchIDControls }
-                        Spacer(minLength: 4)
-                        if cardMode == "markdown" && !showDebate {
-                        Menu {
-                                Button { newResearchCard(template: .reading, mode: .titleOnly) } label: {
-                                    Label("Eco reading", systemImage: "books.vertical")
-                                }
-                                Button { newResearchCard(template: .idea, mode: .luhmann) } label: {
-                                    Label("Luhmann idea", systemImage: "arrow.triangle.branch")
-                                }
-                                Button { newResearchCard(template: nil, mode: .titleOnly) } label: {
-                                    Label("Quick note", systemImage: "square.and.pencil")
-                                }
-                        } label: { Image(systemName: "doc.badge.plus") }
-                        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("New card from a template: Eco reading, Luhmann idea, or quick note")
-                        }
+                        cardTypeControls
                     }
                     .controlSize(.small)
                     if cardMode == "markdown" && showDebate {
@@ -873,15 +866,25 @@ struct ContentView: View {
         .preferredColorScheme(AppearancePreference.colorScheme(for: storedAppearance))
         .onAppear {
             if storedIDMode.isEmpty { storedIDMode = (autoTimestampID ? IDMode.timestamp : IDMode.titleOnly).rawValue }
+            ensureDefaultVault()
             rememberTab(fileURL)
             refreshTypeset()
+            kasterMode = fileURL == nil ? KasterMode.stored(lastMode) : KasterMode.infer(url: fileURL, root: vaultRoot, text: text)
             if !kasterLayoutMigrated { storedWorkspaceArrangement = WorkspaceArrangement.editorLeft.rawValue; showNotesSidebar = true; kasterLayoutMigrated = true }
             if let data = habitDraft.data(using: .utf8), let saved = try? JSONDecoder().decode(HabitTracker.self, from: data) { tracker = saved }
             if let data = todoDraft.data(using: .utf8), let saved = try? JSONDecoder().decode(TodoList.self, from: data) { todo = saved }
             if let data = outlineDraft.data(using: .utf8), let saved = try? JSONDecoder().decode(OutlineDocument.self, from: data) { outline = saved }
         }
         .onChange(of: text) { _ in if cardMode == "markdown" { scheduleAutosave() } }
-        .onChange(of: fileURL) { url in rememberTab(url) }
+        .onChange(of: fileURL) { url in
+            rememberTab(url)
+            if url != nil { newCardFolder = nil }
+            if let url, cardMode == "markdown" {
+                kasterMode = KasterMode.infer(url: url, root: vaultRoot, text: text)
+                storedIDMode = kasterMode.idMode.rawValue
+            }
+            renameTask?.cancel()
+        }
         .onChange(of: typesetRequest) { _ in refreshTypeset() }
         .onChange(of: habitDraft) { _ in if cardMode == "habits" { scheduleAutosave() } }
         .onChange(of: todoDraft) { _ in if cardMode == "todos" { scheduleAutosave() } }
@@ -913,6 +916,13 @@ struct ContentView: View {
             CardLibrary(currentURL: fileURL, allowInsert: cardMode == "markdown", onOpen: { url in loadFile(url) }, onInsert: { link in editor.insert(link); status = "Note link inserted." })
         }
         .sheet(isPresented: $showSettings) { WorkflowSettings() }
+        .sheet(isPresented: $showMigration) {
+            if let root = vaultRoot {
+                MigrationSheet(root: root, artifactFolders: artifactFoldersForMigration(root: root)) { moved in
+                    clearAfterMigration(moved)
+                }
+            }
+        }
         .sheet(isPresented: $showZotero) {
             ZoteroPicker { source in
                 let separator = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : "\n\n"
@@ -929,25 +939,513 @@ struct ContentView: View {
         }
     }
     @ViewBuilder func researchIDRow(labels: Bool) -> some View {
-        Picker("ID style", selection: Binding(get: { idMode }, set: { mode in selectIDMode(mode) })) {
-            ForEach(IDMode.allCases) { mode in Text(mode.rawValue).tag(mode) }
-        }.labelsHidden().fixedSize().accessibilityLabel("ID style").help("Choose the ID style for this card. Confirm before replacing an existing ID.")
-        if idMode != .titleOnly || CardMetadata.parse(text).id != nil {
+        if kasterMode == .zettel || CardMetadata.parse(text).id != nil {
             TextField("Card ID", text: Binding(get: { CardMetadata.parse(text).id ?? "" }, set: { id in
                 if let updated = NoteEditing.setID(id, in: text) { text = updated }
                 else { status = "Could not edit card ID in the existing metadata." }
             })).frame(width: labels ? 120 : 80).help("Edit the card ID; existing files are not automatically renamed.")
                 .accessibilityLabel("Card ID")
         }
-        if idMode == .luhmann {
+        if kasterMode == .zettel {
             Button { relatedFromCurrent(continuation: true) } label: { if labels { Label("Continue", systemImage: "arrow.down.to.line") } else { Image(systemName: "arrow.down.to.line") } }
-                .fixedSize().help("Create the next card in this sequence (e.g. 21/3 → 21/4)")
+                .fixedSize().help("Create the next card in this sequence (21 → 21/1, 21/1 → 21/2)")
         }
-        if idMode != .titleOnly {
+        if kasterMode == .zettel {
             Button { relatedFromCurrent(continuation: false) } label: { if labels { Label("Branch", systemImage: "arrow.triangle.branch") } else { Image(systemName: "arrow.triangle.branch") } }
-                .fixedSize().help("Create a linked branch from the current card (e.g. 21/3 → 21/3a)")
+                .fixedSize().help("Branch from this card (21/1 → 21/1a → 21/1a1)")
         }
     }
+    // MARK: Card types and the vault
+
+    var vaultRoot: URL? {
+        let folder = notesFolder.isEmpty ? saveFolder : notesFolder
+        return folder.isEmpty ? nil : URL(fileURLWithPath: folder, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL
+    }
+
+    func placeCursorAfterTitleMarker() {
+        let ns = text as NSString
+        let marker = ns.range(of: "# ")
+        guard marker.location != NSNotFound else { return }
+        editor.selectWhenReady(range: NSRange(location: NSMaxRange(marker), length: 0), text: text)
+    }
+
+    /// ⌘N: a fresh card of the given type. Zettels get the next top-level Luhmann number.
+    func newKasterCard(_ mode: KasterMode) {
+        var discarded: [String] = []
+        let modes = cardMode == "markdown" ? ["markdown"] : [cardMode, "markdown"]
+        guard confirmReplaceDrafts(modes, discarded: &discarded) else { return }
+        for discardedMode in discarded { clearDiscardedDraft(discardedMode) }
+        cardMode = "markdown"; showDebate = false
+        fileURL = nil; branchSaveFolder = nil; history.detach()
+        editor.discardUndoHistory(); savedMarkdownSnapshot = nil
+        kasterMode = mode; lastMode = mode.rawValue
+        storedIDMode = mode.idMode.rawValue
+        newCardFolder = nil
+        var draft = KasterFrontmatter.ensuringUID(in: mode.template)
+        if mode == .zettel {
+            let existing = (try? BranchIDs.existing(in: scanRoots(for: nil))) ?? []
+            let id = LuhmannIDs.nextTopLevel(existing: existing)
+            if let updated = NoteEditing.addID(id, to: draft) { draft = updated }
+            text = draft
+            status = "New Zettel \(id). Type a title; it saves itself."
+        } else {
+            text = draft
+            status = "New \(mode.title) card. Type a title; it saves itself."
+        }
+        newDraftBaselines["markdown"] = Data(text.utf8)
+        placeCursorAfterTitleMarker()
+    }
+
+    /// Picking a type for the current card. Drafts just switch; saved cards move (with confirmation).
+    func changeMode(_ mode: KasterMode) {
+        guard mode != kasterMode else { return }
+        if fileURL == nil {
+            let untouched = newDraftBaselines["markdown"].map { $0 == Data(text.utf8) } ?? false
+            if untouched {
+                let title = NoteEditing.title(in: text)
+                newKasterCard(mode)
+                if !title.isEmpty { text = NoteEditing.setTitle(title, in: text) }
+                return
+            }
+            kasterMode = mode; lastMode = mode.rawValue; storedIDMode = mode.idMode.rawValue
+            if mode == .zettel, CardMetadata.parse(text).id == nil {
+                let existing = (try? BranchIDs.existing(in: scanRoots(for: nil))) ?? []
+                if let updated = NoteEditing.addID(LuhmannIDs.nextTopLevel(existing: existing), to: text) { text = updated }
+            }
+            return
+        }
+        relocateCurrentCard(to: mode, parentID: nil)
+    }
+
+    /// Moves the open, saved card into another type's folder (Promote), giving a Zettel its ID,
+    /// renaming the file to match and updating every link to it.
+    func relocateCurrentCard(to mode: KasterMode, parentID: String?, confirm: Bool = true) {
+        guard cardMode == "markdown", let root = vaultRoot, let oldURL = fileURL else { return }
+        guard flushExistingDraft() else { return }
+        var newText = KasterFrontmatter.ensuringUID(in: text)
+        var id = CardMetadata.parse(text).id
+        do {
+            if mode == .zettel && id == nil {
+                let existing = try BranchIDs.existing(in: scanRoots(for: oldURL))
+                let assigned = try parentID.map { try LuhmannIDs.branch(of: $0, existing: existing) } ?? LuhmannIDs.nextTopLevel(existing: existing)
+                guard let updated = NoteEditing.addID(assigned, to: newText) else { status = "Could not add an ID to this card's metadata."; return }
+                newText = updated; id = assigned
+            }
+            let title = NoteEditing.title(in: newText)
+            guard let name = KasterVault.filename(mode: mode, id: id, title: title) else { status = "Give the card a title first."; return }
+            let folder = root.appendingPathComponent(mode.folder, isDirectory: true)
+            let target = KasterVault.uniqueURL(in: folder, filename: name, excluding: oldURL)
+            if confirm {
+                let alert = NSAlert()
+                alert.messageText = "Make this a \(mode.title) card?"
+                alert.informativeText = "It moves to \(mode.folder)/\(target.lastPathComponent)" + (mode == .zettel && CardMetadata.parse(text).id == nil ? " with ID \(id ?? "")" : "") + ". Links to it are updated."
+                alert.addButton(withTitle: "Move"); alert.addButton(withTitle: "Cancel")
+                guard alert.runModal() == .alertFirstButtonReturn else { return }
+            }
+            try KasterVault.ensureFolder(folder)
+            autosaveTask?.cancel(); renameTask?.cancel()
+            if newText != text { try Data(newText.utf8).write(to: oldURL, options: .atomic) }
+            if target.standardizedFileURL.path != oldURL.standardizedFileURL.path { try FileManager.default.moveItem(at: oldURL, to: target) }
+            let updatedFiles = try KasterVault.updateLinks(root: root, oldURL: oldURL, newURL: target, skip: [target.resolvingSymlinksInPath().standardizedFileURL.path])
+            adoptMovedCurrentCard(from: oldURL, to: target, content: newText)
+            kasterMode = mode; storedIDMode = mode.idMode.rawValue; lastMode = mode.rawValue
+            status = "Now a \(mode.title) card: \(target.lastPathComponent)" + (updatedFiles.isEmpty ? "." : "; updated links in \(updatedFiles.count) card\(updatedFiles.count == 1 ? "" : "s").")
+        } catch {
+            status = "Could not move the card: \(error.localizedDescription)"
+            let alert = NSAlert(); alert.messageText = "Could not move the card"; alert.informativeText = status; alert.runModal()
+        }
+    }
+
+    func createCardFromLink(_ raw: String) {
+        guard let root = vaultRoot else { linkError("Choose a notes folder so Kaster knows where to create this card."); return }
+        let target = String(raw.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)[0])
+        let withoutFragment = String(target.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)[0])
+        let title = (withoutFragment as NSString).lastPathComponent.trimmingCharacters(in: .whitespaces)
+        guard !title.isEmpty, let name = KasterVault.filename(mode: .quick, id: nil, title: title) else { linkError("This link has no card name."); return }
+        do {
+            let folder = root.appendingPathComponent(KasterMode.quick.folder, isDirectory: true)
+            try KasterVault.ensureFolder(folder)
+            let url = folder.appendingPathComponent(name)
+            guard !FileManager.default.fileExists(atPath: url.path) else { _ = loadFile(url); return }
+            guard flushExistingDraft() else { return }
+            try Data(KasterFrontmatter.ensuringUID(in: "# \(title)\n\n").utf8).write(to: url, options: .withoutOverwriting)
+            sidebarRefreshToken = UUID()
+            if loadFile(url) { status = "Created Quick card \(name) from the link." }
+        } catch { linkError("Could not create the card: \(error.localizedDescription)") }
+    }
+
+    // MARK: Folders
+
+    /// If no notes folder is set (or it no longer exists), create ~/Documents/Kaster with a
+    /// folder for each card type and use it.
+    func ensureDefaultVault() {
+        var isDirectory = ObjCBool(false)
+        let configured = notesFolder.isEmpty ? saveFolder : notesFolder
+        if !configured.isEmpty, FileManager.default.fileExists(atPath: configured, isDirectory: &isDirectory), isDirectory.boolValue { return }
+        guard let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        let vault = documents.appendingPathComponent("Kaster", isDirectory: true)
+        do {
+            for mode in KasterMode.allCases { try KasterVault.ensureFolder(vault.appendingPathComponent(mode.folder, isDirectory: true)) }
+            notesFolder = vault.path
+            if !saveFolder.isEmpty && !FileManager.default.fileExists(atPath: saveFolder) { saveFolder = vault.path }
+            sidebarRefreshToken = UUID()
+            status = configured.isEmpty ? "Created your slip box at ~/Documents/Kaster." : "Your notes folder was missing; Kaster now uses ~/Documents/Kaster."
+        } catch {
+            status = "Could not create ~/Documents/Kaster: \(error.localizedDescription)"
+        }
+    }
+
+    /// Right-click "New Card Here": a card of the last-used type that saves into that folder.
+    func newCardHere(_ path: String) {
+        guard let root = vaultRoot else { return }
+        newKasterCard(KasterMode.stored(lastMode))
+        guard cardMode == "markdown", fileURL == nil else { return }
+        newCardFolder = path.isEmpty ? root : root.appendingPathComponent(path, isDirectory: true)
+        status = "New \(kasterMode.title) card in \(path.isEmpty ? "your notes folder" : path). Type a title; it saves itself."
+    }
+
+    /// Saves a dragged order as `order:` 10, 20, 30… in each card's frontmatter.
+    func saveManualOrder(_ urls: [URL]) {
+        var changed = 0
+        for (index, url) in urls.enumerated() {
+            let value = String((index + 1) * 10)
+            if let current = fileURL, KasterPathList.key(current) == KasterPathList.key(url), cardMode == "markdown" {
+                guard KasterFrontmatter.value("order", in: text) != value, let updated = KasterFrontmatter.setting("order", to: value, in: text) else { continue }
+                text = updated
+                _ = saveMarkdown(automatic: true)
+                changed += 1
+                continue
+            }
+            guard let content = try? String(contentsOf: url, encoding: .utf8), KasterFrontmatter.value("order", in: content) != value,
+                  let updated = KasterFrontmatter.setting("order", to: value, in: content) else { continue }
+            if (try? Data(updated.utf8).write(to: url, options: .atomic)) != nil { changed += 1 }
+        }
+        sidebarRefreshToken = UUID()
+        status = changed == 0 ? "Order unchanged." : "Saved the new card order."
+    }
+
+    func askForName(_ title: String, message: String, initial: String) -> String? {
+        let field = NSTextField(string: initial); field.frame.size.width = 300
+        let alert = NSAlert(); alert.messageText = title; alert.informativeText = message
+        alert.accessoryView = field; alert.addButton(withTitle: "OK"); alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        let name = KasterVault.cleanTitle(field.stringValue)
+        return name.isEmpty ? nil : name
+    }
+
+    func createFolder(inside parentPath: String) {
+        guard let root = vaultRoot else { return }
+        guard let name = askForName("New Folder", message: parentPath.isEmpty ? "Create a folder in your notes folder." : "Create a folder inside \(parentPath).", initial: "") else { return }
+        let url = root.appendingPathComponent(parentPath, isDirectory: true).appendingPathComponent(name, isDirectory: true)
+        guard !FileManager.default.fileExists(atPath: url.path) else { status = "A folder named \(name) already exists there."; return }
+        do { try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true); sidebarRefreshToken = UUID(); status = "Created folder \(name)." }
+        catch { status = "Could not create the folder: \(error.localizedDescription)" }
+    }
+
+    func renameFolder(_ path: String) {
+        guard let root = vaultRoot else { return }
+        let old = root.appendingPathComponent(path, isDirectory: true)
+        guard let name = askForName("Rename Folder", message: "Cards inside keep their names; links that use the folder path are updated.", initial: old.lastPathComponent) else { return }
+        relocateFolder(from: old, to: old.deletingLastPathComponent().appendingPathComponent(name, isDirectory: true))
+    }
+
+    /// Drops in the sidebar: cards use the guarded card move; folders move with their contents.
+    func moveSidebarItem(_ url: URL, to destination: URL) {
+        var isDirectory = ObjCBool(false)
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else { return }
+        if isDirectory.boolValue { relocateFolder(from: url, to: destination.appendingPathComponent(url.lastPathComponent, isDirectory: true)) }
+        else { moveSidebarNote(url, to: destination) }
+    }
+
+    func relocateFolder(from old: URL, to new: URL) {
+        guard let root = vaultRoot else { return }
+        let oldPath = old.resolvingSymlinksInPath().standardizedFileURL.path
+        let newPath = new.standardizedFileURL.path
+        guard oldPath != newPath else { return }
+        guard !(newPath + "/").hasPrefix(oldPath + "/") else { status = "A folder can't move inside itself."; return }
+        guard KasterVault.relativePath(of: old, in: root) != nil, KasterVault.relativePath(of: new, in: root) != nil else { status = "Folders can only move within your notes folder."; return }
+        guard !FileManager.default.fileExists(atPath: newPath) else { status = "\(new.lastPathComponent) already exists there."; return }
+        guard flushExistingDraft() else { return }
+        let cards = KasterVault.markdownFiles(in: old)
+        do {
+            autosaveTask?.cancel(); renameTask?.cancel()
+            try FileManager.default.moveItem(at: old, to: new)
+            func moved(_ url: URL) -> URL? {
+                let path = url.resolvingSymlinksInPath().standardizedFileURL.path
+                guard path.hasPrefix(oldPath + "/") else { return nil }
+                return URL(fileURLWithPath: newPath + path.dropFirst(oldPath.count))
+            }
+            for card in cards { if let destination = moved(card) { try KasterVault.updateLinks(root: root, oldURL: card, newURL: destination) } }
+            if let current = fileURL, let destination = moved(current) { adoptMovedCurrentCard(from: current, to: destination, content: text) }
+            openTabs = openTabs.map { moved($0) ?? $0 }
+            for index in linkedTabs.indices { if let destination = moved(linkedTabs[index].url) { linkedTabs[index].url = destination } }
+            sidebarRefreshToken = UUID()
+            status = "Moved folder to \(KasterVault.relativePath(of: new, in: root) ?? new.lastPathComponent)."
+        } catch { status = "Could not move the folder: \(error.localizedDescription)" }
+    }
+
+    /// Keeps the editor, tabs and history pointed at a card whose file just moved.
+    func adoptMovedCurrentCard(from oldURL: URL, to newURL: URL, content: String) {
+        editor.clearPendingSelection()
+        if content != text { text = content }
+        savedMarkdownSnapshot = content
+        diskSnapshots["markdown"] = Data(content.utf8)
+        fileURL = newURL
+        history.rename(oldURL, to: newURL)
+        for index in linkedTabs.indices where linkedTabs[index].url.standardizedFileURL == oldURL.standardizedFileURL { linkedTabs[index].url = newURL }
+        if let index = openTabs.firstIndex(where: { KasterPathList.key($0) == KasterPathList.key(oldURL) }) { openTabs[index] = newURL }
+        sidebarRefreshToken = UUID()
+    }
+
+    /// Where a new card saves itself: its type's folder, named from its ID and title.
+    /// Artifacts use the folder chosen for that artifact (asked once when `prompting`).
+    func autoTarget(prompting: Bool) -> URL? {
+        var folder: URL?
+        var name: String?
+        if cardMode == "markdown" && !showDebate {
+            guard let root = vaultRoot else { return nil }
+            name = KasterVault.filename(mode: kasterMode, id: CardMetadata.parse(text).id, title: NoteEditing.title(in: text))
+            folder = newCardFolder ?? root.appendingPathComponent(kasterMode.folder, isDirectory: true)
+        } else if cardMode == "habits" || cardMode == "todos" {
+            let artifact: KasterArtifact = cardMode == "habits" ? .habits : .todos
+            folder = artifactFolder(artifact, prompting: prompting)
+            let title = cardMode == "habits" ? tracker.title : todo.title
+            name = KasterVault.filename(mode: .quick, id: nil, title: title)
+        } else {
+            return nil
+        }
+        guard let folder, let name else { return nil }
+        do { try KasterVault.ensureFolder(folder) } catch { status = "Could not create \(folder.lastPathComponent): \(error.localizedDescription)"; return nil }
+        return KasterVault.uniqueURL(in: folder, filename: name)
+    }
+
+    func artifactFolderPath(_ artifact: KasterArtifact) -> String {
+        switch artifact {
+        case .habits: return habitsFolder
+        case .todos: return todosFolder
+        case .debates: return debatesFolder
+        }
+    }
+
+    /// Each artifact type asks once where its files live (suggesting a folder in the vault).
+    func artifactFolder(_ artifact: KasterArtifact, prompting: Bool) -> URL? {
+        let stored = artifactFolderPath(artifact)
+        if !stored.isEmpty { return URL(fileURLWithPath: stored, isDirectory: true) }
+        guard prompting else { return nil }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true
+        panel.prompt = "Use This Folder"
+        panel.message = "Choose where \(artifact.title) files are kept. You can change this later in Settings."
+        if let root = vaultRoot {
+            let suggested = root.appendingPathComponent("Artifacts/\(artifact.folderName)", isDirectory: true)
+            try? KasterVault.ensureFolder(suggested)
+            panel.directoryURL = suggested
+        }
+        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        switch artifact {
+        case .habits: habitsFolder = url.path
+        case .todos: todosFolder = url.path
+        case .debates: debatesFolder = url.path
+        }
+        return url
+    }
+
+    func openArtifact(_ artifact: KasterArtifact) {
+        switch artifact {
+        case .habits: switchMode(to: "habits")
+        case .todos: switchMode(to: "todos")
+        case .debates:
+            switchMode(to: "markdown")
+            if cardMode == "markdown" { showDebate = true }
+            if debatesFolder.isEmpty { _ = artifactFolder(.debates, prompting: true) }
+        }
+    }
+
+    /// After a title change settles, rename the file to match and update links to it.
+    func scheduleTitleRename() {
+        renameTask?.cancel()
+        guard cardMode == "markdown", !showDebate, let root = vaultRoot, let current = fileURL else { return }
+        guard let relative = KasterVault.relativePath(of: current, in: root),
+              let first = relative.split(separator: "/").first,
+              let mode = KasterMode.allCases.first(where: { $0.folder.caseInsensitiveCompare(String(first)) == .orderedSame }) else { return }
+        guard let expected = KasterVault.filename(mode: mode, id: CardMetadata.parse(text).id, title: NoteEditing.title(in: text)),
+              expected != current.lastPathComponent else { return }
+        renameTask = Task { @MainActor in
+            do { try await Task.sleep(nanoseconds: 2_000_000_000) } catch { return }
+            guard !Task.isCancelled, fileURL == current, let saved = savedMarkdownSnapshot, Data(saved.utf8) == Data(text.utf8) else { return }
+            let target = KasterVault.uniqueURL(in: current.deletingLastPathComponent(), filename: expected, excluding: current)
+            guard target.lastPathComponent != current.lastPathComponent else { return }
+            do {
+                try FileManager.default.moveItem(at: current, to: target)
+                let updated = try KasterVault.updateLinks(root: root, oldURL: current, newURL: target, skip: [target.resolvingSymlinksInPath().standardizedFileURL.path])
+                adoptMovedCurrentCard(from: current, to: target, content: text)
+                status = "Renamed to \(target.lastPathComponent)" + (updated.isEmpty ? "." : "; updated links in \(updated.count) card\(updated.count == 1 ? "" : "s").")
+            } catch {
+                status = "Could not rename the file: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    // MARK: Card-type controls
+
+    @ViewBuilder var cardTypeControls: some View {
+        if cardMode == "markdown" && !showDebate {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) { modePicker(labels: true); Spacer(minLength: 4); artifactsMenu }
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) { modeSpecificControls(labels: true); Spacer(minLength: 0) }
+                    HStack(spacing: 6) { modeSpecificControls(labels: false); Spacer(minLength: 0) }
+                }
+            }
+        } else {
+            HStack(spacing: 8) {
+                Label(cardMode == "habits" ? "Habit Tracker" : cardMode == "todos" ? "To-Do List" : cardMode == "outline" ? "Outline" : "Debate",
+                      systemImage: cardMode == "habits" ? "checkmark.circle" : cardMode == "todos" ? "checklist" : cardMode == "outline" ? "list.bullet.indent" : "bubble.left.and.bubble.right")
+                    .font(.system(size: 12, weight: .semibold))
+                Button { backToCards() } label: { Label("Back to Cards", systemImage: "chevron.left") }
+                Spacer(minLength: 4)
+                artifactsMenu
+            }
+        }
+    }
+
+    func backToCards() {
+        if cardMode == "markdown" { showDebate = false } else { switchMode(to: "markdown"); if cardMode == "markdown" { showDebate = false } }
+    }
+
+    func modePicker(labels: Bool) -> some View {
+        Picker("Card type", selection: Binding(get: { kasterMode }, set: { changeMode($0) })) {
+            ForEach(KasterMode.allCases) { mode in
+                (labels ? Label(mode.title, systemImage: mode.systemImage) : Label(mode.title, systemImage: mode.systemImage))
+                    .labelStyle(.titleOnly).tag(mode).help(mode.summary)
+            }
+        }
+        .pickerStyle(.segmented).labelsHidden().fixedSize()
+        .help("Research · Zettel · Quick · Bibliography. ⌘N makes a new card of the last type you used.")
+    }
+
+    @ViewBuilder func modeSpecificControls(labels: Bool) -> some View {
+        switch kasterMode {
+        case .zettel: researchIDRow(labels: labels)
+        case .research: sourceControls(labels: labels)
+        case .quick: promoteMenu
+        case .bibliography:
+            let citing = library.backlinks(for: fileURL).filter { KasterMode.infer(url: $0.url, root: vaultRoot, text: $0.content) == .research }.count
+            Text("Cited by \(citing)").font(.caption).foregroundStyle(.secondary).help("Research cards whose Source links here")
+        }
+    }
+
+    var promoteMenu: some View {
+        Menu {
+            Button { relocateCurrentCard(to: .zettel, parentID: nil) } label: { Label("Promote to Zettel (new top-level)", systemImage: "number") }
+            let zettels = library.snapshot.cards.filter { $0.cardID.map(LuhmannIDs.isLuhmann) ?? false }
+                .sorted { ($0.cardID ?? "").localizedStandardCompare($1.cardID ?? "") == .orderedAscending }
+            if !zettels.isEmpty {
+                Menu("Promote to Zettel, Branching From…") {
+                    ForEach(zettels.prefix(200)) { card in
+                        Button("\(card.cardID ?? "") \(card.title)") { relocateCurrentCard(to: .zettel, parentID: card.cardID) }
+                    }
+                }
+            }
+            Button { relocateCurrentCard(to: .research, parentID: nil) } label: { Label("Promote to Research", systemImage: "books.vertical") }
+        } label: { Label("Promote", systemImage: "arrow.up.forward.circle") }
+            .menuStyle(.borderlessButton).fixedSize().disabled(fileURL == nil)
+            .help(fileURL == nil ? "Type a title first — the card saves itself, then it can be promoted" : "Turn this Quick card into a Zettel or Research card")
+    }
+
+    @ViewBuilder func sourceControls(labels: Bool) -> some View {
+        let source = KasterVault.source(in: text)
+        Menu {
+            let bibliography = library.snapshot.cards.filter { KasterMode.infer(url: $0.url, root: vaultRoot, text: $0.content) == .bibliography }
+                .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+            ForEach(bibliography) { card in
+                Button(card.title) { setSource(link: card.url.deletingPathExtension().lastPathComponent, page: source.page) }
+            }
+            if !bibliography.isEmpty { Divider() }
+            Button("New Bibliography Card…") { createBibliographyCard(page: source.page) }
+            if source.link != nil { Button("Remove Source") { setSource(link: nil, page: source.page) } }
+        } label: {
+            Label(source.link ?? "Source…", systemImage: "text.book.closed").lineLimit(1)
+        }
+        .menuStyle(.borderlessButton).fixedSize()
+        .help("The Bibliography card this quotation comes from")
+        TextField("p.", text: Binding(get: { source.page ?? "" }, set: { setSource(link: KasterVault.source(in: text).link, page: $0) }))
+            .frame(width: 48).help("Page or location").accessibilityLabel("Page")
+    }
+
+    func setSource(link: String?, page: String?) {
+        text = KasterVault.setSource(.init(link: link, page: page), in: text)
+    }
+
+    func createBibliographyCard(page: String?) {
+        guard let root = vaultRoot else { status = "Choose a notes folder first."; return }
+        let titleField = NSTextField(string: ""); titleField.placeholderString = "Title"
+        let authorField = NSTextField(string: ""); authorField.placeholderString = "Author"
+        let yearField = NSTextField(string: ""); yearField.placeholderString = "Year"
+        let stack = NSStackView(views: [titleField, authorField, yearField])
+        stack.orientation = .vertical; stack.spacing = 6
+        stack.frame = NSRect(x: 0, y: 0, width: 300, height: 84)
+        for field in [titleField, authorField, yearField] { field.frame.size.width = 300 }
+        let alert = NSAlert()
+        alert.messageText = "New Bibliography Card"
+        alert.informativeText = "One card per source. Research cards that cite it are listed on it automatically."
+        alert.accessoryView = stack
+        alert.addButton(withTitle: "Create"); alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = titleField
+        guard alert.runModal() == .alertFirstButtonReturn,
+              let name = KasterVault.filename(mode: .bibliography, id: nil, title: titleField.stringValue) else { return }
+        do {
+            let folder = root.appendingPathComponent(KasterMode.bibliography.folder, isDirectory: true)
+            try KasterVault.ensureFolder(folder)
+            let url = KasterVault.uniqueURL(in: folder, filename: name)
+            let body = KasterFrontmatter.ensuringUID(in: KasterVault.bibliographyMarkdown(title: KasterVault.cleanTitle(titleField.stringValue), author: authorField.stringValue, year: yearField.stringValue))
+            try Data(body.utf8).write(to: url, options: .withoutOverwriting)
+            setSource(link: url.deletingPathExtension().lastPathComponent, page: page)
+            sidebarRefreshToken = UUID()
+            status = "Created \(KasterMode.bibliography.folder)/\(url.lastPathComponent)."
+        } catch {
+            status = "Could not create the Bibliography card: \(error.localizedDescription)"
+        }
+    }
+
+    var artifactsMenu: some View {
+        Menu {
+            ForEach(KasterArtifact.allCases) { artifact in
+                Button { openArtifact(artifact) } label: { Label(artifact.title, systemImage: artifact.systemImage) }
+            }
+        } label: { Label("Artifacts", systemImage: "square.grid.2x2") }
+            .menuStyle(.borderlessButton).fixedSize()
+            .help("Habit trackers, to-do lists and debates — kept apart from the slip box")
+    }
+
+    func artifactFoldersForMigration(root: URL) -> [KasterArtifact: URL] {
+        var result: [KasterArtifact: URL] = [:]
+        for artifact in KasterArtifact.allCases {
+            let stored = artifactFolderPath(artifact)
+            result[artifact] = stored.isEmpty ? root.appendingPathComponent("Artifacts/\(artifact.folderName)", isDirectory: true) : URL(fileURLWithPath: stored, isDirectory: true)
+        }
+        return result
+    }
+
+    func clearAfterMigration(_ moved: [URL: URL]) {
+        for artifact in KasterArtifact.allCases where artifactFolderPath(artifact).isEmpty {
+            if let root = vaultRoot, let folder = artifactFoldersForMigration(root: root)[artifact], FileManager.default.fileExists(atPath: folder.path) {
+                switch artifact {
+                case .habits: habitsFolder = folder.path
+                case .todos: todosFolder = folder.path
+                case .debates: debatesFolder = folder.path
+                }
+            }
+        }
+        if let current = fileURL, let destination = moved[current.standardizedFileURL] {
+            if let content = try? String(contentsOf: destination, encoding: .utf8) { adoptMovedCurrentCard(from: current, to: destination, content: content) }
+        }
+        openTabs = openTabs.map { moved[$0.standardizedFileURL] ?? $0 }
+        sidebarRefreshToken = UUID()
+        status = "Organized \(moved.count) cards into Kaster folders."
+    }
+
     // MARK: Typesetting
 
     /// Markdown that Kaster typesets for the current card, or nil for artifacts (habits, to-dos).
@@ -960,7 +1458,7 @@ struct ContentView: View {
     var typesetRequest: TypesetPreview.Request? {
         guard let source = typesetSource, KasterTypesetter.isAvailable(engine) else { return nil }
         return .init(text: source, cardURL: fileURL, portrait: portrait, fontSize: fontSize, dotGrid: dotGrid,
-                     engine: engine, wantsDocument: previewStyle == PreviewStyle.document.rawValue)
+                     engine: engine, wantsDocument: previewStyle == PreviewStyle.document.rawValue, color: PrintColor.stored(printMode))
     }
     func refreshTypeset() { if let request = typesetRequest { typeset.request(request) } }
     var currentPreviewData: Data? {
@@ -978,7 +1476,7 @@ struct ContentView: View {
         guard let source = typesetSource else { return activePDF }
         guard KasterTypesetter.isAvailable(engine) else { return activePDF }
         let card = KasterTypesetter.prepare(source, cardURL: fileURL, links: false)
-        switch KasterTypesetter.render([card], layout: .card(portrait: portrait, fontSize: fontSize, dotGrid: dotGrid), engine: engine) {
+        switch KasterTypesetter.render([card], layout: .card(portrait: portrait, fontSize: fontSize, dotGrid: dotGrid), engine: engine, color: PrintColor.stored(printMode)) {
         case .success(let data): return data
         case .failure(let failure):
             let alert = NSAlert()
@@ -1018,7 +1516,7 @@ struct ContentView: View {
         let layout = TypesetLayout.card(portrait: portrait, fontSize: fontSize, dotGrid: dotGrid)
         var data: Data?
         if KasterTypesetter.isAvailable(engine) {
-            switch KasterTypesetter.render(cards, layout: layout, engine: engine) {
+            switch KasterTypesetter.render(cards, layout: layout, engine: engine, color: PrintColor.stored(printMode)) {
             case .success(let pdf): data = pdf
             case .failure(let failure):
                 let alert = NSAlert()
@@ -1082,7 +1580,7 @@ struct ContentView: View {
         return "Draft"
     }
     var editorTabs: [EditorTab] {
-        var tabs = openTabs.map { url -> EditorTab in
+        var tabs = openTabs.filter { FileManager.default.fileExists(atPath: $0.path) }.map { url -> EditorTab in
             let isCurrent = fileURL.map(KasterPathList.key) == KasterPathList.key(url)
             return EditorTab(url: url, title: isCurrent ? currentCardTitle : (library.card(for: url)?.title ?? url.deletingPathExtension().lastPathComponent))
         }
@@ -1154,7 +1652,10 @@ struct ContentView: View {
                       activeFolder == folderPath else { return }
                 guard Data(currentDraftContents().utf8) == Data(sourceText.utf8) else { status = "Link not opened because the card changed."; return }
                 switch result {
-                case .failure(let message): linkError(message)
+                case .failure(let message):
+                    // A link to a card that doesn't exist yet creates it (as a Quick card).
+                    if case .wiki(let raw) = target, message == "The linked note was not found." { createCardFromLink(raw) }
+                    else { linkError(message) }
                 case .external(let url):
                     if NSWorkspace.shared.open(url) { status = "Opened link." }
                     else { linkError("Could not open this link.") }
@@ -1345,15 +1846,18 @@ struct ContentView: View {
         guard let parentURL = fileURL else { return }
         do {
             let existing = try BranchIDs.existing(in: scanRoots(for: parentURL))
-            let childID = try (continuation ? CardIDs.continuation(from: parentID, existing: existing) : CardIDs.branch(from: parentID, existing: existing))
+            let childID = try (continuation ? LuhmannIDs.continuation(of: parentID, existing: existing) : LuhmannIDs.branch(of: parentID, existing: existing))
             let root = notesFolder.isEmpty ? nil : URL(fileURLWithPath: notesFolder, isDirectory: true).standardizedFileURL.path
             let path = parentURL.deletingPathExtension().standardizedFileURL.path
             let link = root != nil && path.hasPrefix(root! + "/") ? String(path.dropFirst(root!.count + 1)) : parentURL.deletingPathExtension().lastPathComponent
             guard !link.contains(where: { "[]|#^\n\r".contains($0) }) else { status = "The parent filename cannot be used in an Obsidian link."; return }
             let relation = continuation ? "continues this card" : "branches from this card"
             editor.discardUndoHistory()
-            text = CardMetadata.frontmatter(childID) + "# \n\nRelated: [[\(link)]] — \(relation).\n"
+            text = KasterFrontmatter.ensuringUID(in: CardMetadata.frontmatter(childID) + "# \n\nRelated: [[\(link)]] — \(relation).\n")
             branchSaveFolder = parentURL.deletingLastPathComponent(); fileURL = nil; savedMarkdownSnapshot = nil; history.detach()
+            kasterMode = .zettel; storedIDMode = IDMode.luhmann.rawValue
+            newDraftBaselines["markdown"] = Data(text.utf8)
+            placeCursorAfterTitleMarker()
             status = "\(continuation ? "Continuation" : "Branch") \(childID) created. The parent is unchanged."
         } catch { status = "Could not create branch: \(error.localizedDescription)" }
     }
@@ -1519,6 +2023,7 @@ struct ContentView: View {
         if panel.runModal() == .OK, let url = panel.url { saveFolder = url.path; status = "Default save folder: \(url.path)" }
     }
     func newCard() {
+        if cardMode == "markdown" && !showDebate { newKasterCard(KasterMode.stored(lastMode)); return }
         guard confirmReplaceDraft() else { return }
         fileURL = nil; branchSaveFolder = nil; history.detach()
         if cardMode == "habits" { savedHabitSnapshot = nil; setTracker(HabitTracker()); status = "New draft." }
@@ -1573,6 +2078,8 @@ struct ContentView: View {
         var target: URL
         if !saveAs, let currentURL {
             target = currentURL
+        } else if !saveAs, currentURL == nil, let automaticTarget = autoTarget(prompting: !automatic) {
+            target = automaticTarget
         } else {
             guard !automatic else { return false }
             let panel = NSSavePanel()
@@ -1653,6 +2160,7 @@ struct ContentView: View {
                 // No edit: don't normalize an imported file's formatting.
                 fileURL = target; diskSnapshots[cardMode] = before
                 status = automatic ? "Changes saved." : "Saved \(target.lastPathComponent)."
+                scheduleTitleRename()
                 return true
             }
             if before == nil {
@@ -1672,7 +2180,9 @@ struct ContentView: View {
             else { savedMarkdownSnapshot = content }
             if !suppressHistorySave { history.saveCurrent(target) }
             branchSaveFolder = nil; sidebarRefreshToken = UUID()
-            status = automatic ? "Changes saved." : "Saved \(target.lastPathComponent)."
+            status = automatic ? (currentURL == nil ? "Saved as \(target.lastPathComponent)." : "Changes saved.") : "Saved \(target.lastPathComponent)."
+            if currentURL == nil && cardMode == "markdown" { lastMode = kasterMode.rawValue }
+            scheduleTitleRename()
             return true
         } catch { return fail("Could not verify or write the destination: \(error.localizedDescription)") }
     }
@@ -1700,7 +2210,17 @@ struct ContentView: View {
     func scheduleAutosave() {
         autosaveTask?.cancel()
         let mode = cardMode
-        guard let target = fileURL else { return }
+        guard let target = fileURL else {
+            // New cards save themselves into their folder as soon as they have a title.
+            guard autoTarget(prompting: false) != nil else { return }
+            let snapshot = currentDraftContents()
+            autosaveTask = Task { @MainActor in
+                do { try await Task.sleep(nanoseconds: 900_000_000) } catch { return }
+                guard !Task.isCancelled, cardMode == mode, fileURL == nil, Data(currentDraftContents().utf8) == Data(snapshot.utf8) else { return }
+                _ = saveMarkdown(automatic: true)
+            }
+            return
+        }
         let current = mode == "habits" ? tracker.markdown : mode == "todos" ? todo.markdown : mode == "outline" ? outline.markdown : text
         let saved = mode == "habits" ? savedHabitSnapshot : mode == "todos" ? savedTodoSnapshot : mode == "outline" ? savedOutlineSnapshot : savedMarkdownSnapshot
         guard let saved, Data(current.utf8) != Data(saved.utf8) else { return }

@@ -7,9 +7,10 @@ enum SidebarSelection: Hashable {
 }
 
 enum NoteListSort: String, CaseIterable {
-    case modified, id, title
+    case manual, modified, id, title
     var title: String {
         switch self {
+        case .manual: return "Manual (drag to reorder)"
         case .modified: return "Date Modified"
         case .id: return "Card ID"
         case .title: return "Title"
@@ -43,6 +44,10 @@ struct CardSidebar: View {
     let onSettings: () -> Void
     let onPrint: ([URL], String) -> Void
     let lastPrint: Date
+    let onNewFolder: (String) -> Void
+    let onRenameFolder: (String) -> Void
+    let onNewCardIn: (String) -> Void
+    let onReorder: ([URL]) -> Void
 
     @AppStorage("cardifyAppearance") private var appearance = AppearancePreference.system.rawValue
     @AppStorage("kasterFavorites") private var favorites = ""
@@ -102,10 +107,17 @@ struct CardSidebar: View {
                     HStack {
                         Text("Folders").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
                         Spacer()
-                        Button(action: onChooseFolder) { Image(systemName: "folder.badge.plus").font(.system(size: 11)) }
-                            .buttonStyle(.borderless).help("Choose Notes Folder")
+                        Button { onNewFolder(selectedFolderPath ?? "") } label: { Image(systemName: "folder.badge.plus").font(.system(size: 11)) }
+                            .buttonStyle(.borderless).help(selectedFolderPath.map { "New folder inside \(($0 as NSString).lastPathComponent)" } ?? "New folder")
+                            .disabled(folder.isEmpty)
                     }
                     .padding(.horizontal, 10).padding(.top, 16).padding(.bottom, 4)
+                    .contentShape(Rectangle())
+                    .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+                        // Dropping on "Folders" moves a card or folder to the top of the vault.
+                        dropItems(providers, into: "")
+                    }
+                    .help("Drop cards or folders here to move them to the top of your notes folder")
                     if folder.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Choose a folder of Markdown notes, such as an Obsidian vault.")
@@ -184,6 +196,29 @@ struct CardSidebar: View {
         store.folderPaths.contains { ($0 as NSString).deletingLastPathComponent == path }
     }
 
+    private var selectedFolderPath: String? {
+        if case .folder(let path) = selection { return path }
+        return nil
+    }
+
+    private func dropItems(_ providers: [NSItemProvider], into path: String) -> Bool {
+        guard let provider = providers.first else { return false }
+        _ = provider.loadObject(ofClass: NSURL.self) { object, _ in
+            guard let url = object as? URL else { return }
+            DispatchQueue.main.async {
+                guard !folder.isEmpty else { return }
+                let root = URL(fileURLWithPath: folder, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL
+                onMove(url, path.isEmpty ? root : root.appendingPathComponent(path, isDirectory: true))
+            }
+        }
+        return true
+    }
+
+    private func folderURL(_ path: String) -> URL? {
+        guard !folder.isEmpty else { return nil }
+        return URL(fileURLWithPath: folder, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL.appendingPathComponent(path, isDirectory: true)
+    }
+
     private func folderRow(_ row: SidebarFolders.Row) -> some View {
         let selected = selection == .folder(row.path) && !searching
         return HStack(spacing: 4) {
@@ -209,20 +244,15 @@ struct CardSidebar: View {
         .padding(.horizontal, 6).padding(.vertical, 4)
         .padding(.leading, CGFloat(min(row.depth, 12)) * 12)
         .background(selected ? selectionFill : .clear, in: RoundedRectangle(cornerRadius: 7))
-        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
-            guard let provider = providers.first else { return false }
-            _ = provider.loadObject(ofClass: NSURL.self) { object, _ in
-                guard let url = object as? URL else { return }
-                DispatchQueue.main.async {
-                    guard !folder.isEmpty else { return }
-                    let root = URL(fileURLWithPath: folder, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL
-                    onMove(url, root.appendingPathComponent(row.path, isDirectory: true))
-                }
-            }
-            return true
-        }
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in dropItems(providers, into: row.path) }
+        .onDrag { NSItemProvider(object: (folderURL(row.path) ?? URL(fileURLWithPath: "/")) as NSURL) }
         .help(row.path)
         .contextMenu {
+            Button { onNewCardIn(row.path) } label: { Label("New Card Here", systemImage: "square.and.pencil") }
+            Button { onNewFolder(row.path) } label: { Label("New Folder Inside", systemImage: "folder.badge.plus") }
+            Button { onRenameFolder(row.path) } label: { Label("Rename Folder…", systemImage: "pencil") }
+            Button { if let url = folderURL(row.path) { NSWorkspace.shared.activateFileViewerSelecting([url]) } } label: { Label("Show in Finder", systemImage: "folder") }
+            Divider()
             let cards = store.snapshot.cards.filter { $0.path.hasPrefix(row.path + "/") }
                 .sorted { ($0.cardID ?? "~" + $0.title).localizedStandardCompare($1.cardID ?? "~" + $1.title) == .orderedAscending }
             Button { onPrint(cards.map(\.url), "in \(row.name)") } label: { Label("Print All Cards in \(row.name) (\(cards.count))", systemImage: "printer") }
@@ -272,6 +302,16 @@ struct CardSidebar: View {
             }
         }
         switch sort {
+        case .manual:
+            return base.sorted { a, b in
+                // Manual position comes from each card's `order:` frontmatter.
+                switch (KasterFrontmatter.order(in: a.content), KasterFrontmatter.order(in: b.content)) {
+                case let (x?, y?) where x != y: return x < y
+                case (_?, nil): return true
+                case (nil, _?): return false
+                default: return (a.cardID ?? "~" + a.title).localizedStandardCompare(b.cardID ?? "~" + b.title) == .orderedAscending
+                }
+            }
         case .modified:
             return base.sorted { (store.modified[$0.path] ?? .distantPast) > (store.modified[$1.path] ?? .distantPast) }
         case .id:
@@ -328,6 +368,12 @@ struct CardSidebar: View {
                     }
                 }
                 .padding(6)
+                .frame(maxWidth: .infinity, minHeight: 200, alignment: .topLeading)
+                .contentShape(Rectangle())
+                .contextMenu {
+                    Button { onNewCardIn(selectedFolderPath ?? "") } label: { Label("New Card Here", systemImage: "square.and.pencil") }
+                    Button { onNewFolder(selectedFolderPath ?? "") } label: { Label("New Folder Here", systemImage: "folder.badge.plus") }
+                }
             }
             if !selectedPaths.isEmpty {
                 Divider()
@@ -416,8 +462,27 @@ struct CardSidebar: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            // Dropping a card onto another card places it just before that card (manual order).
+            guard let provider = providers.first else { return false }
+            _ = provider.loadObject(ofClass: NSURL.self) { object, _ in
+                guard let dragged = object as? URL else { return }
+                DispatchQueue.main.async { reorder(dragged, before: card) }
+            }
+            return true
+        }
         .contextMenu {
             Button { open(card) } label: { Label("Open", systemImage: "doc.text") }.disabled(current)
+            Button { onNewCardIn((card.path as NSString).deletingLastPathComponent) } label: { Label("New Card Here", systemImage: "square.and.pencil") }
+            Button { onNewFolder((card.path as NSString).deletingLastPathComponent) } label: { Label("New Folder Here", systemImage: "folder.badge.plus") }
+            Menu {
+                Button("Notes Folder (top level)") { if let root = folderURL("") { onMove(card.url, root) } }
+                ForEach(store.folderPaths.sorted { $0.localizedStandardCompare($1) == .orderedAscending }, id: \.self) { path in
+                    Button(path) { if let url = folderURL(path) { onMove(card.url, url) } }
+                        .disabled((card.path as NSString).deletingLastPathComponent == path)
+                }
+            } label: { Label("Move to", systemImage: "folder") }
+            Divider()
             Button { perform(onOpenParallel, for: card) } label: { Label("Open Beside Current Card", systemImage: "rectangle.split.2x1") }
             Divider()
             Button { onPrint([card.url], "") } label: { Label("Print Card", systemImage: "printer") }
@@ -452,6 +517,24 @@ struct CardSidebar: View {
     }
 
     // MARK: Actions
+
+    /// Moves `dragged` just before `target` in the visible list and saves the new manual order.
+    private func reorder(_ dragged: URL, before target: LibraryCard) {
+        let key = KasterPathList.key(dragged)
+        guard key != KasterPathList.key(target.url) else { return }
+        var urls = listedCards.map(\.url)
+        let fromAnotherFolder = !urls.contains { KasterPathList.key($0) == key }
+        if fromAnotherFolder {
+            // A card from elsewhere first moves into this card's folder, then takes its place.
+            onMove(dragged, target.url.deletingLastPathComponent())
+            return
+        }
+        urls.removeAll { KasterPathList.key($0) == key }
+        let index = urls.firstIndex { KasterPathList.key($0) == KasterPathList.key(target.url) } ?? urls.count
+        urls.insert(dragged, at: index)
+        storedSort = NoteListSort.manual.rawValue
+        onReorder(urls)
+    }
 
     private func startSearch() {
         searching = true

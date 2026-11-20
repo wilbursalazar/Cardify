@@ -104,6 +104,11 @@ final class LinkCompletionTextView: NSTextView {
     // UTF-16 offsets and the text view's undo manager are never replaced.
     private var wantsHiddenFrontmatter = false
     private var hiddenFrontmatterRange: NSRange?
+    // Live styling: Markdown symbols (with the font they show in) and the lines currently revealed.
+    var kasterMarkers: [(range: NSRange, font: NSFont)] = []
+    var kasterRevealed: NSRange?
+    var kasterLive = false
+    var kasterStyledText = ""
     private var originalFrontmatterAttributes: [(NSRange, [NSAttributedString.Key: Any])] = []
 
     static func frontmatterRange(in text: String) -> NSRange? { frontmatterInfo(in: text)?.range }
@@ -146,7 +151,7 @@ final class LinkCompletionTextView: NSTextView {
                 let key = value.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespaces).lowercased()
                 let raw = value.substring(with: match.range(at: 2)).trimmingCharacters(in: .whitespaces)
                 hasMapping = true
-                hasCardifyMarker = hasCardifyMarker || key == "card_id" || key == "cardify_index"
+                hasCardifyMarker = hasCardifyMarker || key == "card_id" || key == "cardify_index" || key == "uid" || key == "order"
                 allowsNested = raw.isEmpty || raw.hasPrefix("#") || raw == "|" || raw == "|-" || raw == "|+" || raw == ">" || raw == ">-" || raw == ">+"
             }
             at = NSMaxRange(line)
@@ -198,7 +203,7 @@ final class LinkCompletionTextView: NSTextView {
         setSelectedRange(NSRange(location: start, length: (string as NSString).length - start))
     }
 
-    enum SelectionFormat { case bold, italic, heading, bullet, task, link }
+    enum SelectionFormat { case bold, italic, heading, bullet, task, link, highlight, code, math }
 
     // One replacement keeps each toolbar action as an ordinary text edit, so
     // AppKit's undo and UTF-16 selections continue to work as they do while typing.
@@ -213,8 +218,16 @@ final class LinkCompletionTextView: NSTextView {
         var replacement = ""
         var nextSelection = range
         switch format {
-        case .bold, .italic, .link:
-            let prefix = format == .bold ? "**" : format == .italic ? "*" : "[["
+        case .bold, .italic, .link, .highlight, .code, .math:
+            let prefix: String
+            switch format {
+            case .bold: prefix = "**"
+            case .italic: prefix = "*"
+            case .highlight: prefix = "=="
+            case .code: prefix = "`"
+            case .math: prefix = "$"
+            default: prefix = "[["
+            }
             let suffix = format == .link ? "]]" : prefix
             if format == .link && selected.contains(where: { "[]\r\n".contains($0) }) { return false }
             let before = (prefix as NSString).length, after = (suffix as NSString).length
@@ -773,7 +786,7 @@ struct MarkdownEditor: View {
                     GeometryReader { geometry in
                         if let anchor = selectionToolbar.anchor {
                             selectionToolbarView
-                                .position(x: min(max(anchor.x, 108), max(108, geometry.size.width - 108)),
+                                .position(x: min(max(anchor.x, 142), max(142, geometry.size.width - 142)),
                                           y: anchor.y >= 38 ? anchor.y - 19 : min(geometry.size.height - 18, anchor.y + 38))
                         }
                     }
@@ -808,15 +821,19 @@ struct MarkdownEditor: View {
     }
 
     private var selectionToolbarView: some View {
-        HStack(spacing: 0) {
-            SelectionToolbarButton(title: "B", font: .boldSystemFont(ofSize: 12), help: "Bold") { selectionToolbar.apply(.bold) }.frame(width: 36, height: 28)
-            SelectionToolbarButton(title: "I", font: NSFontManager.shared.convert(.systemFont(ofSize: 12), toHaveTrait: .italicFontMask), help: "Italic") { selectionToolbar.apply(.italic) }.frame(width: 36, height: 28)
-            SelectionToolbarButton(title: "H1", font: .boldSystemFont(ofSize: 11), help: selectionToolbar.canHeading ? "Heading" : "Remove list formatting first", enabled: selectionToolbar.canHeading) { selectionToolbar.apply(.heading) }.frame(width: 36, height: 28)
-            SelectionToolbarButton(title: "", symbol: "list.bullet", help: "Bullet list") { selectionToolbar.apply(.bullet) }.frame(width: 36, height: 28)
-            SelectionToolbarButton(title: "", symbol: "checklist", help: "Task list") { selectionToolbar.apply(.task) }.frame(width: 36, height: 28)
-            SelectionToolbarButton(title: "", symbol: "link", help: "Wrap selection in a note link", enabled: selectionToolbar.canLink) { selectionToolbar.apply(.link) }.frame(width: 36, height: 28)
+        let mathHelp = (UserDefaults.standard.string(forKey: "kasterTypesetEngine") ?? "typst") == "latex"
+            ? "Math — LaTeX syntax, e.g. \\frac{a}{b}" : "Math — Typst syntax, e.g. frac(a, b) (LaTeX commands also work)"
+        return HStack(spacing: 0) {
+            SelectionToolbarButton(title: "B", font: .boldSystemFont(ofSize: 12), help: "Bold") { selectionToolbar.apply(.bold) }.frame(width: 34, height: 28)
+            SelectionToolbarButton(title: "I", font: NSFontManager.shared.convert(.systemFont(ofSize: 12), toHaveTrait: .italicFontMask), help: "Italic") { selectionToolbar.apply(.italic) }.frame(width: 34, height: 28)
+            SelectionToolbarButton(title: "", symbol: "highlighter", help: "Highlight (==text==)") { selectionToolbar.apply(.highlight) }.frame(width: 34, height: 28)
+            SelectionToolbarButton(title: "H1", font: .boldSystemFont(ofSize: 11), help: selectionToolbar.canHeading ? "Heading" : "Remove list formatting first", enabled: selectionToolbar.canHeading) { selectionToolbar.apply(.heading) }.frame(width: 34, height: 28)
+            SelectionToolbarButton(title: "", symbol: "list.bullet", help: "Bullet list") { selectionToolbar.apply(.bullet) }.frame(width: 34, height: 28)
+            SelectionToolbarButton(title: "", symbol: "chevron.left.forwardslash.chevron.right", help: "Inline code") { selectionToolbar.apply(.code) }.frame(width: 34, height: 28)
+            SelectionToolbarButton(title: "", symbol: "link", help: "Wrap selection in a [[card link]]", enabled: selectionToolbar.canLink) { selectionToolbar.apply(.link) }.frame(width: 34, height: 28)
+            SelectionToolbarButton(title: "", symbol: "function", help: mathHelp) { selectionToolbar.apply(.math) }.frame(width: 34, height: 28)
         }
-        .frame(width: 216, height: 32)
+        .frame(width: 280, height: 32)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 7))
         .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.secondary.opacity(0.25)))
         .shadow(color: .black.opacity(0.18), radius: 5, y: 2)
@@ -913,6 +930,7 @@ private struct MarkdownTextView: NSViewRepresentable {
         }
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let view = notification.object as? NSTextView else { return }
+            (view as? LinkCompletionTextView)?.updateMarkerVisibility()
             DispatchQueue.main.async { [weak self, weak view] in if let view { self?.parent.completion.refresh(in: view); self?.updateToolbar(view) } }
         }
         func textDidEndEditing(_ notification: Notification) {
@@ -924,32 +942,89 @@ private struct MarkdownTextView: NSViewRepresentable {
 
 // MARK: Kaster Live / Source styling
 // Styling only changes display attributes; the Markdown string, undo history,
-// and saved file are untouched. Hidden frontmatter keeps its own attributes.
+// selection and saved file are untouched. Hidden frontmatter keeps its own attributes.
+// In Live mode, Markdown symbols are hidden except on the line(s) holding the cursor,
+// and every visible character keeps its line's font, so the cursor never changes size.
 extension LinkCompletionTextView {
     static let liveBodyFont = NSFont.systemFont(ofSize: 15)
     static let sourceFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+    private static let hiddenFont = NSFont.systemFont(ofSize: 0.01)
+    private static let purple = NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        ? NSColor(red: 0.71, green: 0.56, blue: 0.94, alpha: 1) : NSColor(red: 0.42, green: 0.25, blue: 0.76, alpha: 1) }
+
+    private func baseParagraph(live: Bool) -> NSParagraphStyle {
+        let style = NSMutableParagraphStyle()
+        style.lineSpacing = live ? 4 : 3
+        style.paragraphSpacing = live ? 2 : 0
+        return style
+    }
+
+    /// The paragraphs touched by the selection; their symbols stay visible.
+    private func cursorLines() -> NSRange {
+        let ns = string as NSString
+        let selection = selectedRange()
+        guard selection.location != NSNotFound, selection.location <= ns.length else { return NSRange(location: 0, length: 0) }
+        return ns.paragraphRange(for: NSRange(location: selection.location, length: min(selection.length, ns.length - selection.location)))
+    }
+
+    private func touches(_ marker: NSRange, _ lines: NSRange?) -> Bool {
+        guard let lines else { return false }
+        return NSIntersectionRange(marker, lines).length > 0 || (marker.location >= lines.location && marker.location <= NSMaxRange(lines))
+    }
+
+    private func applyMarker(_ marker: (range: NSRange, font: NSFont), visible: Bool, to storage: NSTextStorage) {
+        guard NSMaxRange(marker.range) <= storage.length else { return }
+        if visible {
+            storage.addAttributes([.font: marker.font, .foregroundColor: NSColor.tertiaryLabelColor], range: marker.range)
+        } else {
+            storage.addAttributes([.font: Self.hiddenFont, .foregroundColor: NSColor.clear], range: marker.range)
+        }
+    }
+
+    /// Reveals symbols on the cursor's line and hides them on the line it left.
+    func updateMarkerVisibility() {
+        // Symbol positions belong to the text they were measured in; never apply them to new text.
+        guard kasterLive, let storage = textStorage, !hasMarkedText(), string == kasterStyledText else { return }
+        let lines = cursorLines()
+        guard lines != kasterRevealed else { fixTypingAttributes(); return }
+        let previous = kasterRevealed
+        kasterRevealed = lines
+        storage.beginEditing()
+        for marker in kasterMarkers where touches(marker.range, previous) || touches(marker.range, lines) {
+            applyMarker(marker, visible: touches(marker.range, lines), to: storage)
+        }
+        storage.endEditing()
+        fixTypingAttributes()
+    }
+
+    /// On an empty line, type at body size (not the heading size of the line above).
+    private func fixTypingAttributes() {
+        let ns = string as NSString
+        let lines = cursorLines()
+        let content = ns.substring(with: lines).trimmingCharacters(in: .newlines)
+        if content.isEmpty {
+            typingAttributes = [.font: kasterLive ? Self.liveBodyFont : Self.sourceFont, .foregroundColor: NSColor.textColor, .paragraphStyle: baseParagraph(live: kasterLive)]
+        }
+    }
 
     func applyKasterStyle(live: Bool) {
         guard let storage = textStorage, !hasMarkedText() else { return }
+        kasterLive = live
         let ns = string as NSString
         let full = NSRange(location: 0, length: ns.length)
         let skip = hiddenFrontmatterRange
-        let baseParagraph = NSMutableParagraphStyle()
-        baseParagraph.lineSpacing = live ? 4 : 3
-        baseParagraph.paragraphSpacing = live ? 2 : 0
         let base: [NSAttributedString.Key: Any] = [
             .font: live ? Self.liveBodyFont : Self.sourceFont,
             .foregroundColor: NSColor.textColor,
-            .paragraphStyle: baseParagraph,
+            .paragraphStyle: baseParagraph(live: live),
         ]
-        let selection = selectedRange()
+        var markers: [(range: NSRange, font: NSFont)] = []
         storage.beginEditing()
         func set(_ attrs: [NSAttributedString.Key: Any], _ range: NSRange) {
             guard range.length > 0, NSMaxRange(range) <= ns.length else { return }
             if let skip, NSIntersectionRange(skip, range).length > 0 { return }
             storage.addAttributes(attrs, range: range)
         }
-        // Reset everything except a hidden metadata block.
         if let skip {
             if skip.location > 0 { storage.setAttributes(base, range: NSRange(location: 0, length: skip.location)) }
             let after = NSMaxRange(skip)
@@ -957,16 +1032,19 @@ extension LinkCompletionTextView {
         } else {
             storage.setAttributes(base, range: full)
         }
-        let purple = NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            ? NSColor(red: 0.71, green: 0.56, blue: 0.94, alpha: 1) : NSColor(red: 0.42, green: 0.25, blue: 0.76, alpha: 1) }
-        let dim = NSColor.tertiaryLabelColor
-        func regex(_ pattern: String, _ options: NSRegularExpression.Options = [.anchorsMatchLines]) -> NSRegularExpression? {
-            try? NSRegularExpression(pattern: pattern, options: options)
-        }
         func each(_ pattern: String, _ body: (NSTextCheckingResult) -> Void) {
-            regex(pattern)?.enumerateMatches(in: string, range: full) { match, _, _ in if let match { body(match) } }
+            (try? NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines]))?.enumerateMatches(in: string, range: full) { match, _, _ in if let match { body(match) } }
         }
-        // Wiki links are useful to see in both modes.
+        func font(at location: Int) -> NSFont {
+            guard location < storage.length else { return base[.font] as! NSFont }
+            return (storage.attribute(.font, at: location, effectiveRange: nil) as? NSFont) ?? (base[.font] as! NSFont)
+        }
+        func marker(_ range: NSRange, fontFrom location: Int) {
+            guard range.length > 0, NSMaxRange(range) <= ns.length else { return }
+            if let skip, NSIntersectionRange(skip, range).length > 0 { return }
+            markers.append((range, font(at: min(max(location, 0), max(ns.length - 1, 0)))))
+        }
+        let purple = Self.purple
         for link in CardLinkParser.links(in: string) {
             set([.foregroundColor: purple], link.range)
             if case .wiki = link.target { set([.underlineStyle: NSUnderlineStyle.single.rawValue, .underlineColor: purple.withAlphaComponent(0.4)], link.labelRange) }
@@ -977,10 +1055,10 @@ extension LinkCompletionTextView {
         guard live else {
             each("^(#{1,6} )") { set([.foregroundColor: purple], $0.range(at: 1)) }
             storage.endEditing()
-            if NSMaxRange(selection) <= ns.length { setSelectedRange(selection) }
-            typingAttributes = base
+            kasterMarkers = []; kasterRevealed = nil; kasterStyledText = ""
             return
         }
+        // Headings: the whole line, symbols included, uses the heading's size.
         let sizes: [CGFloat] = [26, 21, 18, 16, 15, 15]
         each("^(#{1,6}) +(.*)$") { match in
             let level = match.range(at: 1).length
@@ -988,21 +1066,20 @@ extension LinkCompletionTextView {
             paragraph.paragraphSpacingBefore = level == 1 ? 2 : 6
             paragraph.paragraphSpacing = 2
             set([.font: NSFont.systemFont(ofSize: sizes[level - 1], weight: level == 1 ? .bold : .semibold), .paragraphStyle: paragraph], match.range)
-            set([.foregroundColor: dim, .font: NSFont.systemFont(ofSize: max(11, sizes[level - 1] * 0.6), weight: .regular)],
-                NSRange(location: match.range(at: 1).location, length: match.range(at: 2).location - match.range(at: 1).location))
+            marker(NSRange(location: match.range(at: 1).location, length: match.range(at: 2).location - match.range(at: 1).location), fontFrom: match.range(at: 2).location)
         }
-        func inline(_ pattern: String, marker: Int, trait: NSFontTraitMask?, extra: [NSAttributedString.Key: Any] = [:]) {
+        func inline(_ pattern: String, marker size: Int, trait: NSFontTraitMask?, extra: [NSAttributedString.Key: Any] = [:]) {
             each(pattern) { match in
                 let inner = match.range(at: 1)
                 if let trait {
                     storage.enumerateAttribute(.font, in: inner) { value, range, _ in
-                        let font = (value as? NSFont) ?? Self.liveBodyFont
-                        set([.font: NSFontManager.shared.convert(font, toHaveTrait: trait)], range)
+                        let current = (value as? NSFont) ?? Self.liveBodyFont
+                        set([.font: NSFontManager.shared.convert(current, toHaveTrait: trait)], range)
                     }
                 }
                 set(extra, inner)
-                set([.foregroundColor: dim], NSRange(location: match.range.location, length: marker))
-                set([.foregroundColor: dim], NSRange(location: NSMaxRange(match.range) - marker, length: marker))
+                marker(NSRange(location: match.range.location, length: size), fontFrom: inner.location)
+                marker(NSRange(location: NSMaxRange(match.range) - size, length: size), fontFrom: inner.location)
             }
         }
         inline("\\*\\*(?=\\S)(.+?)(?<=\\S)\\*\\*", marker: 2, trait: .boldFontMask)
@@ -1010,30 +1087,37 @@ extension LinkCompletionTextView {
         inline("(?<![*\\w])\\*(?=[^*\\s])([^*\\n]+?)(?<=\\S)\\*(?![*\\w])", marker: 1, trait: .italicFontMask)
         inline("(?<![_\\w])_(?=[^_\\s])([^_\\n]+?)(?<=\\S)_(?![_\\w])", marker: 1, trait: .italicFontMask)
         inline("~~(?=\\S)(.+?)(?<=\\S)~~", marker: 2, trait: nil, extra: [.strikethroughStyle: NSUnderlineStyle.single.rawValue])
+        inline("==(?=\\S)([^=\\n]+?)(?<=\\S)==", marker: 2, trait: nil, extra: [.backgroundColor: NSColor.systemYellow.withAlphaComponent(0.3)])
         inline("<u>(.+?)</u>", marker: 3, trait: nil, extra: [.underlineStyle: NSUnderlineStyle.single.rawValue])
-        each("`([^`\\n]+)`") { match in
-            set([.font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular), .backgroundColor: NSColor.quaternaryLabelColor.withAlphaComponent(0.25)], match.range)
+        each("(?<!`)`([^`\\n]+)`(?!`)") { match in
+            set([.font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular), .backgroundColor: NSColor.quaternaryLabelColor.withAlphaComponent(0.25)], match.range(at: 1))
+            marker(NSRange(location: match.range.location, length: 1), fontFrom: match.range(at: 1).location)
+            marker(NSRange(location: NSMaxRange(match.range) - 1, length: 1), fontFrom: match.range(at: 1).location)
+        }
+        // Wiki links: hide the brackets (and the target, when an alias is shown).
+        each("\\[\\[([^\\]|\\n]*\\|)?([^\\]\\n]+)\\]\\]") { match in
+            let open = NSRange(location: match.range.location, length: 2 + (match.range(at: 1).location == NSNotFound ? 0 : match.range(at: 1).length))
+            marker(open, fontFrom: match.range(at: 2).location)
+            marker(NSRange(location: NSMaxRange(match.range) - 2, length: 2), fontFrom: match.range(at: 2).location)
         }
         each("^(\\s*)([-*+]|\\d+[.)])( \\[[ xX]\\])? ") { match in set([.foregroundColor: purple], match.range(at: 2)); set([.foregroundColor: purple], match.range(at: 3)) }
         each("^> ?.*$") { match in
             set([.foregroundColor: NSColor.secondaryLabelColor, .font: NSFontManager.shared.convert(Self.liveBodyFont, toHaveTrait: .italicFontMask)], match.range)
         }
-        each("^\\s*\\|.*\\|\\s*$") { match in
-            set([.font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)], match.range)
-        }
-        each("^\\s*\\|?[\\s:|-]*-{3,}[\\s:|-]*$") { set([.foregroundColor: dim], $0.range) }
-        each("\\|") { set([.foregroundColor: dim], $0.range) }
+        each("^\\s*\\|.*\\|\\s*$") { set([.font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)], $0.range) }
+        each("^\\s*\\|?[\\s:|-]*-{3,}[\\s:|-]*$") { set([.foregroundColor: NSColor.tertiaryLabelColor], $0.range) }
         each("(?<![\\w#&])#[A-Za-z][\\w/-]*") { set([.foregroundColor: purple], $0.range) }
         // Math is typeset in the preview and on the card; in the editor it reads as code.
-        let mathColor = purple.withAlphaComponent(0.85)
         each("\\$\\$[\\s\\S]+?\\$\\$|(?<![\\\\$])\\$(?=\\S)[^$\\n]+?(?<=\\S)\\$(?!\\d)") { match in
-            set([.font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular), .foregroundColor: mathColor], match.range)
+            set([.font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular), .foregroundColor: purple.withAlphaComponent(0.85)], match.range)
         }
-        // Blank lines separate paragraphs; keep them short so the page reads like a document.
-        let blank = NSMutableParagraphStyle(); blank.lineSpacing = 0; blank.paragraphSpacing = 0
-        each("^\\n") { set([.font: NSFont.systemFont(ofSize: 7), .paragraphStyle: blank], $0.range) }
+        // Symbols last, so each keeps the font of the text it wraps.
+        let lines = cursorLines()
+        kasterMarkers = markers
+        kasterRevealed = lines
+        kasterStyledText = string
+        for item in markers { applyMarker(item, visible: touches(item.range, lines), to: storage) }
         storage.endEditing()
-        if NSMaxRange(selection) <= ns.length { setSelectedRange(selection) }
-        typingAttributes = base
+        fixTypingAttributes()
     }
 }
