@@ -1011,8 +1011,14 @@ private struct MarkdownTextView: NSViewRepresentable {
             DispatchQueue.main.async { [weak self, weak view] in if let view { self?.parent.completion.refresh(in: view); self?.updateToolbar(view) } }
         }
         func textViewDidChangeSelection(_ notification: Notification) {
-            guard let view = notification.object as? NSTextView else { return }
-            DispatchQueue.main.async { [weak self, weak view] in if let view { view.refreshMarkdownPresentation(); self?.parent.completion.refresh(in: view); self?.updateToolbar(view) } }
+            guard let view = notification.object as? LinkCompletionTextView else { return }
+            DispatchQueue.main.async { [weak self, weak view] in
+                if let view {
+                    view.refreshMarkdownPresentation()
+                    self?.parent.completion.refresh(in: view)
+                    self?.updateToolbar(view)
+                }
+            }
         }
         func textDidEndEditing(_ notification: Notification) {
             guard let view = notification.object as? NSTextView else { return }
