@@ -16,6 +16,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+      - name: Typecheck Kaster source
+        run: swiftc -target arm64-apple-macos13.0 -parse-as-library -typecheck Sources/*.swift
       - name: Run regression tests
         run: bash scripts/test.sh
       - name: Build universal Kaster application
