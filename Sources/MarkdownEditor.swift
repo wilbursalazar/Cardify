@@ -743,6 +743,7 @@ struct MarkdownEditor: View {
     @Binding var text: String
     let editor: EditorState
     let onFollowLink: (CardLinkTarget) -> Void
+    var live: Bool = true
     @StateObject private var completion = LinkCompletionState()
     @StateObject private var selectionToolbar = SelectionToolbarState()
     @AppStorage("hideEditorFrontmatter") private var hideFrontmatter = true
@@ -767,7 +768,7 @@ struct MarkdownEditor: View {
                 }.padding(.horizontal, 12).padding(.vertical, 6)
                 Divider()
             }
-            MarkdownTextView(text: $text, editor: editor, completion: completion, selectionToolbar: selectionToolbar, hideFrontmatter: isHidden, onFollowLink: onFollowLink)
+            MarkdownTextView(text: $text, editor: editor, completion: completion, selectionToolbar: selectionToolbar, hideFrontmatter: isHidden, live: live, onFollowLink: onFollowLink)
                 .overlay(alignment: .topLeading) {
                     GeometryReader { geometry in
                         if let anchor = selectionToolbar.anchor {
@@ -828,11 +829,12 @@ private struct MarkdownTextView: NSViewRepresentable {
     @ObservedObject var completion: LinkCompletionState
     @ObservedObject var selectionToolbar: SelectionToolbarState
     let hideFrontmatter: Bool
+    let live: Bool
     let onFollowLink: (CardLinkTarget) -> Void
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSScrollView()
-        scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.borderType = .noBorder
+        scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.borderType = .noBorder; scroll.drawsBackground = false
         scroll.contentView.postsBoundsChangedNotifications = true
         context.coordinator.scroll = scroll
         NotificationCenter.default.addObserver(context.coordinator, selector: #selector(Coordinator.scrolled), name: NSView.boundsDidChangeNotification, object: scroll.contentView)
@@ -843,9 +845,9 @@ private struct MarkdownTextView: NSViewRepresentable {
         view.isVerticallyResizable = true; view.isHorizontallyResizable = false; view.autoresizingMask = [.width]
         view.textContainer?.containerSize = NSSize(width: contentSize.width, height: CGFloat.greatestFiniteMagnitude)
         view.textContainer?.widthTracksTextView = true
-        view.font = .systemFont(ofSize: 14, weight: .regular)
+        view.font = .systemFont(ofSize: 14, weight: .regular); view.drawsBackground = false
         view.isRichText = false; view.isAutomaticQuoteSubstitutionEnabled = false; view.isAutomaticDashSubstitutionEnabled = false; view.isAutomaticTextReplacementEnabled = false
-        view.allowsUndo = true; view.delegate = context.coordinator; view.string = text; view.textContainerInset = NSSize(width: 16, height: 16)
+        view.allowsUndo = true; view.delegate = context.coordinator; view.string = text; view.textContainerInset = NSSize(width: 28, height: 22)
         view.registerForDraggedTypes([LinkCompletionTextView.bulletDragType])
         view.handleCompletionKey = { [weak coordinator = context.coordinator] event in coordinator?.parent.completion.handleKey(event) ?? false }
         view.handleToolbarKey = { [weak coordinator = context.coordinator] event in
@@ -855,6 +857,7 @@ private struct MarkdownTextView: NSViewRepresentable {
         view.followLink = { [weak coordinator = context.coordinator] target in coordinator?.parent.onFollowLink(target) }
         scroll.documentView = view; editor.view = view; completion.view = view
         view.setFrontmatterHidden(hideFrontmatter)
+        context.coordinator.restyle(view, live: live)
         editor.applyPendingSelection()
         return scroll
     }
@@ -863,6 +866,10 @@ private struct MarkdownTextView: NSViewRepresentable {
         guard let view = scroll.documentView as? LinkCompletionTextView else { return }
         if view.string != text { selectionToolbar.clear(); view.replaceEditorText(text); completion.close() }
         view.setFrontmatterHidden(hideFrontmatter)
+        if live != context.coordinator.styledLive || view.string != context.coordinator.styledText || hideFrontmatter != context.coordinator.styledHidden {
+            context.coordinator.styledHidden = hideFrontmatter
+            context.coordinator.restyle(view, live: live)
+        }
         editor.view = view; completion.view = view
         editor.applyPendingSelection()
     }
@@ -881,7 +888,14 @@ private struct MarkdownTextView: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: MarkdownTextView
         weak var scroll: NSScrollView?
+        var styledLive: Bool?
+        var styledText: String?
+        var styledHidden: Bool?
         init(_ parent: MarkdownTextView) { self.parent = parent }
+        func restyle(_ view: LinkCompletionTextView, live: Bool) {
+            view.applyKasterStyle(live: live)
+            styledLive = live; styledText = view.string
+        }
         @objc func scrolled() {
             guard let scroll, let view = scroll.documentView as? LinkCompletionTextView else { return }
             parent.selectionToolbar.refresh(view, in: scroll)
@@ -893,6 +907,7 @@ private struct MarkdownTextView: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard let view = notification.object as? NSTextView else { return }
             parent.editor.editorTextDidChange(view)
+            if let view = view as? LinkCompletionTextView { restyle(view, live: parent.live) }
             parent.text = view.string
             DispatchQueue.main.async { [weak self, weak view] in if let view { self?.parent.completion.refresh(in: view); self?.updateToolbar(view) } }
         }
@@ -904,5 +919,116 @@ private struct MarkdownTextView: NSViewRepresentable {
             guard let view = notification.object as? NSTextView else { return }
             DispatchQueue.main.async { [weak self, weak view] in if let view { self?.updateToolbar(view) } }
         }
+    }
+}
+
+// MARK: Kaster Live / Source styling
+// Styling only changes display attributes; the Markdown string, undo history,
+// and saved file are untouched. Hidden frontmatter keeps its own attributes.
+extension LinkCompletionTextView {
+    static let liveBodyFont = NSFont.systemFont(ofSize: 15)
+    static let sourceFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+
+    func applyKasterStyle(live: Bool) {
+        guard let storage = textStorage, !hasMarkedText() else { return }
+        let ns = string as NSString
+        let full = NSRange(location: 0, length: ns.length)
+        let skip = hiddenFrontmatterRange
+        let baseParagraph = NSMutableParagraphStyle()
+        baseParagraph.lineSpacing = live ? 4 : 3
+        baseParagraph.paragraphSpacing = live ? 2 : 0
+        let base: [NSAttributedString.Key: Any] = [
+            .font: live ? Self.liveBodyFont : Self.sourceFont,
+            .foregroundColor: NSColor.textColor,
+            .paragraphStyle: baseParagraph,
+        ]
+        let selection = selectedRange()
+        storage.beginEditing()
+        func set(_ attrs: [NSAttributedString.Key: Any], _ range: NSRange) {
+            guard range.length > 0, NSMaxRange(range) <= ns.length else { return }
+            if let skip, NSIntersectionRange(skip, range).length > 0 { return }
+            storage.addAttributes(attrs, range: range)
+        }
+        // Reset everything except a hidden metadata block.
+        if let skip {
+            if skip.location > 0 { storage.setAttributes(base, range: NSRange(location: 0, length: skip.location)) }
+            let after = NSMaxRange(skip)
+            if after < ns.length { storage.setAttributes(base, range: NSRange(location: after, length: ns.length - after)) }
+        } else {
+            storage.setAttributes(base, range: full)
+        }
+        let purple = NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(red: 0.71, green: 0.56, blue: 0.94, alpha: 1) : NSColor(red: 0.42, green: 0.25, blue: 0.76, alpha: 1) }
+        let dim = NSColor.tertiaryLabelColor
+        func regex(_ pattern: String, _ options: NSRegularExpression.Options = [.anchorsMatchLines]) -> NSRegularExpression? {
+            try? NSRegularExpression(pattern: pattern, options: options)
+        }
+        func each(_ pattern: String, _ body: (NSTextCheckingResult) -> Void) {
+            regex(pattern)?.enumerateMatches(in: string, range: full) { match, _, _ in if let match { body(match) } }
+        }
+        // Wiki links are useful to see in both modes.
+        for link in CardLinkParser.links(in: string) {
+            set([.foregroundColor: purple], link.range)
+            if case .wiki = link.target { set([.underlineStyle: NSUnderlineStyle.single.rawValue, .underlineColor: purple.withAlphaComponent(0.4)], link.labelRange) }
+        }
+        if let front = Self.frontmatterRange(in: string), skip == nil {
+            set([.foregroundColor: NSColor.secondaryLabelColor, .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)], front)
+        }
+        guard live else {
+            each("^(#{1,6} )") { set([.foregroundColor: purple], $0.range(at: 1)) }
+            storage.endEditing()
+            if NSMaxRange(selection) <= ns.length { setSelectedRange(selection) }
+            typingAttributes = base
+            return
+        }
+        let sizes: [CGFloat] = [26, 21, 18, 16, 15, 15]
+        each("^(#{1,6}) +(.*)$") { match in
+            let level = match.range(at: 1).length
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.paragraphSpacingBefore = level == 1 ? 2 : 6
+            paragraph.paragraphSpacing = 2
+            set([.font: NSFont.systemFont(ofSize: sizes[level - 1], weight: level == 1 ? .bold : .semibold), .paragraphStyle: paragraph], match.range)
+            set([.foregroundColor: dim, .font: NSFont.systemFont(ofSize: max(11, sizes[level - 1] * 0.6), weight: .regular)],
+                NSRange(location: match.range(at: 1).location, length: match.range(at: 2).location - match.range(at: 1).location))
+        }
+        func inline(_ pattern: String, marker: Int, trait: NSFontTraitMask?, extra: [NSAttributedString.Key: Any] = [:]) {
+            each(pattern) { match in
+                let inner = match.range(at: 1)
+                if let trait {
+                    storage.enumerateAttribute(.font, in: inner) { value, range, _ in
+                        let font = (value as? NSFont) ?? Self.liveBodyFont
+                        set([.font: NSFontManager.shared.convert(font, toHaveTrait: trait)], range)
+                    }
+                }
+                set(extra, inner)
+                set([.foregroundColor: dim], NSRange(location: match.range.location, length: marker))
+                set([.foregroundColor: dim], NSRange(location: NSMaxRange(match.range) - marker, length: marker))
+            }
+        }
+        inline("\\*\\*(?=\\S)(.+?)(?<=\\S)\\*\\*", marker: 2, trait: .boldFontMask)
+        inline("__(?=\\S)(.+?)(?<=\\S)__", marker: 2, trait: .boldFontMask)
+        inline("(?<![*\\w])\\*(?=[^*\\s])([^*\\n]+?)(?<=\\S)\\*(?![*\\w])", marker: 1, trait: .italicFontMask)
+        inline("(?<![_\\w])_(?=[^_\\s])([^_\\n]+?)(?<=\\S)_(?![_\\w])", marker: 1, trait: .italicFontMask)
+        inline("~~(?=\\S)(.+?)(?<=\\S)~~", marker: 2, trait: nil, extra: [.strikethroughStyle: NSUnderlineStyle.single.rawValue])
+        inline("<u>(.+?)</u>", marker: 3, trait: nil, extra: [.underlineStyle: NSUnderlineStyle.single.rawValue])
+        each("`([^`\\n]+)`") { match in
+            set([.font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular), .backgroundColor: NSColor.quaternaryLabelColor.withAlphaComponent(0.25)], match.range)
+        }
+        each("^(\\s*)([-*+]|\\d+[.)])( \\[[ xX]\\])? ") { match in set([.foregroundColor: purple], match.range(at: 2)); set([.foregroundColor: purple], match.range(at: 3)) }
+        each("^> ?.*$") { match in
+            set([.foregroundColor: NSColor.secondaryLabelColor, .font: NSFontManager.shared.convert(Self.liveBodyFont, toHaveTrait: .italicFontMask)], match.range)
+        }
+        each("^\\s*\\|.*\\|\\s*$") { match in
+            set([.font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)], match.range)
+        }
+        each("^\\s*\\|?[\\s:|-]*-{3,}[\\s:|-]*$") { set([.foregroundColor: dim], $0.range) }
+        each("\\|") { set([.foregroundColor: dim], $0.range) }
+        each("(?<![\\w#&])#[A-Za-z][\\w/-]*") { set([.foregroundColor: purple], $0.range) }
+        // Blank lines separate paragraphs; keep them short so the page reads like a document.
+        let blank = NSMutableParagraphStyle(); blank.lineSpacing = 0; blank.paragraphSpacing = 0
+        each("^\\n") { set([.font: NSFont.systemFont(ofSize: 7), .paragraphStyle: blank], $0.range) }
+        storage.endEditing()
+        if NSMaxRange(selection) <= ns.length { setSelectedRange(selection) }
+        typingAttributes = base
     }
 }

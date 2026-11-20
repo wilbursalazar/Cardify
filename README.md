@@ -1,10 +1,10 @@
-# Cardify
+# Kaster
 
 **Write a note once. Keep it as Markdown, print it on 3 × 5-inch index cards, or do both.**
 
-Cardify is a free, open-source Mac app for research, reading, studying, and keeping a paper-and-digital slip box. Write in Markdown, connect your notes, explore them in a graph, add Zotero sources, and see how your cards will print as you work. You can use Cardify with an Obsidian vault, a folder of Markdown files, a physical card box, or any combination of the three.
+Kaster is a free, open-source Mac app for research, reading, studying, and keeping a paper-and-digital slip box. Write in Markdown, connect your notes, explore them in a graph, add Zotero sources, and see how your cards will print as you work. You can use Kaster with an Obsidian vault, a folder of Markdown files, a physical card box, or any combination of the three.
 
-[Download Cardify for Mac](https://github.com/wilbursalazar/Cardify/raw/refs/heads/main/Downloads/Cardify-Mac.zip) · [Get started](#your-first-card) · [Use the library](#find-and-connect-cards) · [Explore the graph](#explore-the-graph) · [Choose a note-taking approach](#three-approaches-one-flexible-workflow) · [Printing help](#printing)
+[Download Kaster for Mac](https://github.com/wilbursalazar/Cardify/raw/refs/heads/main/Downloads/Cardify-Mac.zip) · [Get started](#your-first-card) · [Use the library](#find-and-connect-cards) · [Explore the graph](#explore-the-graph) · [Choose a note-taking approach](#three-approaches-one-flexible-workflow) · [Printing help](#printing)
 
 ## Download and open
 
@@ -12,21 +12,21 @@ Cardify is a free, open-source Mac app for research, reading, studying, and keep
 2. Move **Cardify.app** to Applications if you like, then open it.
 3. If macOS blocks the app, look in **System Settings → Privacy & Security** for an option to allow it to open.
 
-Cardify requires **macOS 13 or later** and includes code for both Apple silicon and Intel Macs. The current build is ad-hoc signed and **not Apple-notarized**, so macOS may ask for confirmation. Compatibility across all Macs and printers has not been tested. Cardify is currently a Mac app; Windows and Linux versions are not available.
+Kaster requires **macOS 13 or later** and includes code for both Apple silicon and Intel Macs. The current build is ad-hoc signed and **not Apple-notarized**, so macOS may ask for confirmation. Compatibility across all Macs and printers has not been tested. Kaster is currently a Mac app; Windows and Linux versions are not available.
 
 ## Your first card
 
-1. Open Cardify. Use the card-type menu above the writing area to choose **Research**, **Habit**, **To Do**, or **Debate**.
+1. Open Kaster. Use the card-type menu above the writing area to choose **Research**, **Habit**, **To Do**, or **Debate**.
 2. Optional: choose **File → Choose Save Folder…** to set the folder offered when you save a new note or export a PDF. To work with an Obsidian vault, you can choose a folder inside your vault.
-3. Optional: choose **File → Choose Notes Folder…** and select your vault or notes folder. For Obsidian, select the vault root so inserted paths are relative to the vault. Cardify searches this folder for notes to link and for existing card IDs. It can be the same folder as your save folder.
-4. Enter a title and write, or choose **Templates → Eco reading**, **Luhmann idea**, or **Quick note** to start a new Research card. Cardify asks before replacing an edited draft. Use **File → Mark as Index Card** when a card should serve as a topic entry point.
+3. Optional: choose **File → Choose Notes Folder…** and select your vault or notes folder. For Obsidian, select the vault root so inserted paths are relative to the vault. Kaster searches this folder for notes to link and for existing card IDs. It can be the same folder as your save folder.
+4. Enter a title and write, or choose **Templates → Eco reading**, **Luhmann idea**, or **Quick note** to start a new Research card. Kaster asks before replacing an edited draft. Use **File → Mark as Index Card** when a card should serve as a topic entry point.
 5. Check the preview. Use the controls beside it to change orientation or text size, or scroll over the card to zoom the on-screen view. To add a dot grid, open **Settings → Appearance**. Then choose **Save**, **Print**, or **Save & Print**. Preview zoom does not change the printed size.
 
-When you leave a new, edited card, Cardify offers **Save**, **Discard**, or **Cancel**. **Save** opens a dialog to save a `.md` file. After a file is saved or opened, Cardify saves edits automatically; ordinary **Save** updates that same file. If the file changes outside Cardify, autosave stops and your draft stays open so you can resolve the conflict. **Print** opens the printer dialog. **Save & Print** saves first and starts printing only if the save succeeds. **File → Export PDF…** saves a PDF for review or printing later. Longer notes can continue onto more than one card.
+When you leave a new, edited card, Kaster offers **Save**, **Discard**, or **Cancel**. **Save** opens a dialog to save a `.md` file. After a file is saved or opened, Kaster saves edits automatically; ordinary **Save** updates that same file. If the file changes outside Kaster, autosave stops and your draft stays open so you can resolve the conflict. **Print** opens the printer dialog. **Save & Print** saves first and starts printing only if the save succeeds. **File → Export PDF…** saves a PDF for review or printing later. Longer notes can continue onto more than one card.
 
 New Habit, To Do, and Debate cards default to **Habit**, **To Do**, and **Debate** folders inside your chosen notes folder. They remain part of the same searchable, linkable vault. Existing files stay where they are; you can choose another destination in the Save dialog.
 
-> Save folder and notes folder have different jobs: the first is a default destination; the second is the collection Cardify searches. If no notes folder is selected, note suggestions fall back to the save folder. Saving still lets you choose a destination.
+> Save folder and notes folder have different jobs: the first is a default destination; the second is the collection Kaster searches. If no notes folder is selected, note suggestions fall back to the save folder. Saving still lets you choose a destination.
 
 ## Navigate between cards
 
@@ -34,21 +34,21 @@ The notes sidebar shows Markdown cards from your notes folder, or your save fold
 
 Use the folder arrows to expand and collapse nested folders. Search opens the paths containing matches, and selecting a note reveals its parent folders. Empty folders are shown too.
 
-Drag a saved note onto a folder in the sidebar to move the Markdown file into that folder on disk. Cardify refuses a move that would overwrite another file. Links that spell out the old folder path may need updating.
+Drag a saved note onto a folder in the sidebar to move the Markdown file into that folder on disk. Kaster refuses a move that would overwrite another file. Links that spell out the old folder path may need updating.
 
 Right-click a note and choose **Open Beside Current Card** to view it in a parallel tab without leaving the card you are writing.
 
-Right-click a saved note in the sidebar to open it, show it in Finder, copy its path, duplicate it, rename its file, or move it to the macOS Trash. A duplicate does not retain the original card ID. Renaming or trashing a file does not update links in other notes. Cardify checks the file for outside changes before changing it.
+Right-click a saved note in the sidebar to open it, show it in Finder, copy its path, duplicate it, rename its file, or move it to the macOS Trash. A duplicate does not retain the original card ID. Renaming or trashing a file does not update links in other notes. Kaster checks the file for outside changes before changing it.
 
 Use the **back** and **forward** arrows in the top ribbon to revisit cards opened during the current session. The buttons follow browsing history, not the card-number sequence. You can also use **⌘[** and **⌘]**. Opening a different card after going back starts a new path through your history.
 
-Choose **Layout** in the top ribbon to put writing on the left, preview on the left, or writing above preview. Drag the divider to resize the areas; select the divider and use arrow keys to adjust it with the keyboard. Cardify remembers the arrangement. The formatting controls use one row when it fits and two rows when the writing area is narrower. If the controls above the editor need more space, scroll that area to see them all.
+Choose **Layout** in the top ribbon to put writing on the left, preview on the left, or writing above preview. Drag the divider to resize the areas; select the divider and use arrow keys to adjust it with the keyboard. Kaster remembers the arrangement. The formatting controls use one row when it fits and two rows when the writing area is narrower. If the controls above the editor need more space, scroll that area to see them all.
 
-Cardify asks before leaving a changed, unsaved draft. If you save it before going back, you can return to the saved card with Forward. A discarded unsaved draft cannot be recovered through history.
+Kaster asks before leaving a changed, unsaved draft. If you save it before going back, you can return to the saved card with Forward. A discarded unsaved draft cannot be recovered through history.
 
 ## Find and connect cards
 
-Click **Library** to browse the Markdown files in your notes folder, or in your save folder if no notes folder is set. Search by title, filename, card ID, or note text. Select a card to see its text, outgoing links, and notes that link to it. Click a connection to inspect it, then **Open Card** to edit it. The library reads files; browsing does not rename or rewrite them. Use **Refresh** after changes outside Cardify.
+Click **Library** to browse the Markdown files in your notes folder, or in your save folder if no notes folder is set. Search by title, filename, card ID, or note text. Select a card to see its text, outgoing links, and notes that link to it. Click a connection to inspect it, then **Open Card** to edit it. The library reads files; browsing does not rename or rewrite them. Use **Refresh** after changes outside Kaster.
 
 In the Cards view, **Insert Link** adds a link to the selected card in the current Markdown draft. You can include an optional explanation, such as “supports this argument.” You can do the same from **Link Note** above the editor. Links to ambiguous or unrecognized targets may not appear in the library’s connections; the Markdown itself remains unchanged. Nearby IDs are hints inferred from address shapes, not proof that cards are related.
 
@@ -56,11 +56,11 @@ In the Cards view, **Insert Link** adds a link to the selected card in the curre
 
 Choose **Templates → Quick note**, give it a subject such as “Memory,” and add a few links that are good starting points. Choose **File → Mark as Index Card**, then save it in the notes folder. In **Library → Index**, select that index card to explore its links. Index cards are ordinary Markdown files with `cardify_index: true` in their frontmatter, which makes them discoverable in the Index view. The marker is not printed on the card.
 
-To include an existing Markdown note, open it and choose **File → Mark as Index Card**, then save it. This changes your draft only until you choose to save. You choose the entry points and the words explaining them; Cardify does not require every related note to appear in an index.
+To include an existing Markdown note, open it and choose **File → Mark as Index Card**, then save it. This changes your draft only until you choose to save. You choose the entry points and the words explaining them; Kaster does not require every related note to appear in an index.
 
 ### Turn a reading into an idea
 
-Open a reading card and choose **File → New Linked Idea from Current…**. If needed, Cardify asks you to save the current card first, then creates a new unsaved Idea Card with a link back to it. Write and save the idea when you are ready. This also works with other Markdown cards; it does not alter the saved source card.
+Open a reading card and choose **File → New Linked Idea from Current…**. If needed, Kaster asks you to save the current card first, then creates a new unsaved Idea Card with a link back to it. Write and save the idea when you are ready. This also works with other Markdown cards; it does not alter the saved source card.
 
 ## Explore the graph
 
@@ -78,29 +78,29 @@ The setting takes effect when you create a new Markdown card. It does not change
 
 ## Three approaches, one flexible workflow
 
-You do not have to follow a single system. These approaches answer different questions, and Cardify lets you borrow the parts you find useful.
+You do not have to follow a single system. These approaches answer different questions, and Kaster lets you borrow the parts you find useful.
 
 ### Umberto Eco: keep track of your research
 
 In *How to Write a Thesis*, Umberto Eco describes using different files of cards to organize research. A **bibliography file** records works to find or consult; a **reading file** records works actually read, with summaries, quotations, assessments, and the details needed to find the source again. He also discusses cards for ideas and quotations. A working plan helps relate material to a piece of writing.
 
-**Try it in Cardify:** choose a **Reading Card**, record a summary or clearly marked quotation, add the source and page, and write your own response. Use an **Idea Card** when the reading gives you an idea worth developing. An **Index Card** can collect links to notes for a topic or project. Zotero can help you find and insert a source; you decide how to organize your bibliography and work plan.
+**Try it in Kaster:** choose a **Reading Card**, record a summary or clearly marked quotation, add the source and page, and write your own response. Use an **Idea Card** when the reading gives you an idea worth developing. An **Index Card** can collect links to notes for a topic or project. Zotero can help you find and insert a source; you decide how to organize your bibliography and work plan.
 
-Eco's method is especially helpful when you need to distinguish **what a source says** from **what you think about it**, and when you want to return to the exact page later. Cardify supplies tools for this kind of work; it does not automatically build Eco's complete research system for you.
+Eco's method is especially helpful when you need to distinguish **what a source says** from **what you think about it**, and when you want to return to the exact page later. Kaster supplies tools for this kind of work; it does not automatically build Eco's complete research system for you.
 
 ### Niklas Luhmann: develop connected lines of thought
 
 Luhmann's physical card index used fixed addresses, sequences, branches, cross-references, and an index of entry points. New notes could be placed near an existing line of thought without renumbering the whole collection. Cross-references could connect ideas in different places, allowing several paths through the file.
 
-**Try it in Cardify:** choose the **Luhmann** ID style, write an idea, and save it. Use **Continue sequence** for the next address in a sequence or **Branch from card** for an offshoot. Add links and a sentence explaining why the notes belong together. An Index Card can serve as an entry point into a topic.
+**Try it in Kaster:** choose the **Luhmann** ID style, write an idea, and save it. Use **Continue sequence** for the next address in a sequence or **Branch from card** for an offshoot. Add links and a sentence explaining why the notes belong together. An Index Card can serve as an entry point into a topic.
 
-Cardify's numbering is **Luhmann-inspired**, not an exact reconstruction of every address in his historical archive. You remain free to edit an ID or write notes in a different style.
+Kaster's numbering is **Luhmann-inspired**, not an exact reconstruction of every address in his historical archive. You remain free to edit an ID or write notes in a different style.
 
 ### Obsidian: work with connected Markdown files
 
 Obsidian is an app for working with a vault of files; it is not a single prescribed research method. Its internal links let you connect notes digitally using `[[wiki links]]`. You can use an Eco-inspired research practice, a Luhmann-inspired slip box, or your own approach in Obsidian.
 
-**Try them together:** select an Obsidian vault as your notes folder and save cards into it. Cardify creates ordinary Markdown files, and its note picker inserts links to existing filenames. Open the same vault in Obsidian to continue working there; print the cards you want in your physical box. Cardify does not provide a separate sync service, and the paper copy will not update itself when a Markdown file changes. Reprint a card when you want the paper copy to reflect edits.
+**Try them together:** select an Obsidian vault as your notes folder and save cards into it. Kaster creates ordinary Markdown files, and its note picker inserts links to existing filenames. Open the same vault in Obsidian to continue working there; print the cards you want in your physical box. Kaster does not provide a separate sync service, and the paper copy will not update itself when a Markdown file changes. Reprint a card when you want the paper copy to reflect edits.
 
 ## Continue a sequence or branch from a card?
 
@@ -113,41 +113,41 @@ Think of a **continuation** as the next address at the same level and a **branch
 | `1a1` | Continue sequence | `1a2` | Add another note at the offshoot's level. |
 | `1a1` | Branch from card | `1a1a` | Explore another offshoot. |
 
-These examples assume the suggested IDs are available. Cardify searches for existing IDs and skips ones already in use. Your actual suggestion may differ, and you can edit it. **Continue sequence** appears in Luhmann mode; **Branch from card** is available in Luhmann and Timestamp modes.
+These examples assume the suggested IDs are available. Kaster searches for existing IDs and skips ones already in use. Your actual suggestion may differ, and you can edit it. **Continue sequence** appears in Luhmann mode; **Branch from card** is available in Luhmann and Timestamp modes.
 
 To use either action:
 
-1. Give the current card an ID. If the card is new or has unsaved edits, Cardify asks you to save it first.
-2. Choose **Continue sequence** or **Branch from card**. Cardify creates a new draft with a suggested ID and a link back to the saved card.
+1. Give the current card an ID. If the card is new or has unsaved edits, Kaster asks you to save it first.
+2. Choose **Continue sequence** or **Branch from card**. Kaster creates a new draft with a suggested ID and a link back to the saved card.
 3. Give the new draft a title, write your note, and save it. The new draft is **not saved automatically**.
 
-The original card keeps its ID and filename. Cardify does not automatically add a link from the original card to the new one; add one yourself if you want a link in both directions. Neither action automatically renumbers existing notes.
+The original card keeps its ID and filename. Kaster does not automatically add a link from the original card to the new one; add one yourself if you want a link in both directions. Neither action automatically renumbers existing notes.
 
 ## Choose an ID style
 
 The **ID style** selector sits above the writing area. IDs are optional and editable; when present, they appear in small type on the top line of the printed card and as `card_id` in the Markdown frontmatter. The first line wraps before it reaches the ID; an unusually long ID uses its own line.
 
-| Style | What Cardify suggests | Useful when |
+| Style | What Kaster suggests | Useful when |
 | --- | --- | --- |
 | **Timestamp** | A local date-and-time ID, such as `202611122145`. If needed, a suffix distinguishes collisions. | You want a chronological identifier and simple filenames. |
 | **Luhmann** | An available numeric starting ID, with continuation and branch suggestions. | You want addresses that express sequences and offshoots. |
 | **Title only** | No new ID. | You prefer a descriptive filename without an automatically generated ID. |
 
-With Timestamp or Luhmann selected, a new note's suggested filename combines its ID and title. For example, a card titled `Ways of remembering` might be suggested as `202611122145 Ways of remembering.md`. Title only suggests a title-based filename. Switching between Timestamp and Luhmann proposes a new ID for the current Research card. If it already has an ID, Cardify shows both IDs and asks whether to replace it. For a saved card, this changes the Markdown ID when you save; its existing filename stays the same. Debate cards keep their own IDs. You can also edit the ID field yourself.
+With Timestamp or Luhmann selected, a new note's suggested filename combines its ID and title. For example, a card titled `Ways of remembering` might be suggested as `202611122145 Ways of remembering.md`. Title only suggests a title-based filename. Switching between Timestamp and Luhmann proposes a new ID for the current Research card. If it already has an ID, Kaster shows both IDs and asks whether to replace it. For a saved card, this changes the Markdown ID when you save; its existing filename stays the same. Debate cards keep their own IDs. You can also edit the ID field yourself.
 
 In **Settings**, choose year–month–day, day–month–year, or month–day–year for new timestamp IDs. Turn **Include hours and minutes** on or off. For example, day–month–year can produce `13-11-26` or `13-11-26-1437`. Changing this setting does not rename existing notes or change their IDs.
 
-Before saving an ID-bearing note, Cardify checks the selected notes folder and the destination folder, including their subfolders, for duplicate IDs it recognizes. If the check cannot be completed, Cardify stops the save instead of assuming the ID is unique. These checks apply only to the folders searched and cannot prevent simultaneous changes by another app.
+Before saving an ID-bearing note, Kaster checks the selected notes folder and the destination folder, including their subfolders, for duplicate IDs it recognizes. If the check cannot be completed, Kaster stops the save instead of assuming the ID is unique. These checks apply only to the folders searched and cannot prevent simultaneous changes by another app.
 
-If an externally edited file causes a save conflict, you can use **File → Save As** to preserve your draft separately. If the original is still inside a folder being checked and both copies have the same card ID, change the draft's ID before saving the copy; Cardify does not silently create duplicate IDs.
+If an externally edited file causes a save conflict, you can use **File → Save As** to preserve your draft separately. If the original is still inside a folder being checked and both copies have the same card ID, change the draft's ID before saving the copy; Kaster does not silently create duplicate IDs.
 
 ## Link and format notes
 
-In a Markdown card, type `[[` to search the selected notes folder by filename and insert a link. Use the arrow keys to choose a suggestion, Return or Tab to insert it, and Escape to dismiss the list. You can also click **Link Note** and search for a note. Cardify inserts a path-based link such as `[[Research/Memory and archives]]`; it does not change the linked file.
+In a Markdown card, type `[[` to search the selected notes folder by filename and insert a link. Use the arrow keys to choose a suggestion, Return or Tab to insert it, and Escape to dismiss the list. You can also click **Link Note** and search for a note. Kaster inserts a path-based link such as `[[Research/Memory and archives]]`; it does not change the linked file.
 
 To follow a link, **Command-click** it in the Markdown editor, or click the underlined link in the card preview. `[[Note]]`, `[[Folder/Note|label]]`, and heading links such as `[[Note#Heading]]` open Markdown cards in a tab beside the current editor. Close a linked tab with its ×, choose **Current card** to return to your own preview, or choose **Edit** to open the linked note in the main editor. Web links open in your browser, and Zotero links open in Zotero.
 
-Choose the vault root with **File → Choose Notes Folder…** so note links resolve against your vault. If a filename is ambiguous or a target cannot be found, Cardify tells you instead of opening a different note. Heading links support Markdown headings; Obsidian block links are not supported yet. Preview links are interactive only inside Cardify; Cardify does not add its internal link actions to exported or printed PDFs. The Zotero open-source line is hidden in the printed preview, but you can Command-click it in the editor.
+Choose the vault root with **File → Choose Notes Folder…** so note links resolve against your vault. If a filename is ambiguous or a target cannot be found, Kaster tells you instead of opening a different note. Heading links support Markdown headings; Obsidian block links are not supported yet. Preview links are interactive only inside Kaster; Kaster does not add its internal link actions to exported or printed PDFs. The Zotero open-source line is hidden in the printed preview, but you can Command-click it in the editor.
 
 Add a few words explaining a link when they will help you later, for example:
 
@@ -155,7 +155,7 @@ Add a few words explaining a link when they will help you later, for example:
 Related: [[Research/Memory and archives]] — connects this idea to how archives preserve context.
 ```
 
-Use the buttons above the editor for **bold**, *italic*, headings, bullet lists, and tasks. The list and task buttons use icons with labels on hover. Markdown and wiki-link labels appear in the card preview and print output. Cardify renders a subset of Markdown; it does not promise every Obsidian or Markdown feature will print exactly as it appears in another app.
+Use the buttons above the editor for **bold**, *italic*, headings, bullet lists, and tasks. The list and task buttons use icons with labels on hover. Markdown and wiki-link labels appear in the card preview and print output. Kaster renders a subset of Markdown; it does not promise every Obsidian or Markdown feature will print exactly as it appears in another app.
 
 Select text in the editor to show a compact formatting toolbar. Use it to format the selection, make a list or task, or wrap selected text in `[[double brackets]]` as a note link.
 
@@ -165,43 +165,43 @@ For notes with YAML frontmatter, use **Show Metadata** or **Hide Metadata** in t
 
 Write an outline as an ordinary Markdown list in a Research card. Drag the bullet marker (`-`, `+`, or `*`) to move that point and any indented bullets beneath it. This changes their order in the Markdown file and can be undone with Command-Z.
 
-Existing files made with Cardify's older structured Outline mode still open in that editor. New outlines can be written directly in Research cards.
+Existing files made with Kaster's older structured Outline mode still open in that editor. New outlines can be written directly in Research cards.
 
 ## Add a Zotero source
 
 1. Open Zotero. In Zotero, enable **Settings → Advanced → Allow other applications on this computer to communicate with Zotero**.
 2. In a Markdown card, click **Add Zotero Source**.
-3. Search your library, select a source, and optionally enter a page or other location. Cardify adds a readable source and a link that opens the item in Zotero.
+3. Search your library, select a source, and optionally enter a page or other location. Kaster adds a readable source and a link that opens the item in Zotero.
 
-You can choose your personal library or an available group, search more fields, and load additional results. Zotero must be running with local access enabled. Cardify reads through Zotero's local API and does not modify your library. Check source details and page numbers before citing them.
+You can choose your personal library or an available group, search more fields, and load additional results. Zotero must be running with local access enabled. Kaster reads through Zotero's local API and does not modify your library. Check source details and page numbers before citing them.
 
 ## Weekly habit cards
 
 Choose **Habit**, then **Templates → Weekly Habit Tracker** if you want a fresh tracker. Edit the heading, add a row for each habit, and click the weekday boxes to add or remove an X. You can also leave the boxes empty and mark the printed card by hand.
 
-Use the preview's **Text size** control to change the tracker font. Seven standard rows fit on a landscape card at the default size; larger text, long habit names, or more rows can continue onto additional cards. Saving produces a Markdown table. Opening a table saved by Cardify restores it in the habit editor.
+Use the preview's **Text size** control to change the tracker font. Seven standard rows fit on a landscape card at the default size; larger text, long habit names, or more rows can continue onto additional cards. Saving produces a Markdown table. Opening a table saved by Kaster restores it in the habit editor.
 
 ## To-do cards
 
 Choose **To Do** to write a heading and add tasks. Click each checkbox to mark or clear it, and use **Add task** or the minus button to change the list. Adjust text size and orientation beside the preview, then save, print, or both.
 
-The saved file uses ordinary Markdown task checkboxes and a `<!-- cardify:todo -->` marker. The marker is hidden on the printed card and lets Cardify reopen the list in the structured editor. If a marked file contains additional content the editor cannot safely represent, Cardify opens it as a Research note instead of discarding that content.
+The saved file uses ordinary Markdown task checkboxes and a `<!-- cardify:todo -->` marker. The marker is hidden on the printed card and lets Kaster reopen the list in the structured editor. If a marked file contains additional content the editor cannot safely represent, Kaster opens it as a Research note instead of discarding that content.
 
 ## Debate: resolutions and argument maps
 
-Choose **Debate** to organize arguments using the same Markdown draft, ID options, links, Zotero tools, preview, and print controls as Research. The argument map shows a resolution at the top, AFF and DEF points underneath, and each point's evidence, objections, arguments, and replies below it. This structure is inspired by [William Lane Craig's description of preparing and reusing documented argument and response briefs](https://www.reasonablefaith.org/media/reasonable-faith-podcast/dr-craig-live-at-west-university-baptist-church-part-1/); the visual map is Cardify's own design.
+Choose **Debate** to organize arguments using the same Markdown draft, ID options, links, Zotero tools, preview, and print controls as Research. The argument map shows a resolution at the top, AFF and DEF points underneath, and each point's evidence, objections, arguments, and replies below it. This structure is inspired by [William Lane Craig's description of preparing and reusing documented argument and response briefs](https://www.reasonablefaith.org/media/reasonable-faith-podcast/dr-craig-live-at-west-university-baptist-church-part-1/); the visual map is Kaster's own design.
 
 1. Choose **File → Choose Notes Folder…** and select your notes folder. The argument map searches this folder; if none is selected, it uses the save folder.
 2. Under **New**, choose **Resolution**, give the resolution a title, and save it in the notes folder. Existing debate projects still appear as resolutions. Use **Mark as** to identify an existing draft without renaming its file.
-3. Open **Argument map**. The map guides you to create a resolution, then add an AFF point; you can also add as many DEF points as you need. New points receive IDs such as `AFF-01` and `DEF-01`, shown at the top right of their cards and in their suggested filenames. Existing IDs and filenames are kept. Choose a notes or save folder first so Cardify can check for duplicate IDs.
+3. Open **Argument map**. The map guides you to create a resolution, then add an AFF point; you can also add as many DEF points as you need. New points receive IDs such as `AFF-01` and `DEF-01`, shown at the top right of their cards and in their suggested filenames. Existing IDs and filenames are kept. Choose a notes or save folder first so Kaster can check for duplicate IDs.
 4. Select a point or connected card on the map. Choose **Add objection or counterargument**, **Add supporting evidence**, **Add response**, or **Add supporting argument**. The new card branches from the selected card, which becomes its primary parent. You can select that new card later to continue the chain. It inherits its parent's ID: an objection under `AFF-01` might be `AFF-01-OB-01`, and its reply `AFF-01-OB-01-RE-01`. The other type codes are `EV` (evidence), `AR` (argument), and `NT` (other note); each type has its own sequence. If an older parent has no ID, you can add one first or continue without an inherited ID. Save and refresh the map to see each new card.
-5. To connect an existing draft to another card, select its parent on the map and choose **Set as primary parent**. To connect it elsewhere too, choose **Add related parent**. A card has one primary parent; dashed connections show additional related parents. You can add a brief explanation of each relationship. Cardify refuses primary links that would make a cycle.
+5. To connect an existing draft to another card, select its parent on the map and choose **Set as primary parent**. To connect it elsewhere too, choose **Add related parent**. A card has one primary parent; dashed connections show additional related parents. You can add a brief explanation of each relationship. Kaster refuses primary links that would make a cycle.
 
 Select any node to inspect its actions; double-click it or choose **Open card** to edit the note. Choose **Focus branch** above the map, or **Focus on this branch** beside the selected card, to see its path and immediate children. Select another card to follow the chain, or choose **Full map** to return to the whole debate. Related cards are cross-links, not additional primary parents. Use the resolution picker to switch between debates and search within the displayed map. The **Unassigned** view keeps earlier AFF/DEF notes that have no resolution link accessible. A parent may belong to more than one resolution, and a related card may appear under multiple points without being copied.
 
 Each primary connection can be marked **Supports parent**, **Challenges parent**, or **Not specified**. The relation describes the connection, not the card type: supporting evidence supports its selected parent, while an objection challenges it. A new response starts unspecified; open the card and use **Relationship to parent** to choose. Older cards remain unspecified until you choose, and changing a card's primary parent clears the old connection's label. Save the card after changing its relationship.
 
-Resolutions, points, and connected cards are ordinary Markdown files. Role and relationship markers are hidden from the printed card, and parent relationships are readable wiki links. No linked note is copied, automatically renamed, or modified when you connect your current draft. If a linked file is moved or renamed outside Cardify, repair its link in the Markdown. Anki integration and study scheduling are not included in this version.
+Resolutions, points, and connected cards are ordinary Markdown files. Role and relationship markers are hidden from the printed card, and parent relationships are readable wiki links. No linked note is copied, automatically renamed, or modified when you connect your current draft. If a linked file is moved or renamed outside Kaster, repair its link in the Markdown. Anki integration and study scheduling are not included in this version.
 
 ## Printing
 
@@ -210,23 +210,23 @@ Resolutions, points, and connected cards are ordinary Markdown files. Role and r
 3. Click **Print**. In your printer dialog, choose a printer-supported **3 × 5-inch** paper size and the matching orientation. Print at **100% scale**, without fit-to-page scaling.
 4. Feed the cards according to your printer's instructions. Print a test card to check the feed, orientation, ink, and margins for your printer.
 
-Cardify generates a 3 × 5-inch PDF with a 3/8-inch inset. Actual printable margins and media handling depend on the printer and driver. If the result is clipped, blank, or misaligned, check the paper size, media type, tray, and scaling in the printer dialog; try **File → Export PDF…** to inspect or print the PDF separately. A correct preview cannot guarantee that a particular printer will handle the card stock correctly.
+Kaster generates a 3 × 5-inch PDF with a 3/8-inch inset. Actual printable margins and media handling depend on the printer and driver. If the result is clipped, blank, or misaligned, check the paper size, media type, tray, and scaling in the printer dialog; try **File → Export PDF…** to inspect or print the PDF separately. A correct preview cannot guarantee that a particular printer will handle the card stock correctly.
 
 For a light background, enable **Dot grid on cards** under **Settings → Appearance**. It appears in the preview, exported PDF, and printed cards.
 
 ## Clip research from the web
 
-The optional browser clipper sends selected webpage text, the page title, and URL to Cardify for review. Open Cardify once before using it so macOS can register the app's link handler.
+The optional browser clipper sends selected webpage text, the page title, and URL to Kaster for review. Open Kaster once before using it so macOS can register the app's link handler.
 
 - **Chrome:** load [Extensions/Chrome](Extensions/Chrome) with **Load unpacked** at `chrome://extensions`, after enabling Developer mode.
 - **LibreWolf:** [Download the clipper XPI](Downloads/Cardify-Clipper-LibreWolf.xpi). In `about:addons`, use the gear menu → **Install Add-on From File…**. This package is unsigned. LibreWolf must support unsigned extensions and have signature verification disabled before it can install it; that setting affects all extensions in the profile. Once installed, it persists across restarts. This package does not currently update itself.
 - **Firefox:** the XPI is not Mozilla-signed and cannot be permanently installed in ordinary Firefox release builds. For testing, load [Extensions/LibreWolf](Extensions/LibreWolf) from `about:debugging` → **This Firefox** → **Load Temporary Add-on**. A Mozilla-signed release is not yet available.
 
-Select text on a supported webpage, open the extension, and choose **Open in Cardify**. Review the header, note, and source before appending to or replacing your draft. Some browser pages, embedded frames, and PDF viewers restrict access; images and video are not extracted, and very long selections are rejected. Browser-to-app handoff has not been tested across every browser and macOS version.
+Select text on a supported webpage, open the extension, and choose **Open in Kaster**. Review the header, note, and source before appending to or replacing your draft. Some browser pages, embedded frames, and PDF viewers restrict access; images and video are not extracted, and very long selections are rejected. Browser-to-app handoff has not been tested across every browser and macOS version.
 
 ## Privacy and your files
 
-Drafts and the default save-folder setting are stored locally. Markdown files are saved where you choose. The clipper passes selected text, title, and the full URL through a local custom URL scheme; it does not send them to a remote Cardify service. Other local software or system components may see a custom URL, and a webpage URL can contain private query parameters. Review a source before sharing or printing it. Zotero integration communicates with the local Zotero service.
+Drafts and the default save-folder setting are stored locally. Markdown files are saved where you choose. The clipper passes selected text, title, and the full URL through a local custom URL scheme; it does not send them to a remote Kaster service. Other local software or system components may see a custom URL, and a webpage URL can contain private query parameters. Review a source before sharing or printing it. Zotero integration communicates with the local Zotero service.
 
 ## Build from source
 
@@ -234,7 +234,7 @@ On macOS, install the Apple Command Line Tools, then run:
 
 ```sh
 ./scripts/build.sh
-open build/Cardify.app
+open build/Kaster.app
 ```
 
 The script builds a universal app targeting macOS 13 and later and signs it ad hoc. The result is not notarized. Run `./scripts/test.sh` for library, graph physics, index, workflow, appearance, to-do, history, and draft-protection checks, `./scripts/test-printed-id.sh` for PDF layout checks, `./scripts/test-preview-links.sh` for clickable-preview checks, `./scripts/test-preview-stability.sh` for preview updates, `./scripts/test-todo-pdf.sh` for to-do printing, `./scripts/test-graph-layout.sh` for graph layout, and `./scripts/test-graph-open.sh` for graph-opening safeguards.
@@ -247,4 +247,4 @@ The script builds a universal app targeting macOS 13 and later and signs it ad h
 
 ## License
 
-Cardify is open source under the [MIT License](LICENSE).
+Kaster is open source under the [MIT License](LICENSE).

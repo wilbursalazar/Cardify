@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 enum AppearancePreference: String, CaseIterable, Identifiable {
     case system
@@ -18,6 +19,18 @@ enum AppearancePreference: String, CaseIterable, Identifiable {
     static let slateGradientEnd = Color(red: 34 / 255, green: 31 / 255, blue: 45 / 255)
     static let slateText = Color(red: 159 / 255, green: 163 / 255, blue: 172 / 255)
     static let slateAccent = Color(red: 139 / 255, green: 147 / 255, blue: 184 / 255)
+    // Kaster brand purple, sampled from the wizard icon. Lighter in dark mode for contrast.
+    static let kasterPurple = Color(nsColor: NSColor(name: "KasterPurple") { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(red: 0.71, green: 0.56, blue: 0.94, alpha: 1)
+            : NSColor(red: 0.42, green: 0.25, blue: 0.76, alpha: 1)
+    })
+    // Soft lavender for selected rows and table headers.
+    static let kasterSelection = Color(nsColor: NSColor(name: "KasterSelection") { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(red: 0.42, green: 0.30, blue: 0.62, alpha: 0.45)
+            : NSColor(red: 0.91, green: 0.87, blue: 0.98, alpha: 1)
+    })
 
     static func background(for stored: String) -> Color {
         if stored == charcoal.rawValue { return charcoalBackground }
@@ -46,7 +59,7 @@ enum AppearancePreference: String, CaseIterable, Identifiable {
     static func tint(for stored: String) -> Color? {
         if stored == charcoal.rawValue { return charcoalBlue }
         if stored == slate.rawValue { return slateAccent }
-        return nil
+        return kasterPurple
     }
     static func accent(for stored: String) -> Color? { tint(for: stored) }
 
