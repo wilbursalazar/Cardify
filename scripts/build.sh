@@ -11,7 +11,7 @@ rm -rf "$APP/Contents/Resources/typst"; mkdir -p "$APP/Contents/Resources/typst"
 cp -R "$ROOT/Resources/Typst/packages" "$APP/Contents/Resources/typst/packages"
 cp "$ROOT/Resources/Typst/NOTICE.md" "$APP/Contents/Resources/typst/NOTICE.md"
 if [ -n "$TYPST_BIN" ]; then
-    cp -L "$TYPST_BIN" "$APP/Contents/Resources/typst/typst"; chmod +x "$APP/Contents/Resources/typst/typst"
+    cp -L "$TYPST_BIN" "$APP/Contents/Resources/typst/typst"; chmod 755 "$APP/Contents/Resources/typst/typst"
     echo "Bundled $("$TYPST_BIN" --version) ($(lipo -archs "$TYPST_BIN"))"
 else
     echo "warning: typst not found; install it (brew install typst) or set KASTER_TYPST. Kaster will fall back to an installed typst or the basic renderer." >&2
