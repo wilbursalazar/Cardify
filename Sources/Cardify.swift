@@ -424,6 +424,7 @@ struct ContentView: View {
     @State private var suppressHistorySave = false
     @State private var branchSaveFolders: [String: URL] = [:]
     @State private var showZotero = false
+    @State private var showRegister = false
     @State private var showNotes = false
     @State private var showOutlineNotes = false
     @State private var outlineLinkCompletion: ((String) -> Void)?
@@ -549,6 +550,8 @@ struct ContentView: View {
                     Button("Open Markdown…", action: openFile)
                     Button("Research Clipper…") { research = ResearchClip() }
                     Button("Mark as Index Card") { markIndexCard() }.disabled(cardMode != "markdown")
+                    Button("Keyword Register…") { showRegister = true }.disabled(vaultRoot == nil)
+                    Button("Add This Card to Register…") { if let url = fileURL { addToRegister(url) } }.disabled(fileURL == nil || cardMode != "markdown")
                     Button("New Linked Idea from Current…") { ideaFromCurrent() }.disabled(cardMode != "markdown")
                     Button("Save As…") { _ = saveMarkdown(saveAs: true) }
                     Divider()
@@ -601,7 +604,8 @@ struct ContentView: View {
                                 onPrint: { urls, label in printBatch(urls, label: label) },
                                 lastPrint: Date(timeIntervalSince1970: lastPrintTime),
                                 onNewFolder: createFolder, onRenameFolder: renameFolder,
-                                onNewCardIn: newCardHere, onNewFolderInFinder: makeFolderInFinder, onReorder: saveManualOrder)
+                                onNewCardIn: newCardHere, onNewFolderInFinder: makeFolderInFinder, onReorder: saveManualOrder,
+                                onOpenRegister: { showRegister = true }, onAddToRegister: { url in addToRegister(url) })
                 }
                 WorkspaceSplitView(arrangement: WorkspaceArrangement.stored(storedWorkspaceArrangement), editor: {
                 HStack(spacing: 0) {
@@ -897,6 +901,15 @@ struct ContentView: View {
                     clearAfterMigration(moved)
                 }
             }
+        }
+        .sheet(isPresented: $showRegister) {
+            KeywordRegisterView(entries: registerEntries, indexCardsToImport: indexCardsNotInRegister.count,
+                                resolve: { library.index.resolve(link: $0)?.url },
+                                onOpen: { url in _ = loadFile(url) },
+                                onRemove: { link, keyword in updateRegister { KeywordRegister.removing(link, from: keyword, in: $0) } },
+                                onImportIndexCards: importIndexCardsToRegister,
+                                onPrint: printRegister,
+                                onOpenFile: { if let root = vaultRoot { ensureRegisterFile(root); _ = loadFile(KeywordRegister.url(in: root)) } })
         }
         .sheet(isPresented: $showZotero) {
             ZoteroPicker { pick in
@@ -1229,6 +1242,78 @@ struct ContentView: View {
             sidebarRefreshToken = UUID()
             status = "Moved folder to \(KasterVault.relativePath(of: new, in: root) ?? new.lastPathComponent)."
         } catch { status = "Could not move the folder: \(error.localizedDescription)" }
+    }
+
+    // MARK: Keyword register
+
+    var registerEntries: [KeywordRegister.Entry] {
+        guard let root = vaultRoot else { return [] }
+        let text = (try? String(contentsOf: KeywordRegister.url(in: root), encoding: .utf8)) ?? ""
+        return KeywordRegister.entries(in: text)
+    }
+
+    /// Cards marked as index cards that no keyword points to yet.
+    var indexCardsNotInRegister: [LibraryCard] {
+        let linked = Set(registerEntries.flatMap(\.links).compactMap { library.index.resolve(link: $0)?.path })
+        return library.snapshot.cards.filter { IndexCardMetadata.isIndex($0.content) && !linked.contains($0.path) }
+    }
+
+    func ensureRegisterFile(_ root: URL) {
+        let url = KeywordRegister.url(in: root)
+        if !FileManager.default.fileExists(atPath: url.path) { try? Data(KeywordRegister.template.utf8).write(to: url, options: .withoutOverwriting) }
+    }
+
+    /// Rewrites Register.md, refusing if it's open with unsaved edits.
+    func updateRegister(_ change: (String) -> String) {
+        guard let root = vaultRoot else { status = "Choose a notes folder first."; return }
+        let url = KeywordRegister.url(in: root)
+        if fileURL.map({ $0.standardizedFileURL == url.standardizedFileURL }) == true, savedMarkdownSnapshot != text {
+            status = "Register.md has unsaved edits; it saves in a moment, then try again."; return
+        }
+        let before = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        let after = change(before)
+        guard after != before else { return }
+        do {
+            try Data(after.utf8).write(to: url, options: .atomic)
+            library.refresh(files: [url], folder: libraryFolder)
+            reloadOpenCards([url])
+        } catch { status = "Could not update the register: \(error.localizedDescription)" }
+    }
+
+    func addToRegister(_ url: URL) {
+        guard let card = library.card(for: url) else { status = "Save the card first, then add it to the register."; return }
+        let field = NSTextField(string: KasterTypesetter.firstTag(in: card.content) ?? card.title); field.frame.size.width = 300
+        let alert = NSAlert(); alert.messageText = "Add “\(card.title)” to the register"
+        alert.informativeText = "Keyword for this entry card. A keyword usually points to 1–3 cards where a line of thought begins."
+        alert.accessoryView = field; alert.addButton(withTitle: "Add"); alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let keyword = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !keyword.isEmpty else { return }
+        let link = CardifyNote.shortestLink(for: card.path, among: library.snapshot.cards.map(\.path))
+        updateRegister { KeywordRegister.adding(link, to: keyword, in: $0) }
+        let count = registerEntries.first { $0.keyword.caseInsensitiveCompare(keyword) == .orderedSame }?.links.count ?? 1
+        status = "Added to “\(keyword)” in the register" + (count > KeywordRegister.suggestedLinks ? " (\(count) entries; consider a hub card)." : ".")
+    }
+
+    func importIndexCardsToRegister() {
+        let cards = indexCardsNotInRegister
+        let paths = library.snapshot.cards.map(\.path)
+        updateRegister { text in
+            cards.reduce(text) { KeywordRegister.adding(CardifyNote.shortestLink(for: $1.path, among: paths), to: $1.title, in: $0) }
+        }
+        status = "Added \(cards.count) index card\(cards.count == 1 ? "" : "s") to the register."
+    }
+
+    func printRegister() {
+        let pages = KeywordRegister.printCards(registerEntries)
+        guard !pages.isEmpty else { return }
+        let cards = pages.map { KasterTypesetter.prepare($0, cardURL: nil, links: false) }
+        let layout = TypesetLayout.card(portrait: portrait, fontSize: fontSize, dotGrid: dotGrid)
+        guard KasterTypesetter.isAvailable(engine), case .success(let data) = KasterTypesetter.render(cards, layout: layout, engine: engine, color: PrintColor.stored(printMode)) else {
+            status = "Could not typeset the register."; return
+        }
+        if runPrint(data) { status = "Sent \(pages.count) register card\(pages.count == 1 ? "" : "s") to the printer." }
     }
 
     /// After Kaster rewrote files on disk (e.g. link updates), shows the new text in any editor

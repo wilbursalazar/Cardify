@@ -54,6 +54,8 @@ struct CardSidebar: View {
     let onNewCardIn: (String) -> Void
     let onNewFolderInFinder: (String) -> Void
     let onReorder: ([URL]) -> Void
+    var onOpenRegister: (() -> Void)? = nil
+    var onAddToRegister: ((URL) -> Void)? = nil
 
     @AppStorage("cardifyAppearance") private var appearance = AppearancePreference.system.rawValue
     @AppStorage("kasterFavorites") private var favorites = ""
@@ -113,6 +115,7 @@ struct CardSidebar: View {
                     actionRow("Graph", systemImage: "point.3.connected.trianglepath.dotted", action: onGraph)
                     actionRow("Search", systemImage: "magnifyingglass", shortcut: "⌘F") { startSearch() }
                         .keyboardShortcut("f", modifiers: .command)
+                    if let onOpenRegister { actionRow("Keyword Register", systemImage: "character.book.closed", action: onOpenRegister) }
                     if themesEnabled {
                         Text("Themes").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
                             .padding(.horizontal, 10).padding(.top, 16).padding(.bottom, 4)
@@ -578,6 +581,7 @@ struct CardSidebar: View {
             Button { perform(onOpenParallel, for: card) } label: { Label("Open Beside Current Card", systemImage: "rectangle.split.2x1") }
             Divider()
             Button { onPrint([card.url], "") } label: { Label("Print Card", systemImage: "printer") }
+            if let onAddToRegister { Button { onAddToRegister(card.url) } label: { Label("Add to Register…", systemImage: "character.book.closed") } }
             if card.cardID != nil {
                 let branch = KasterSequence.branch(of: card, in: store.snapshot.cards)
                 Button { onPrint(branch.map(\.url), "in the \(card.cardID ?? "") branch") } label: {

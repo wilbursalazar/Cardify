@@ -596,6 +596,18 @@ struct LibraryIndex {
     func card(path: String) -> LibraryCard? { byPath[path].map { cards[$0] } }
     func count(inFolder path: String) -> Int { folderCounts[path] ?? 0 }
 
+    /// The card a [[link]] points to: an exact path, or a file name only one card has.
+    func resolve(link raw: String) -> LibraryCard? {
+        var target = String(raw.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)[0])
+        target = String(target.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)[0]).trimmingCharacters(in: .whitespaces)
+        if target.lowercased().hasSuffix(".md") { target = String(target.dropLast(3)) }
+        if let exact = card(path: target) { return exact }
+        let lowered = target.lowercased()
+        if target.contains("/") { return cards.first { $0.path.lowercased() == lowered } }
+        let named = cards.filter { ($0.path as NSString).lastPathComponent.lowercased() == lowered }
+        return named.count == 1 ? named[0] : nil
+    }
+
     /// Cards carrying every one of these tags (case-insensitive).
     func cards(taggedWithAll names: [String]) -> [LibraryCard] {
         guard let first = names.first else { return cards }
