@@ -98,12 +98,7 @@ enum KasterTypesetter {
     /// Converts a stored card into the Markdown the engines read.
     /// `links: true` keeps clickable in-app links (preview); print output shows plain labels.
     /// The first #tag in the card body — its Holiday–Greene theme.
-    static func firstTag(in text: String) -> String? {
-        let body = stripFrontmatter(text)
-        guard let regex = try? NSRegularExpression(pattern: "(?<![\\w#&/])#([A-Za-z][\\w/-]*)"),
-              let match = regex.firstMatch(in: body, range: NSRange(location: 0, length: (body as NSString).length)) else { return nil }
-        return (body as NSString).substring(with: match.range(at: 1))
-    }
+    static func firstTag(in text: String) -> String? { CardSyntax.firstTag(in: text) }
 
     static func prepare(_ text: String, cardURL: URL? = nil, links: Bool, themes: Bool? = nil) -> TypesetCard {
         let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
@@ -125,33 +120,29 @@ enum KasterTypesetter {
     static func stripFrontmatter(_ text: String) -> String {
         var source = text
         if source.hasPrefix("\u{FEFF}") { source.removeFirst() }
-        guard source.hasPrefix("---\n") else { return text }
         let lines = source.components(separatedBy: "\n")
-        for index in 1..<lines.count where lines[index] == "---" || lines[index] == "..." {
+        guard lines.count > 1, CardSyntax.isFrontmatterOpening(lines[0]) else { return text }
+        for index in 1..<lines.count where CardSyntax.isFrontmatterClosing(lines[index]) {
             return lines[(index + 1)...].joined(separator: "\n")
         }
         return text
     }
 
     static func rewriteWikiLinks(_ text: String, links: Bool) -> String {
-        guard let regex = try? NSRegularExpression(pattern: "\\[\\[([^\\]|#]*)(#[^\\]|]*)?(?:\\|([^\\]]+))?\\]\\]") else { return text }
         let ns = text as NSString
         var result = ""
         var last = 0
-        for match in regex.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
-            result += ns.substring(with: NSRange(location: last, length: match.range.location - last))
-            let target = ns.substring(with: match.range(at: 1))
-            let fragment = match.range(at: 2).location == NSNotFound ? "" : ns.substring(with: match.range(at: 2))
+        for link in CardSyntax.wikiLinks(in: text) {
+            result += ns.substring(with: NSRange(location: last, length: link.range.location - last))
             // A link shows the card's name, not its folder path ("Zettel/Idea" → "Idea").
-            let name = (target as NSString).lastPathComponent.isEmpty ? target : (target as NSString).lastPathComponent
-            let label = match.range(at: 3).location == NSNotFound ? name + fragment : ns.substring(with: match.range(at: 3))
-            let escaped = label.replacingOccurrences(of: "[", with: "\\[").replacingOccurrences(of: "]", with: "\\]")
-            if links, let action = CardPreviewLinks.action(for: .wiki(target + fragment)) {
+            let target = link.target
+            let escaped = target.label.replacingOccurrences(of: "[", with: "\\[").replacingOccurrences(of: "]", with: "\\]")
+            if links, let action = CardPreviewLinks.action(for: .wiki(target.destination)) {
                 result += "[\(escaped)](\(action.absoluteString))"
             } else {
                 result += escaped
             }
-            last = NSMaxRange(match.range)
+            last = NSMaxRange(link.range)
         }
         result += ns.substring(from: last)
         return result

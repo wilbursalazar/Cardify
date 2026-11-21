@@ -8,13 +8,16 @@ struct CardLink {
 
 // Locations are UTF-16 offsets, matching NSTextView and NSRegularExpression.
 enum CardLinkParser {
-    static func links(in text: String) -> [CardLink] {
+    /// `includeEmbeds`: also `![[…]]` wiki embeds (rename updates them; nothing else follows them).
+    static func links(in text: String, includeEmbeds: Bool = false) -> [CardLink] {
         let source = text as NSString
         let length = source.length
         var results: [CardLink] = []
         var lineStart = 0
         var fence: (marker: unichar, count: Int)?
-        func unit(_ index: Int) -> unichar { source.character(at: index) }
+        // Read characters from a plain buffer: this runs over every card when the library loads.
+        let units = Array(text.utf16)
+        func unit(_ index: Int) -> unichar { units[index] }
         func isSpace(_ c: unichar) -> Bool { c == 32 || c == 9 || c == 10 || c == 13 }
         func find(_ needle: String, from: Int, end: Int) -> NSRange {
             guard from < end else { return NSRange(location: NSNotFound, length: 0) }
@@ -65,7 +68,7 @@ enum CardLinkParser {
                             let pipe = (raw as NSString).range(of: "|")
                             let label = pipe.location == NSNotFound ? inside : NSRange(location: inside.location + pipe.location + 1, length: inside.length - pipe.location - 1)
                             let full = NSRange(location: i, length: NSMaxRange(close) - i)
-                            if !embedded { results.append(CardLink(range: full, labelRange: label, target: .wiki(raw))) }
+                            if !embedded || includeEmbeds { results.append(CardLink(range: full, labelRange: label, target: .wiki(raw))) }
                             i = NSMaxRange(close); continue
                         }
                     } else {
@@ -111,12 +114,15 @@ enum CardLinkParser {
                         }
                     }
                 }
-                let prefix = ["https://", "http://", "zotero://"].first { value in
-                    let n = (value as NSString).length
-                    return i + n <= end && source.substring(with: NSRange(location: i, length: n)).lowercased() == value
+                // A bare web or Zotero link starts with h or z ("https://", "http://", "zotero://").
+                let startsLink = (ch == 104 || ch == 72 || ch == 122 || ch == 90) && Self.urlPrefixes.contains { prefix in
+                    i + prefix.count <= end && prefix.indices.allSatisfy { k in
+                        let c = unit(i + k)
+                        return (c >= 65 && c <= 90 ? c + 32 : c) == prefix[k]
+                    }
                 }
-                let precedingIsWord: Bool = i > lineStart && UnicodeScalar(UInt32(unit(i - 1))).map { CharacterSet.alphanumerics.contains($0) } == true
-                if prefix != nil && !precedingIsWord {
+                let precedingIsWord: Bool = startsLink && i > lineStart && UnicodeScalar(UInt32(unit(i - 1))).map { CharacterSet.alphanumerics.contains($0) } == true
+                if startsLink && !precedingIsWord {
                     var j = i, depth = 0, brackets = 0
                     while j < end {
                         let c = unit(j)
@@ -140,6 +146,8 @@ enum CardLinkParser {
         }
         return results
     }
+    private static let urlPrefixes: [[unichar]] = ["https://", "http://", "zotero://"].map { Array($0.utf16) }
+
     static func link(in text: String, atUTF16 index: Int) -> CardLink? {
         links(in: text).first { NSLocationInRange(index, $0.range) }
     }

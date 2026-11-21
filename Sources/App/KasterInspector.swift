@@ -323,18 +323,17 @@ struct KasterDocumentView: View {
     static func attributed(_ text: String) -> AttributedString {
         // Turn [[target|label]] into ordinary Markdown links with a private scheme.
         var source = text.replacingOccurrences(of: "</?u>", with: "", options: .regularExpression)
-        if let regex = try? NSRegularExpression(pattern: "\\[\\[([^\\]|#]+)(#[^\\]|]*)?(?:\\|([^\\]]+))?\\]\\]") {
+        do {
             let ns = source as NSString
             var result = ""
             var last = 0
-            for match in regex.matches(in: source, range: NSRange(location: 0, length: ns.length)) {
-                result += ns.substring(with: NSRange(location: last, length: match.range.location - last))
-                let target = ns.substring(with: match.range(at: 1))
-                let fragment = match.range(at: 2).location == NSNotFound ? "" : ns.substring(with: match.range(at: 2))
-                let label = match.range(at: 3).location == NSNotFound ? "[[" + target + fragment + "]]" : ns.substring(with: match.range(at: 3))
-                let encoded = (target + fragment).addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? target
+            for link in CardSyntax.wikiLinks(in: source) where !link.target.path.isEmpty {
+                result += ns.substring(with: NSRange(location: last, length: link.range.location - last))
+                let destination = link.target.destination
+                let label = link.target.alias ?? "[[" + destination + "]]"
+                let encoded = destination.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? destination
                 result += "[\(label.replacingOccurrences(of: "[", with: "\\[").replacingOccurrences(of: "]", with: "\\]"))](\(wikiScheme):\(encoded))"
-                last = NSMaxRange(match.range)
+                last = NSMaxRange(link.range)
             }
             result += ns.substring(from: last)
             source = result

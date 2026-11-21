@@ -86,12 +86,11 @@ enum DebateNotes {
             if start == 0 && source.character(at: start) == 0xFEFF { start += 1 }
             let line = NSRange(location: start, length: end - start)
             let value = source.substring(with: line)
-            let delimiter = value.hasPrefix("---") && value.dropFirst(3).allSatisfy { $0 == " " || $0 == "\t" }
             if firstLine {
                 firstLine = false
-                if delimiter { frontmatter = true; offset = NSMaxRange(full); continue }
+                if CardSyntax.isFrontmatterOpening(value) { frontmatter = true; offset = NSMaxRange(full); continue }
             } else if frontmatter {
-                if delimiter { frontmatter = false }
+                if CardSyntax.isFrontmatterClosing(value) { frontmatter = false }
                 offset = NSMaxRange(full); continue
             }
             if htmlComment {

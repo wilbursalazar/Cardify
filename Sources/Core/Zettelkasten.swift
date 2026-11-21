@@ -36,15 +36,8 @@ enum MarkdownSource {
             offset = NSMaxRange(full)
         }
         let bomLength = source.length > 0 && source.character(at: 0) == 0xFEFF ? 1 : 0
-        func isDelimiter(_ line: Line, first: Bool) -> Bool {
-            let extra = first ? bomLength : 0
-            guard line.content.length >= extra else { return false }
-            let range = NSRange(location: line.content.location + extra, length: line.content.length - extra)
-            let value = source.substring(with: range)
-            return value.hasPrefix("---") && value.dropFirst(3).allSatisfy { $0 == " " || $0 == "\t" }
-        }
-        let starts = result.first.map { isDelimiter($0, first: true) } ?? false
-        let end = starts ? result.indices.dropFirst().first(where: { isDelimiter(result[$0], first: false) }) : nil
+        let starts = result.first.map { CardSyntax.isFrontmatterOpening(source.substring(with: $0.content)) } ?? false
+        let end = starts ? result.indices.dropFirst().first(where: { CardSyntax.isFrontmatterClosing(source.substring(with: result[$0].content)) }) : nil
         return Lines(source: source, values: result, hasFrontmatterStart: starts, frontmatterEnd: end, bomLength: bomLength, newline: newline ?? "\n")
     }
 }

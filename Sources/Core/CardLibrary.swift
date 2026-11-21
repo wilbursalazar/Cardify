@@ -36,8 +36,7 @@ struct LibrarySnapshot {
             guard let content = try? String(contentsOf: url, encoding: .utf8) else { unreadable += 1; continue }
             let relative = String(fullPath.dropFirst(prefix.count))
             let path = String(relative.dropLast(url.pathExtension.count + 1))
-            let heading = NoteEditing.title(in: content).trimmingCharacters(in: .whitespacesAndNewlines)
-            let title = heading.isEmpty ? url.deletingPathExtension().lastPathComponent : heading
+            let title = KasterVault.displayTitle(for: url, text: content)
             let cardID = CardMetadata.parse(content).id ?? BranchIDs.filenameID(for: url) ?? BranchIDs.luhmannFilenameID(for: url) ?? BranchIDs.debateFilenameID(for: url)
             cards.append(LibraryCard(url: url, path: path, title: title, cardID: cardID, content: content))
         }
@@ -65,17 +64,11 @@ enum LibraryLinks {
         }
         var outgoing: [String: [String]] = [:]
         var incoming: [String: [String]] = [:]
-        let regex = try! NSRegularExpression(pattern: #"(?<!!)\[\[([^\]\r\n]+)\]\]"#)
         for source in sources ?? cards {
-            let value = source.content as NSString
             var seen: Set<String> = []
-            for match in regex.matches(in: source.content, range: NSRange(location: 0, length: value.length)) {
-                var target = value.substring(with: match.range(at: 1))
-                target = String(target.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)[0])
-                target = String(target.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)[0]).trimmingCharacters(in: .whitespacesAndNewlines)
-                if target.lowercased().hasSuffix(".md") { target = String(target.dropLast(3)) }
+            for link in CardSyntax.wikiLinks(in: source.content) {
+                let target = link.target.path
                 guard !target.isEmpty else { continue }
-                if target.hasPrefix("/") { target.removeFirst() }
                 // An unqualified name shared by multiple files is ambiguous,
                 // even when one happens to live at the vault root.
                 if !target.contains("/"), (byName[target.lowercased()]?.count ?? 0) > 1 { continue }
@@ -170,8 +163,7 @@ extension LibrarySnapshot {
                 continue
             }
             let url = URL(fileURLWithPath: prefix + path + "." + file.pathExtension)
-            let heading = NoteEditing.title(in: content).trimmingCharacters(in: .whitespacesAndNewlines)
-            let title = heading.isEmpty ? url.deletingPathExtension().lastPathComponent : heading
+            let title = KasterVault.displayTitle(for: url, text: content)
             let cardID = CardMetadata.parse(content).id ?? BranchIDs.filenameID(for: url) ?? BranchIDs.luhmannFilenameID(for: url) ?? BranchIDs.debateFilenameID(for: url)
             if byPath[path] == nil { pathsChanged = true }
             byPath[path] = LibraryCard(url: url, path: path, title: title, cardID: cardID, content: content)

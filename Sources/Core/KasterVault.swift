@@ -104,10 +104,10 @@ enum KasterFrontmatter {
     private static func split(_ text: String) -> (newline: String, lines: [String], end: Int?)? {
         let newline = text.contains("\r\n") ? "\r\n" : "\n"
         let lines = text.components(separatedBy: newline)
-        guard let first = lines.first, first.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: "\u{feff}", with: "") == "---" else {
+        guard let first = lines.first, CardSyntax.isFrontmatterOpening(first) else {
             return (newline, lines, nil)
         }
-        let end = lines.indices.dropFirst().first { lines[$0].trimmingCharacters(in: .whitespaces) == "---" || lines[$0] == "..." }
+        let end = lines.indices.dropFirst().first { CardSyntax.isFrontmatterClosing(lines[$0]) }
         guard let end else { return nil }  // unterminated: never touch
         return (newline, lines, end)
     }
@@ -122,10 +122,10 @@ enum KasterFrontmatter {
         // "\r\n" is one Character in Swift, so split on either form.
         let isBreak: (Character) -> Bool = { $0 == "\n" || $0 == "\r\n" }
         var lines = body.split(maxSplits: 200, omittingEmptySubsequences: false, whereSeparator: isBreak).dropFirst().makeIterator()
-        guard body.split(maxSplits: 1, whereSeparator: isBreak).first?.trimmingCharacters(in: .whitespaces) == "---" else { return [:] }
+        guard let opening = body.split(maxSplits: 1, whereSeparator: isBreak).first, CardSyntax.isFrontmatterOpening(opening) else { return [:] }
         while let raw = lines.next() {
             let line = raw
-            if line.trimmingCharacters(in: .whitespaces) == "---" || line == "..." { return result }
+            if CardSyntax.isFrontmatterClosing(line) { return result }
             guard let colon = line.firstIndex(of: ":"), line.first.map({ !$0.isWhitespace }) == true else { continue }
             let key = String(line[..<colon])
             guard result[key] == nil else { continue }
@@ -334,19 +334,18 @@ enum KasterVault {
     /// Rewrites [[old]], [[old|label]], [[old#heading]] and folder-path forms to the new name.
     static func rewriteLinks(in text: String, from oldPaths: [String], to newPath: String) -> String? {
         let olds = Set(oldPaths.filter { !$0.isEmpty }.map { $0.lowercased() })
-        guard !olds.isEmpty, let regex = try? NSRegularExpression(pattern: "\\[\\[([^\\]|#]+)((?:#[^\\]|]*)?(?:\\|[^\\]]*)?)\\]\\]") else { return nil }
+        guard !olds.isEmpty else { return nil }
         let ns = text as NSString
         var result = ""
         var last = 0
         var changed = false
-        for match in regex.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
-            let target = ns.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespaces)
-            var comparable = target.lowercased()
-            if comparable.hasSuffix(".md") { comparable = String(comparable.dropLast(3)) }
-            guard olds.contains(comparable) else { continue }
-            result += ns.substring(with: NSRange(location: last, length: match.range.location - last))
-            result += "[[\(newPath)\(ns.substring(with: match.range(at: 2)))]]"
-            last = NSMaxRange(match.range)
+        for link in CardSyntax.wikiLinks(in: text, includeEmbeds: true) {
+            guard olds.contains(link.target.path.lowercased()) else { continue }
+            // Keep everything after the name: "#Heading" and "|Label".
+            let suffix = link.raw.firstIndex(where: { $0 == "#" || $0 == "|" }).map { String(link.raw[$0...]) } ?? ""
+            result += ns.substring(with: NSRange(location: last, length: link.range.location - last))
+            result += "[[\(newPath)\(suffix)]]"
+            last = NSMaxRange(link.range)
             changed = true
         }
         guard changed else { return nil }
@@ -508,18 +507,9 @@ struct LibraryIndex {
             (match.range(at: 1).location == NSNotFound ? "personal" : ns.substring(with: match.range(at: 1))) + "/" + ns.substring(with: match.range(at: 2))
         })
     }
-    private static let tagPattern = try! NSRegularExpression(pattern: "(?<![\\w#&/])#([A-Za-z][\\w/-]*)")
 
-    /// Every #tag in a card's text (code spans and fenced blocks included; headings need a space, so never match).
-    static func tags(in text: String) -> [String] {
-        let ns = text as NSString
-        var seen: [String] = []
-        for match in tagPattern.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
-            let tag = ns.substring(with: match.range(at: 1))
-            if !seen.contains(where: { $0.caseInsensitiveCompare(tag) == .orderedSame }) { seen.append(tag) }
-        }
-        return seen
-    }
+    /// Every #tag in a card's text (see CardSyntax).
+    static func tags(in text: String) -> [String] { CardSyntax.tags(in: text) }
     /// Luhmann-numbered cards in sequence order (Promote → Branch From…).
     let zettels: [LibraryCard]
 

@@ -36,12 +36,9 @@ struct OutlineDocument: Codable, Equatable {
         var lines = withoutBOM.components(separatedBy: "\n")
         let trailing = withoutBOM.hasSuffix("\n")
         if trailing { lines.removeLast() }
-        func delimiter(_ line: String) -> Bool {
-            line.hasPrefix("---") && line.dropFirst(3).allSatisfy { $0 == " " || $0 == "\t" }
-        }
         var markerIndex = 0
-        if let first = lines.first, delimiter(first) {
-            guard let end = lines.indices.dropFirst().first(where: { delimiter(lines[$0]) }) else { return nil }
+        if let first = lines.first, CardSyntax.isFrontmatterOpening(first) {
+            guard let end = lines.indices.dropFirst().first(where: { CardSyntax.isFrontmatterClosing(lines[$0]) }) else { return nil }
             markerIndex = end + 1
             while markerIndex < lines.count && lines[markerIndex].isEmpty { markerIndex += 1 }
         }

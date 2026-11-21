@@ -19,10 +19,8 @@ enum IndexCardMetadata {
     private static func frontmatter(_ text: String) -> (lines: [String], end: Int, newline: String)? {
         let newline = newline(in: text)
         let lines = text.components(separatedBy: newline)
-        func delimiter(_ line: String) -> Bool {
-            line.hasPrefix("---") && line.dropFirst(3).allSatisfy { $0 == " " || $0 == "\t" }
-        }
-        guard let first = lines.first, delimiter(first), let end = lines.indices.dropFirst().first(where: { delimiter(lines[$0]) }) else { return nil }
+        guard let first = lines.first, CardSyntax.isFrontmatterOpening(first),
+              let end = lines.indices.dropFirst().first(where: { CardSyntax.isFrontmatterClosing(lines[$0]) }) else { return nil }
         return (lines, end, newline)
     }
 
@@ -59,7 +57,7 @@ enum IndexCardMetadata {
     static func marking(_ text: String) -> String? {
         guard !text.hasPrefix("\u{FEFF}") else { return nil }
         let newline = newline(in: text)
-        let startsFrontmatter = text.components(separatedBy: newline).first?.trimmingCharacters(in: .whitespaces) == "---"
+        let startsFrontmatter = text.components(separatedBy: newline).first.map { CardSyntax.isFrontmatterOpening($0) } ?? false
         guard startsFrontmatter else { return "---\(newline)cardify_index: true\(newline)---\(newline)" + text }
         guard let front = frontmatter(text), isMapping(front) else { return nil }
         var lines = front.lines

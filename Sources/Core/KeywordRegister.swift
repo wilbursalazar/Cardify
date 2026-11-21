@@ -21,7 +21,6 @@ enum KeywordRegister {
 
     static let template = "---\nkaster_register: true\n---\n# Register\n\n"
 
-    private static let linkPattern = try! NSRegularExpression(pattern: "\\[\\[([^\\]\\n]+)\\]\\]")
 
     /// The entry on one line, or nil if the line isn't a register entry.
     static func entry(in line: String) -> Entry? {
@@ -30,8 +29,7 @@ enum KeywordRegister {
         let keyword = trimmed[trimmed.index(trimmed.startIndex, offsetBy: 2)..<colon].trimmingCharacters(in: .whitespaces)
         guard !keyword.isEmpty, !keyword.contains("[[") else { return nil }
         let rest = String(trimmed[trimmed.index(after: colon)...])
-        let ns = rest as NSString
-        let links = linkPattern.matches(in: rest, range: NSRange(location: 0, length: ns.length)).map { ns.substring(with: $0.range(at: 1)) }
+        let links = CardSyntax.wikiLinks(in: rest).map(\.raw)
         return Entry(keyword: keyword, links: links)
     }
 

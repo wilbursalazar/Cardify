@@ -250,16 +250,7 @@ enum KasterText {
         if metadata.id != nil { body = metadata.body }
         return body.split { $0.isWhitespace || $0.isNewline }.filter { $0.contains { $0.isLetter || $0.isNumber } }.count
     }
-    static func tags(_ text: String) -> [String] {
-        guard let regex = try? NSRegularExpression(pattern: "(?<![\\w#&])#([A-Za-z][\\w/-]*)") else { return [] }
-        let ns = text as NSString
-        var seen: [String] = []
-        for match in regex.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
-            let tag = ns.substring(with: match.range(at: 1))
-            if !seen.contains(tag) { seen.append(tag) }
-        }
-        return seen
-    }
+    static func tags(_ text: String) -> [String] { CardSyntax.tags(in: text) }
 }
 
 // Luhmann sequences: 21 → 21/1 → 21/1a → 21/1a1. A descendant extends the parent's ID

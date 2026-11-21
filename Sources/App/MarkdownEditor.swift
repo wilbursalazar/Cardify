@@ -150,14 +150,10 @@ final class LinkCompletionTextView: NSTextView {
             while end > range.location && [10, 13].contains(Int(source.character(at: end - 1))) { end -= 1 }
             return source.substring(with: NSRange(location: range.location, length: end - range.location))
         }
-        func delimiter(_ line: String) -> Bool {
-            guard line.hasPrefix("---") else { return false }
-            return line.dropFirst(3).allSatisfy { $0 == " " || $0 == "\t" }
-        }
         let first = source.lineRange(for: NSRange(location: 0, length: 0))
         var opening = lineContent(first)
         if opening.hasPrefix("\u{feff}") { opening.removeFirst() }
-        guard delimiter(opening) else { return nil }
+        guard CardSyntax.isFrontmatterOpening(opening) else { return nil }
         let mapping = try! NSRegularExpression(pattern: #"^([\p{L}_][\p{L}\p{N}_. -]*|'(?:[^']|'')*'|"(?:[^"\\]|\\.)*")[ \t]*:[ \t]*(.*)$"#)
         var at = NSMaxRange(first)
         var hasMapping = false
@@ -166,7 +162,7 @@ final class LinkCompletionTextView: NSTextView {
         while at < source.length {
             let line = source.lineRange(for: NSRange(location: at, length: 0))
             let content = lineContent(line)
-            if delimiter(content) { return hasMapping ? (NSRange(location: 0, length: NSMaxRange(line)), hasCardifyMarker) : nil }
+            if CardSyntax.isFrontmatterClosing(content) { return hasMapping ? (NSRange(location: 0, length: NSMaxRange(line)), hasCardifyMarker) : nil }
             let trimmed = content.trimmingCharacters(in: .whitespaces)
             if trimmed.isEmpty || trimmed.hasPrefix("#") { at = NSMaxRange(line); continue }
             if content.hasPrefix(" ") || content.hasPrefix("\t") {

@@ -54,4 +54,11 @@ if let file = LibraryCache.file(for: root) { try? manager.removeItem(at: file) }
 for (name, value) in results { print(String(format: "%-44@ %9.2f ms", name as NSString, value)) }
 let lookup = results.first { $0.0 == "card(for:) indexed" }!.1, inc = results.first { $0.0 == "Incremental update of one saved card" }!.1
 precondition(lookup < 1 && inc < 150, "Indexed lookups must stay under 1 ms and incremental updates under 150 ms")
+// Budgets about 3× today's times on an M-series Mac, so slower CI machines pass but a real
+// regression fails (a slow link parser once made the scan 3.6 s and launch 3.3 s).
+let budgets: [String: Double] = ["Full library scan": 2000, "Build LibraryIndex": 2000, "Load library cache (launch head start)": 1000, "Save library cache": 500]
+for (name, budget) in budgets {
+    let value = results.first { $0.0 == name }!.1
+    precondition(value < budget, "\(name) took \(Int(value)) ms; the budget is \(Int(budget)) ms")
+}
 print("Performance at \(count) cards passed")

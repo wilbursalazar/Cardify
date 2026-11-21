@@ -82,18 +82,14 @@ enum MarkdownRendering {
         // Turn Obsidian links into temporary Markdown links so the parser can
         // handle link labels inside bold/italic spans as well as ordinary links.
         var markdown = source
-        let pattern = try! NSRegularExpression(pattern: #"\[\[([^\]\n]+)\]\]"#)
-        let matches = pattern.matches(in: markdown, range: NSRange(markdown.startIndex..., in: markdown))
-        for match in matches.reversed() {
-            guard let whole = Range(match.range, in: markdown), let inside = Range(match.range(at: 1), in: markdown) else { continue }
-            let parts = markdown[inside].split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)
+        let length = (source as NSString).length
+        // The wiki links CardLinkParser found in this span (never inside code).
+        for link in links.reversed() {
+            guard case .wiki(let raw) = link.target, link.range.location >= offset, NSMaxRange(link.range) <= offset + length,
+                  let whole = Range(NSRange(location: link.range.location - offset, length: link.range.length), in: markdown) else { continue }
+            let parts = raw.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)
             let label = String(parts.last ?? "").replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "[", with: "\\[").replacingOccurrences(of: "]", with: "\\]")
-            let recognized = links.first { link in
-                guard link.range.location == offset + match.range.location else { return false }
-                if case .wiki = link.target { return true }
-                return false
-            }
-            let destination = recognized.flatMap { CardPreviewLinks.action(for: $0.target) }?.absoluteString ?? "https://cardify.invalid/"
+            let destination = CardPreviewLinks.action(for: link.target)?.absoluteString ?? "https://cardify.invalid/"
             markdown.replaceSubrange(whole, with: "[\(label)](\(destination))")
         }
         guard let parsed = try? AttributedString(markdown: markdown, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) else {
