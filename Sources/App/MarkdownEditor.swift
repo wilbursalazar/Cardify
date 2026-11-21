@@ -939,7 +939,10 @@ private struct MarkdownTextView: NSViewRepresentable {
         view.handleToolbarKey = nil
         view.followLink = nil
         NotificationCenter.default.removeObserver(coordinator)
-        coordinator.parent.selectionToolbar.clear()
+        // SwiftUI is dismantling the window right now: changing published state here aborts the
+        // app (a Swift exclusivity violation inside SwiftUI). Clear the toolbar just afterwards.
+        let toolbar = coordinator.parent.selectionToolbar
+        DispatchQueue.main.async { [weak toolbar] in toolbar?.clear() }
         if coordinator.parent.editor.view === view { coordinator.parent.editor.view = nil }
         if coordinator.parent.completion.view === view { coordinator.parent.completion.view = nil }
     }

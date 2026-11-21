@@ -5,7 +5,8 @@ on:
   pull_request:
 jobs:
   test:
-    runs-on: macos-15
+    # Current macOS (PDFKit on macOS 15 measures embedded system fonts differently).
+    runs-on: macos-26
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
