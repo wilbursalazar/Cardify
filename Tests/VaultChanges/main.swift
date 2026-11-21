@@ -177,6 +177,22 @@ func text(_ url: URL) -> String? { (try? Data(contentsOf: url)).map { String(dec
         engine = VaultChanges(journalFolder: journal, files: files)
         let createThenMove = VaultChange(summary: "Duplicate", steps: [.write(root.appendingPathComponent("Copy.md").path, Data("# Copy\n".utf8)), .move(root.appendingPathComponent("B.md").path, root.appendingPathComponent("Notes/B.md").path)])
         precondition((try? engine.apply(createThenMove)) == nil && !manager.fileExists(atPath: root.appendingPathComponent("Copy.md").path))
-        print("Vault changes: journaled steps, undo on failure, finish or undo after a quit, Trash and case-only renames passed")
+        // 13. Guarded updates: a file changed since the plan stops the change, and it's undone.
+        (root, journal, files) = try vault()
+        engine = VaultChanges(journalFolder: journal, files: files)
+        let planned = VaultChange(summary: "Rename C", steps: [
+            .update(root.appendingPathComponent("A.md").path, from: Data("# A\n\nSee [[B]].\n".utf8), to: Data("# A\n\nSee [[Bee]].\n".utf8)),
+            .update(root.appendingPathComponent("B.md").path, from: Data("# B (as planned)\n".utf8), to: Data("# Bee\n".utf8)),
+        ])
+        do { try engine.apply(planned); preconditionFailure("A changed file must stop the change") }
+        catch let error as VaultChanges.Failure { precondition(error.undone && error.reason.contains("changed while Kaster was updating it"), "\(error)") }
+        precondition(untouched(root), "The first update was undone; B kept its own text")
+        // …and recovery treats an update like a write.
+        try VaultChanges(journalFolder: journal, files: files, stopAfter: 1).apply(VaultChange(summary: "Two", steps: [
+            .update(root.appendingPathComponent("A.md").path, from: Data("# A\n\nSee [[B]].\n".utf8), to: Data("# A2\n".utf8)),
+            .update(root.appendingPathComponent("B.md").path, from: Data("# B\n".utf8), to: Data("# B2\n".utf8)),
+        ]))
+        precondition(VaultChanges(journalFolder: journal, files: files).recoverInterrupted().map(\.outcome) == [.finished] && text(root.appendingPathComponent("B.md")) == "# B2\n")
+        print("Vault changes: journaled steps, undo on failure, finish or undo after a quit, Trash, case-only renames and guarded updates passed")
     }
 }

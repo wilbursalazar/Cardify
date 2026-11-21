@@ -8,6 +8,9 @@ struct VaultChange: Codable, Equatable {
         case makeFolder(String)
         /// Replace (or create) a file's contents.
         case write(String, Data)
+        /// Replace a file's contents only if it still holds `from` (what the plan was made from),
+        /// so an edit made meanwhile (in Obsidian, say) is never overwritten.
+        case update(String, from: Data, to: Data)
         /// Move a file or folder; the destination must be free.
         case move(String, String)
         case trash(String)
@@ -134,6 +137,7 @@ struct VaultChanges {
         do {
             before = try change.steps.map { step -> Data? in
                 if case .write(let path, _) = step { return try files.read(URL(fileURLWithPath: path)) }
+                if case .update(_, let from, _) = step { return from }
                 return nil
             }
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -174,6 +178,13 @@ struct VaultChanges {
             guard current != data else { return }
             try files.write(data, to: url, creating: current == nil)
             guard try files.read(url) == data else { throw CocoaError(.fileWriteUnknown, userInfo: [NSLocalizedDescriptionKey: "\((path as NSString).lastPathComponent) did not save correctly."]) }
+        case .update(let path, let from, let to):
+            let url = URL(fileURLWithPath: path)
+            let current = try files.read(url)
+            guard current != to else { return }
+            guard current == from else { throw CocoaError(.fileWriteUnknown, userInfo: [NSLocalizedDescriptionKey: "\((path as NSString).lastPathComponent) changed while Kaster was updating it."]) }
+            try files.write(to, to: url, creating: false)
+            guard try files.read(url) == to else { throw CocoaError(.fileWriteUnknown, userInfo: [NSLocalizedDescriptionKey: "\((path as NSString).lastPathComponent) did not save correctly."]) }
         case .move(let from, let to):
             let source = URL(fileURLWithPath: from), destination = URL(fileURLWithPath: to)
             let caseOnly = from.lowercased() == to.lowercased()
@@ -190,6 +201,7 @@ struct VaultChanges {
         switch step {
         case .makeFolder(let path): return files.exists(URL(fileURLWithPath: path))
         case .write(let path, let data): return (try? files.read(URL(fileURLWithPath: path))) == data
+        case .update(let path, _, let to): return (try? files.read(URL(fileURLWithPath: path))) == to
         case .move(let from, let to):
             if from.lowercased() == to.lowercased() { return realName(to) == (to as NSString).lastPathComponent }
             return !files.exists(URL(fileURLWithPath: from)) && files.exists(URL(fileURLWithPath: to))
@@ -202,6 +214,7 @@ struct VaultChanges {
         switch step {
         case .makeFolder: return true
         case .write(let path, _): return (try? files.read(URL(fileURLWithPath: path))) == before
+        case .update(let path, let from, _): return (try? files.read(URL(fileURLWithPath: path))) == from
         case .move(let from, let to):
             if from.lowercased() == to.lowercased() { return realName(from) == (from as NSString).lastPathComponent }
             return files.exists(URL(fileURLWithPath: from)) && !files.exists(URL(fileURLWithPath: to))
@@ -235,6 +248,13 @@ struct VaultChanges {
                 do {
                     if let original = before[index] { try files.write(original, to: url, creating: false) } else { try files.remove(url) }
                 } catch { left.append(path) }
+            case .update(let path, let from, let to):
+                let url = URL(fileURLWithPath: path)
+                guard (try? files.read(url)) == to else {
+                    if (try? files.read(url)) != from { left.append(path) }
+                    continue
+                }
+                do { try files.write(from, to: url, creating: false) } catch { left.append(path) }
             case .move(let from, let to):
                 let source = URL(fileURLWithPath: from), destination = URL(fileURLWithPath: to)
                 let caseOnly = from.lowercased() == to.lowercased()

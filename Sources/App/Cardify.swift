@@ -868,6 +868,7 @@ struct ContentView: View {
         .onChange(of: text) { _ in if cardMode == "markdown" { scheduleAutosave() } }
         // Files changed outside Kaster: show the new text in any open card you haven't edited.
         .onChange(of: library.externalChange?.id) { _ in if let files = library.externalChange?.files { reloadOpenCards(files) } }
+        .onChange(of: library.generation) { _ in repairDuplicateUIDs() }
         .onChange(of: fileURL) { url in
             rememberOpenFile(url)
             rememberTab(url)
@@ -1157,7 +1158,7 @@ struct ContentView: View {
     /// Saves a dragged order as `order:` 10, 20, 30… in each card's frontmatter.
     func saveManualOrder(_ urls: [URL]) {
         var changed = 0
-        var others: [(url: URL, text: String)] = []
+        var others: [CardWrite] = []
         for (index, url) in urls.enumerated() {
             let value = String((index + 1) * 10)
             if let current = fileURL, KasterPathList.key(current) == KasterPathList.key(url), cardMode == "markdown" {
@@ -1169,7 +1170,7 @@ struct ContentView: View {
             }
             guard let content = try? String(contentsOf: url, encoding: .utf8), KasterFrontmatter.value("order", in: content) != value,
                   let updated = KasterFrontmatter.setting("order", to: value, in: content) else { continue }
-            others.append((url, updated))
+            others.append(CardWrite(url: url, text: updated, original: content))
         }
         do {
             // The other cards' order changes as one change: all of them or none.
@@ -2121,6 +2122,31 @@ struct ContentView: View {
         var discarded: [String] = []
         return confirmReplaceDrafts([cardMode], hidden: hidden, discarded: &discarded)
     }
+    /// One editor mode's draft, and its text as last saved.
+    func draftContents(_ mode: String) -> String {
+        mode == "habits" ? tracker.markdown : mode == "todos" ? todo.markdown : mode == "outline" ? outline.markdown : text
+    }
+    func savedDraft(_ mode: String) -> String? {
+        mode == "habits" ? savedHabitSnapshot : mode == "todos" ? savedTodoSnapshot : mode == "outline" ? savedOutlineSnapshot : savedMarkdownSnapshot
+    }
+
+    /// Copies made outside Kaster carry their original's permanent uid; each gets its own (the
+    /// oldest card keeps it). A copy open with unsaved edits waits until it has been saved.
+    func repairDuplicateUIDs() {
+        let fixes = UIDRepair.fixes(index: library.index, created: library.created, modified: library.modified)
+        guard !fixes.isEmpty else { return }
+        let ready = fixes.filter { fix in
+            !fileURLs.contains { mode, url in KasterPathList.key(url) == KasterPathList.key(fix.url) && savedDraft(mode) != draftContents(mode) }
+        }
+        guard !ready.isEmpty else { return }
+        do {
+            try cardChanges.write(ready.map { CardWrite(url: $0.url, text: $0.newText, original: $0.original) }, summary: "Give copied cards their own permanent ID")
+            reloadOpenCards(ready.map(\.url))
+            library.refresh(files: ready.map(\.url), folder: libraryFolder)
+            status = UIDRepair.message(ready)
+        } catch { status = "Could not give copied cards their own ID: \(error.localizedDescription)" }
+    }
+
     func currentDraftContents() -> String {
         cardMode == "habits" ? tracker.markdown : cardMode == "todos" ? todo.markdown : cardMode == "outline" ? outline.markdown : text
     }
@@ -2191,8 +2217,8 @@ struct ContentView: View {
     private var drafts: EditorDrafts {
         EditorDrafts(state: DraftState(
             mode: { cardMode },
-            contentsOf: { mode in mode == "habits" ? tracker.markdown : mode == "todos" ? todo.markdown : mode == "outline" ? outline.markdown : text },
-            savedOf: { mode in mode == "habits" ? savedHabitSnapshot : mode == "todos" ? savedTodoSnapshot : mode == "outline" ? savedOutlineSnapshot : savedMarkdownSnapshot },
+            contentsOf: { draftContents($0) },
+            savedOf: { savedDraft($0) },
             baselineOf: { newDraftBaselines[$0] },
             urlOf: { fileURLs[$0] },
             saveMode: { mode, quiet in

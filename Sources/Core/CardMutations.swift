@@ -189,8 +189,9 @@ struct CardMutationService {
         }
     }
 
-    /// Writes several cards as one change (all or none).
-    func write(_ texts: [(url: URL, text: String)], summary: String) throws {
-        try changes.apply(KasterVault.change(summary, writes: texts, moves: []))
+    /// Writes several cards as one change (all or none). Each write needs the file to still
+    /// hold its `original` text.
+    func write(_ writes: [CardWrite], summary: String) throws {
+        try changes.apply(KasterVault.change(summary, writes: writes, moves: []))
     }
 }

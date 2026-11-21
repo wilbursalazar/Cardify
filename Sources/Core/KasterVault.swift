@@ -362,7 +362,7 @@ enum KasterVault {
     /// moves. Links use the new filename; links that used a folder path keep using one.
     /// `overrides` are files the change rewrites anyway (path → new text): link changes apply on
     /// top, and they're always included.
-    static func linkUpdates(root: URL, moves: [(from: URL, to: URL)], overrides: [String: String] = [:]) -> [(url: URL, text: String)] {
+    static func linkUpdates(root: URL, moves: [(from: URL, to: URL)], overrides: [String: String] = [:]) -> [CardWrite] {
         var mapping: [String: String] = [:]
         for move in moves {
             guard let oldRelative = relativePath(of: move.from, in: root), let newRelative = relativePath(of: move.to, in: root) else { continue }
@@ -372,26 +372,32 @@ enum KasterVault {
             let oldName = (oldPath as NSString).lastPathComponent, newName = (newPath as NSString).lastPathComponent
             if oldName != newName { mapping[oldName.lowercased()] = newName }
         }
-        var updates: [(url: URL, text: String)] = []
+        var updates: [CardWrite] = []
         var covered = Set<String>()
         for file in markdownFiles(in: root) {
             let key = file.resolvingSymlinksInPath().standardizedFileURL.path
             covered.insert(key)
             let override = overrides[key]
-            guard let base = override ?? (try? String(contentsOf: file, encoding: .utf8)) else { continue }
+            let disk = override == nil ? (try? String(contentsOf: file, encoding: .utf8)) : nil
+            guard let base = override ?? disk else { continue }
             let updated = rewriteLinks(in: base, mapping: mapping) ?? base
-            if override != nil || updated != base { updates.append((file, updated)) }
+            if override != nil || updated != base { updates.append(CardWrite(url: file, text: updated, original: disk)) }
         }
         // A file the change writes that isn't a card in the vault (yet) is still written.
-        for (path, text) in overrides where !covered.contains(path) { updates.append((URL(fileURLWithPath: path), text)) }
+        for (path, text) in overrides where !covered.contains(path) { updates.append(CardWrite(url: URL(fileURLWithPath: path), text: text, original: nil)) }
         return updates
     }
 
     /// One journaled change: write these texts (each at its current path), then do these moves.
-    static func change(_ summary: String, writes: [(url: URL, text: String)], moves: [(from: URL, to: URL)], folders: [URL] = []) -> VaultChange {
+    /// A write that knows the text it was planned from only happens if the file still holds it.
+    static func change(_ summary: String, writes: [CardWrite], moves: [(from: URL, to: URL)], folders: [URL] = []) -> VaultChange {
         VaultChange(summary: summary, steps:
             folders.map { .makeFolder($0.standardizedFileURL.path) } +
-            writes.map { .write($0.url.standardizedFileURL.path, Data($0.text.utf8)) } +
+            writes.map { write in
+                let path = write.url.standardizedFileURL.path
+                if let original = write.original { return .update(path, from: Data(original.utf8), to: Data(write.text.utf8)) }
+                return .write(path, Data(write.text.utf8))
+            } +
             moves.map { .move($0.from.standardizedFileURL.path, $0.to.standardizedFileURL.path) })
     }
 
@@ -499,6 +505,14 @@ enum KasterVault {
     }
 }
 
+/// New text for a card file. `original`: the text the change was planned from, if read from disk
+/// (the write then refuses to happen if the file changed meanwhile).
+struct CardWrite: Equatable {
+    let url: URL
+    let text: String
+    let original: String?
+}
+
 // MARK: Library index
 
 /// Lookups the editor makes on every render, computed once per library snapshot
@@ -515,6 +529,8 @@ struct LibraryIndex {
     let ids: Set<String>
     private let byMode: [KasterMode: [LibraryCard]]
     private let byUID: [String: Int]
+    /// Permanent uids that more than one card carries (a copy made outside Kaster), with those cards.
+    let duplicateUIDs: [String: [LibraryCard]]
     /// Research cards citing each Zotero item ("library/key").
     private let zoteroCiting: [String: [LibraryCard]]
     /// Cards inside each folder path, including subfolders.
@@ -542,6 +558,7 @@ struct LibraryIndex {
         incoming = snapshot.incoming; outgoing = snapshot.outgoing
         var byKey: [String: Int] = [:], byPath: [String: Int] = [:], orders: [String: Double] = [:]
         var modes: [String: KasterMode] = [:], ids: Set<String> = [], byMode: [KasterMode: [LibraryCard]] = [:], byUID: [String: Int] = [:]
+        var duplicates: [String: [LibraryCard]] = [:]
         var zoteroCiting: [String: [LibraryCard]] = [:], folderCounts: [String: Int] = [:]
         var tagged: [String: Set<String>] = [:], spelled: [String: String] = [:]
         for (index, card) in snapshot.cards.enumerated() {
@@ -556,7 +573,9 @@ struct LibraryIndex {
             }
             let header = KasterFrontmatter.fields(in: card.content)
             if let order = header["order"].flatMap(Double.init) { orders[card.path] = order }
-            if let uid = header["uid"] { byUID[uid] = byUID[uid] ?? index }
+            if let uid = header["uid"] {
+                if let first = byUID[uid] { duplicates[uid, default: [snapshot.cards[first]]].append(card) } else { byUID[uid] = index }
+            }
             var cited = Set<String>()
             // Footnote citations link the item: zotero://select/library/items/KEY
             if card.content.contains("zotero://select/") { cited.formUnion(Self.zoteroItems(in: card.content)) }
@@ -573,7 +592,7 @@ struct LibraryIndex {
             else if metadataID == nil, let id = BranchIDs.luhmannFilenameID(for: card.url) { ids.insert(id) }
             if let id = BranchIDs.debateFilenameID(for: card.url), id.caseInsensitiveCompare(metadataID ?? "") != .orderedSame { ids.insert(id) }
         }
-        self.byKey = byKey; self.byPath = byPath; self.orders = orders; self.modes = modes; self.ids = ids; self.byUID = byUID; self.zoteroCiting = zoteroCiting; self.folderCounts = folderCounts
+        self.byKey = byKey; self.byPath = byPath; self.orders = orders; self.modes = modes; self.ids = ids; self.byUID = byUID; self.duplicateUIDs = duplicates; self.zoteroCiting = zoteroCiting; self.folderCounts = folderCounts
         self.tagged = tagged
         tags = tagged.map { (name: spelled[$0.key] ?? $0.key, count: $0.value.count) }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
