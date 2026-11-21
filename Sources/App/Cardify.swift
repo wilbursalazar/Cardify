@@ -2144,54 +2144,86 @@ struct ContentView: View {
         guard Data(currentDraftContents().utf8) != Data((currentDraftSnapshot() ?? currentDraftInitial()).utf8) else { return true }
         return automatic ? saveMarkdown(automatic: true) : saveMarkdown()
     }
-    // When opening a different card type, both drafts can be unsaved. Ask
-    // once and apply the same Save/Discard/Cancel choice to both.
+    // When opening a different card type, both drafts can be unsaved. EditorDrafts asks
+    // once and applies the same Save/Discard/Cancel choice to both.
     func confirmReplaceDrafts(_ modes: [String], hidden: Bool = false, discarded: inout [String]) -> Bool {
-        discarded = []
-        let originalMode = cardMode
-        defer { cardMode = originalMode }
-        var unique: [String] = []
-        for mode in modes where !unique.contains(mode) { unique.append(mode) }
-        var unsaved: [String] = []
-        for mode in unique {
-            cardMode = mode
-            let baseline = currentDraftSnapshot().map { Data($0.utf8) } ?? newDraftBaselines[mode] ?? Data(currentDraftInitial().utf8)
-            guard Data(currentDraftContents().utf8) != baseline else { continue }
-            if fileURL != nil {
-                let wasSuppressed = suppressHistorySave
-                if mode != originalMode { suppressHistorySave = true }
-                let ok = saveMarkdown()
-                suppressHistorySave = wasSuppressed
-                guard ok else { return false }
-            } else { unsaved.append(mode) }
+        guard let chosen = drafts.confirmReplacing(modes, hidden: hidden) else { discarded = []; return false }
+        discarded = chosen
+        return true
+    }
+
+    /// The editor's per-mode drafts as EditorDrafts sees them.
+    private struct DraftState: EditorDraftState {
+        let mode: () -> String
+        let contentsOf: (String) -> String
+        let savedOf: (String) -> String?
+        let baselineOf: (String) -> Data?
+        let urlOf: (String) -> URL?
+        let saveMode: (String, Bool) -> Bool
+        let clearMode: (String) -> Void
+        let showCard: (OpenedCard) -> Void
+        var activeMode: String { mode() }
+        func contents(_ mode: String) -> String { contentsOf(mode) }
+        func saved(_ mode: String) -> String? { savedOf(mode) }
+        func baseline(_ mode: String) -> Data? { baselineOf(mode) }
+        func initial(_ mode: String) -> String {
+            mode == "habits" ? HabitTracker().markdown : mode == "todos" ? TodoList().markdown : mode == "outline" ? OutlineDocument().markdown : ""
         }
-        guard !unsaved.isEmpty else { return true }
-        let alert = NSAlert()
-        if unsaved.count == 1 {
-            let kind = unsaved[0] == "habits" ? "habit" : unsaved[0] == "todos" ? "to-do" : unsaved[0] == "outline" ? "outline" : "research"
-            alert.messageText = "Save changes to your \(kind) draft?"
-            alert.informativeText = hidden ? "The existing \(kind) draft will be replaced." : "Your current draft will be replaced or left behind."
-        } else {
-            alert.messageText = "Save changes to your drafts?"
-            alert.informativeText = "There are \(unsaved.count) unsaved drafts involved. Save or discard them before opening this card."
-        }
-        alert.addButton(withTitle: "Save…")
-        alert.addButton(withTitle: "Discard")
-        alert.addButton(withTitle: "Cancel")
-        switch alert.runModal() {
-        case .alertFirstButtonReturn:
-            for mode in unsaved {
-                cardMode = mode
-                let wasSuppressed = suppressHistorySave
-                if mode != originalMode || hidden { suppressHistorySave = true }
-                let ok = saveMarkdown()
-                suppressHistorySave = wasSuppressed
-                guard ok else { return false }
+        func fileURL(_ mode: String) -> URL? { urlOf(mode) }
+        func save(_ mode: String, quietHistory: Bool) -> Bool { saveMode(mode, quietHistory) }
+        func clear(_ mode: String) { clearMode(mode) }
+        func show(_ card: OpenedCard) { showCard(card) }
+    }
+
+    private struct DraftQuestion: DraftPrompts {
+        func saveDrafts(_ unsaved: [String], hidden: Bool) -> DraftChoice {
+            let alert = NSAlert()
+            if unsaved.count == 1 {
+                let kind = unsaved[0] == "habits" ? "habit" : unsaved[0] == "todos" ? "to-do" : unsaved[0] == "outline" ? "outline" : "research"
+                alert.messageText = "Save changes to your \(kind) draft?"
+                alert.informativeText = hidden ? "The existing \(kind) draft will be replaced." : "Your current draft will be replaced or left behind."
+            } else {
+                alert.messageText = "Save changes to your drafts?"
+                alert.informativeText = "There are \(unsaved.count) unsaved drafts involved. Save or discard them before opening this card."
             }
-            return true
-        case .alertSecondButtonReturn: discarded = unsaved; return true
-        default: return false
+            alert.addButton(withTitle: "Save…")
+            alert.addButton(withTitle: "Discard")
+            alert.addButton(withTitle: "Cancel")
+            switch alert.runModal() {
+            case .alertFirstButtonReturn: return .save
+            case .alertSecondButtonReturn: return .discard
+            default: return .cancel
+            }
         }
+    }
+
+    private var drafts: EditorDrafts {
+        EditorDrafts(state: DraftState(
+            mode: { cardMode },
+            contentsOf: { mode in mode == "habits" ? tracker.markdown : mode == "todos" ? todo.markdown : mode == "outline" ? outline.markdown : text },
+            savedOf: { mode in mode == "habits" ? savedHabitSnapshot : mode == "todos" ? savedTodoSnapshot : mode == "outline" ? savedOutlineSnapshot : savedMarkdownSnapshot },
+            baselineOf: { newDraftBaselines[$0] },
+            urlOf: { fileURLs[$0] },
+            saveMode: { mode, quiet in
+                let previous = cardMode
+                cardMode = mode
+                defer { cardMode = previous }
+                let wasSuppressed = suppressHistorySave
+                if quiet { suppressHistorySave = true }
+                defer { suppressHistorySave = wasSuppressed }
+                return saveMarkdown()
+            },
+            clearMode: { clearDiscardedDraft($0) },
+            showCard: { card in
+                cardMode = card.mode
+                if let saved = card.outline { setOutline(saved); savedOutlineSnapshot = saved.markdown }
+                else if let saved = card.habit { setTracker(saved); savedHabitSnapshot = saved.markdown }
+                else if let saved = card.todo { setTodo(saved); savedTodoSnapshot = saved.markdown }
+                else { editor.discardUndoHistory(); text = card.text; savedMarkdownSnapshot = card.text }
+                fileURL = card.url; diskSnapshots[card.mode] = card.data; newDraftBaselines.removeValue(forKey: card.mode)
+                branchSaveFolder = nil
+            }),
+            prompts: DraftQuestion())
     }
     func clearDiscardedDraft(_ mode: String) {
         let previousMode = cardMode
@@ -2237,46 +2269,17 @@ struct ContentView: View {
     }
     @discardableResult
     func loadFile(_ url: URL, validating validate: (() -> Bool)? = nil) -> Bool {
-        func targetIsSafe() -> Bool {
-            guard validate?() ?? true else {
-                status = "This note is no longer safely available. Refresh the sidebar and try again."
-                return false
-            }
-            return true
-        }
-        let originalMode = cardMode
-        do {
-            guard targetIsSafe() else { return false }
-            let initial = try decodeMarkdown(Data(contentsOf: url))
-            let initialOutline = OutlineDocument.fromMarkdown(initial)
-            let initialHabit = initialOutline == nil ? HabitTracker.fromMarkdown(initial) : nil
-            let initialTodo = initialOutline == nil && initialHabit == nil ? TodoList.fromMarkdown(initial) : nil
-            let targetMode = initialOutline != nil ? "outline" : initialHabit != nil ? "habits" : initialTodo != nil ? "todos" : "markdown"
-            var discarded: [String] = []
-            let modes = targetMode == originalMode ? [originalMode] : [originalMode, targetMode]
-            guard confirmReplaceDrafts(modes, discarded: &discarded) else { return false }
-            guard targetIsSafe() else { return false }
-            let diskData = try Data(contentsOf: url)
-            let contents = try decodeMarkdown(diskData)
-            let savedOutline = OutlineDocument.fromMarkdown(contents)
-            let savedHabit = savedOutline == nil ? HabitTracker.fromMarkdown(contents) : nil
-            let savedTodo = savedOutline == nil && savedHabit == nil ? TodoList.fromMarkdown(contents) : nil
-            let finalMode = savedOutline != nil ? "outline" : savedHabit != nil ? "habits" : savedTodo != nil ? "todos" : "markdown"
-            guard finalMode == targetMode else { status = "The card changed while opening. Try again."; return false }
-            for mode in discarded where mode != finalMode { clearDiscardedDraft(mode) }
-            cardMode = finalMode
-            if let savedOutline {
-                setOutline(savedOutline); savedOutlineSnapshot = savedOutline.markdown
-            } else if let savedHabit {
-                setTracker(savedHabit); savedHabitSnapshot = savedHabit.markdown
-            } else if let savedTodo {
-                setTodo(savedTodo); savedTodoSnapshot = savedTodo.markdown
-            } else { editor.discardUndoHistory(); text = contents; savedMarkdownSnapshot = contents }
-            fileURL = url; diskSnapshots[finalMode] = diskData; newDraftBaselines.removeValue(forKey: finalMode)
-            branchSaveFolder = nil; status = "Opened \(url.lastPathComponent)."
+        switch drafts.open(url, validating: validate) {
+        case .opened:
+            status = "Opened \(url.lastPathComponent)."
             if !traversingHistory { history.visit(url) }
             return true
-        } catch { cardMode = originalMode; status = "Could not open file: \(error.localizedDescription)"; return false }
+        case .cancelled:
+            return false
+        case .failed(let message):
+            status = message
+            return false
+        }
     }
     func chooseFolder() {
         let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true

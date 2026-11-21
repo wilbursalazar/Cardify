@@ -47,33 +47,14 @@ run() {   # run <name> [sources...]: defaults to every .swift file in Tests/<nam
         "${sources[@]}" -o "$WORK/$name" && (cd "$ROOT" && "$WORK/$name"); then :; else failed+=("$name"); fi
 }
 
-# Tests that still copy ContentView methods out of Cardify.swift (until those move into services).
-extracted() {   # extracted <name> <template> <python that prints the methods>
-    local name=$1 template=$2 script=$3
-    mkdir -p "$WORK/gen/$name"
-    python3 - "$ROOT/Sources/App/Cardify.swift" "$template" "$WORK/gen/$name/main.swift" <<<"$script" || { failed+=("$name"); return; }
-    run "$name" "$WORK/gen/$name/main.swift"
-}
-
 wanted() { [ $# -eq 0 ] && return 0; local n; for n in "${SELECTED[@]}"; do [ "$n" = "$1" ] && return 0; done; return 1; }
 SELECTED=(); [ $# -gt 0 ] && SELECTED=("$@")
 want() { [ ${#SELECTED[@]} -eq 0 ] || wanted "$1" "${SELECTED[@]}"; }
 
 for dir in "$ROOT"/Tests/*/; do
     name=$(basename "$dir")
-    case $name in Draft) continue ;; esac
     want "$name" && run "$name"
 done
-
-want Draft && extracted Draft "$ROOT/Tests/Draft/DraftChecks.swift.in" '
-from pathlib import Path; import sys
-s = Path(sys.argv[1]).read_text()
-first = s[s.index("    func confirmReplaceDraft("):s.index("    func openFile()")]
-i = s.index("    func switchMode(to mode: String)")
-switch = s[i:s.index("    var body: some View", i)]
-nav = s[s.index("    func navigateHistory("):s.index("    @discardableResult\n    func loadFile(")]
-second = s[s.index("    func loadFile("):s.index("    func chooseFolder()")]
-Path(sys.argv[3]).write_text(Path(sys.argv[2]).read_text().replace("    // DRAFT_METHODS\n", switch + first + nav + second))'
 
 if [ ${#failed[@]} -gt 0 ]; then echo; echo "✗ Failed: ${failed[*]}"; exit 1; fi
 echo; echo "✓ All tests passed"
