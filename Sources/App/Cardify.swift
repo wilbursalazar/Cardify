@@ -1068,19 +1068,13 @@ struct ContentView: View {
 
     func createCardFromLink(_ raw: String) {
         guard let root = vaultRoot else { linkError("Choose a notes folder so Kaster knows where to create this card."); return }
-        let target = String(raw.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)[0])
-        let withoutFragment = String(target.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)[0])
-        let title = (withoutFragment as NSString).lastPathComponent.trimmingCharacters(in: .whitespaces)
-        guard !title.isEmpty, let name = KasterVault.filename(mode: .quick, id: nil, title: title) else { linkError("This link has no card name."); return }
+        guard let card = CardNavigation.cardForMissingLink(raw, root: root) else { linkError("This link has no card name."); return }
+        guard !card.exists else { _ = loadFile(card.url); return }
+        guard flushExistingDraft() else { return }
         do {
-            let folder = root.appendingPathComponent(KasterMode.quick.folder, isDirectory: true)
-            try KasterVault.ensureFolder(folder)
-            let url = folder.appendingPathComponent(name)
-            guard !FileManager.default.fileExists(atPath: url.path) else { _ = loadFile(url); return }
-            guard flushExistingDraft() else { return }
-            try Data(KasterFrontmatter.ensuringUID(in: "# \(title)\n\n").utf8).write(to: url, options: .withoutOverwriting)
+            try CardNavigation.createQuickCard(at: card.url, title: card.title)
             sidebarRefreshToken = UUID()
-            if loadFile(url) { status = "Created Quick card \(name) from the link." }
+            if loadFile(card.url) { status = "Created Quick card \(card.url.lastPathComponent) from the link." }
         } catch { linkError("Could not create the card: \(error.localizedDescription)") }
     }
 
@@ -1895,8 +1889,7 @@ struct ContentView: View {
             // Footnote links: book page → PDF page via the PDF's own page labels.
             if let url = ZoteroPageOpener.resolve(raw), NSWorkspace.shared.open(url) { status = "Opened in Zotero."; return }
         }
-        let configuredFolder = notesFolder.isEmpty ? saveFolder : notesFolder
-        let folderPath = configuredFolder.isEmpty && showDebate ? (fileURL?.deletingLastPathComponent().path ?? "") : configuredFolder
+        let folderPath = CardNavigation.linkFolder(notesFolder: notesFolder, saveFolder: saveFolder, debateFile: showDebate ? fileURL : nil)
         let folder = folderPath.isEmpty ? nil : URL(fileURLWithPath: folderPath, isDirectory: true)
         let sourceFile = fileURL
         let sourceMode = cardMode
@@ -1907,8 +1900,7 @@ struct ContentView: View {
         DispatchQueue.global(qos: .userInitiated).async {
             let result = CardLinkNavigation.resolve(target, folder: folder, currentFile: sourceFile)
             DispatchQueue.main.async {
-                let currentFolder = notesFolder.isEmpty ? saveFolder : notesFolder
-                let activeFolder = currentFolder.isEmpty && showDebate ? (fileURL?.deletingLastPathComponent().path ?? "") : currentFolder
+                let activeFolder = CardNavigation.linkFolder(notesFolder: notesFolder, saveFolder: saveFolder, debateFile: showDebate ? fileURL : nil)
                 guard requestID == linkRequestID, cardMode == sourceMode, !showDebateBrowser, fileURL == sourceFile,
                       activeFolder == folderPath else { return }
                 guard Data(currentDraftContents().utf8) == Data(sourceText.utf8) else { status = "Link not opened because the card changed."; return }
@@ -1931,24 +1923,15 @@ struct ContentView: View {
         }
     }
     func openLinkedTab(_ url: URL, fragment: String? = nil) {
-        do {
-            let folderPath = notesFolder.isEmpty ? saveFolder : notesFolder
-            guard !folderPath.isEmpty,
-                  CardGraph.canOpen(url, in: URL(fileURLWithPath: folderPath, isDirectory: true)) else {
-                linkError("This linked note is no longer available in the selected notes folder.")
-                return
-            }
-            let content = try decodeMarkdown(Data(contentsOf: url))
-            if let fragment, CardLinkNavigation.headingRange(fragment, in: content) == nil {
-                linkError("The linked heading was not found.")
-                return
-            }
+        switch CardNavigation.readLinked(url, vault: notesFolder.isEmpty ? saveFolder : notesFolder, fragment: fragment) {
+        case .failure(let problem): linkError(problem.message)
+        case .success(let content):
             linkedTabs.removeAll(where: { $0.url.standardizedFileURL == url.standardizedFileURL })
             guard fileURL.map({ KasterPathList.key($0) }) != KasterPathList.key(url) else { status = "That card is already open in the main editor."; return }
             let tab = LinkedCardTab(url: url, content: content, savedContent: content)
             linkedTabs.append(tab); sideTab = tab.id
             status = "Opened \(tab.title) beside the current card."
-        } catch { linkError("Could not open linked note: \(error.localizedDescription)") }
+        }
     }
     /// A binding to one side card that stays safe after the card is closed.
     func sideBinding(_ initial: LinkedCardTab) -> Binding<LinkedCardTab> {
@@ -1964,7 +1947,7 @@ struct ContentView: View {
         if sideTab == id { sideTab = linkedTabs.last?.id }
     }
     func followLinkFromTab(_ target: CardLinkTarget, source: LinkedCardTab) {
-        let folderPath = notesFolder.isEmpty ? saveFolder : notesFolder
+        let folderPath = CardNavigation.linkFolder(notesFolder: notesFolder, saveFolder: saveFolder)
         let folder = folderPath.isEmpty ? nil : URL(fileURLWithPath: folderPath, isDirectory: true)
         let result = CardLinkNavigation.resolve(target, folder: folder, currentFile: source.url)
         switch result {
