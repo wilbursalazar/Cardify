@@ -2348,164 +2348,99 @@ struct ContentView: View {
     }
     // A normal Save updates the note already open; Save As is the only path
     // that presents a destination panel for an existing note.
+    /// Saves the open card through CardStore; this view only answers its questions and shows the result.
     func saveMarkdown(saveAs: Bool = false, automatic: Bool = false) -> Bool {
         autosaveTask?.cancel()
-        if !notesFolder.isEmpty && (idMode != .titleOnly || CardMetadata.parse(text).id != nil) {
-            var isDirectory = ObjCBool(false)
-            let available = FileManager.default.fileExists(atPath: notesFolder, isDirectory: &isDirectory) &&
-                isDirectory.boolValue && FileManager.default.isReadableFile(atPath: notesFolder)
-            if !available {
-                let message = "The selected notes folder is unavailable: \(notesFolder). Choose its current location to check card IDs."
-                status = automatic ? "Autosave paused: " + message : message
-                guard !automatic else { return false }
+        let mode = cardMode
+        let currentURL = fileURL
+        let request = CardSaveRequest(
+            kind: mode, currentURL: currentURL, saveAs: saveAs, automatic: automatic,
+            notesFolder: notesFolder, saveFolder: saveFolder,
+            checksIDs: idMode != .titleOnly || CardMetadata.parse(text).id != nil,
+            typeFolder: mode == "habits" ? "Habit" : mode == "todos" ? "To Do" : mode == "markdown" && showDebate ? "Debate" : nil,
+            branchFolder: branchSaveFolder, expectedDisk: diskSnapshots[mode], savedContent: currentDraftSnapshot())
+        let prompts = SavePrompts(
+            locate: { message in
                 let alert = NSAlert(); alert.messageText = "Locate notes folder"; alert.informativeText = message
                 alert.addButton(withTitle: "Choose Notes Folder…"); alert.addButton(withTitle: "Cancel")
-                guard alert.runModal() == .alertFirstButtonReturn else { return false }
-                chooseNotesFolder()
-                guard !notesFolder.isEmpty, FileManager.default.isReadableFile(atPath: notesFolder) else { return false }
-            }
-        }
-        if cardMode == "markdown" && fileURL == nil && idMode != .titleOnly && !ensureID() { return false }
-        let content = cardMode == "habits" ? tracker.markdown : cardMode == "todos" ? todo.markdown : cardMode == "outline" ? outline.markdown : text
-        let currentURL = fileURL
-        var target: URL
-        if !saveAs, let currentURL {
-            target = currentURL
-        } else if !saveAs, currentURL == nil, let automaticTarget = autoTarget(prompting: !automatic) {
-            target = automaticTarget
-        } else {
-            guard !automatic else { return false }
-            let panel = NSSavePanel()
-            if let currentURL { panel.directoryURL = currentURL.deletingLastPathComponent() }
-            else if let folderName: String = cardMode == "habits" ? "Habit" : cardMode == "todos" ? "To Do" : cardMode == "markdown" && showDebate ? "Debate" : nil,
-                    !(notesFolder.isEmpty && saveFolder.isEmpty) {
-                do {
-                    let root = URL(fileURLWithPath: notesFolder.isEmpty ? saveFolder : notesFolder, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL
-                    let folder = root.appendingPathComponent(folderName, isDirectory: true)
-                    let manager = FileManager.default
-                    if manager.fileExists(atPath: folder.path) {
-                        let values = try folder.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
-                        guard values.isDirectory == true, values.isSymbolicLink != true else { throw CocoaError(.fileWriteInvalidFileName) }
-                    } else { try manager.createDirectory(at: folder, withIntermediateDirectories: false) }
-                    panel.directoryURL = folder
-                } catch {
-                    status = "Could not prepare the \(folderName) folder: \(error.localizedDescription)"
-                    let alert = NSAlert(); alert.messageText = "Could not save card"; alert.informativeText = status; alert.runModal()
-                    return false
-                }
-            }
-            else if let folder = branchSaveFolder { panel.directoryURL = folder }
-            else if !saveFolder.isEmpty { panel.directoryURL = URL(fileURLWithPath: saveFolder, isDirectory: true) }
-            panel.allowedContentTypes = [.init(filenameExtension: "md")!]
-            let debate = cardMode == "markdown" ? DebateNotes.parse(text) : nil
-            let useIDInFilename = idMode != .titleOnly || debate?.role == .aff || debate?.role == .def || debate?.primary != nil
-            panel.nameFieldStringValue = currentURL?.lastPathComponent ?? (cardMode == "markdown" ? NoteEditing.filename(id: useIDInFilename ? CardMetadata.parse(text).id : nil, title: NoteEditing.title(in: text)) : cardMode == "todos" ? NoteEditing.filename(id: nil, title: todo.title) : cardMode == "outline" ? NoteEditing.filename(id: CardMetadata.parse(outline.markdown).id, title: outline.title) : "Weekly Habits.md")
-            guard panel.runModal() == .OK, let chosen = panel.url else { return false }
-            target = chosen
-        }
-        target = target.standardizedFileURL
-        let sameFile = currentURL.map { $0.resolvingSymlinksInPath().standardizedFileURL == target.resolvingSymlinksInPath().standardizedFileURL } ?? false
-        func fail(_ message: String) -> Bool {
-            status = automatic ? "Autosave paused: " + message : message
-            if !automatic {
+                guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+                let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true
+                return panel.runModal() == .OK ? panel.url?.path : nil
+            },
+            content: {
+                if mode == "markdown" && currentURL == nil && idMode != .titleOnly && !ensureID() { return nil }
+                return currentDraftContents()
+            },
+            automatic: { autoTarget(prompting: $0) },
+            choose: { folder in
+                let panel = NSSavePanel()
+                if let folder { panel.directoryURL = folder }
+                panel.allowedContentTypes = [.init(filenameExtension: "md")!]
+                panel.nameFieldStringValue = suggestedFilename(for: currentURL)
+                return panel.runModal() == .OK ? panel.url : nil
+            },
+            report: { message in
                 let alert = NSAlert(); alert.messageText = "Could not save card"; alert.informativeText = message; alert.runModal()
-            }
+            })
+        let result = CardStore().save(request, prompts: prompts)
+        if result.notesFolder != notesFolder { notesFolder = result.notesFolder; status = "ID and notes folder: \(result.notesFolder)" }
+        switch result.outcome {
+        case .cancelled:
             return false
-        }
-        do {
-            let before = try diskContents(at: target)
-            if sameFile {
-                guard let expected = diskSnapshots[cardMode] else { return fail("The saved version could not be verified. Use Save As to preserve this draft.") }
-                guard before == expected else { return fail("This file changed or was removed outside Kaster. Your draft is still open. Use Save As to keep a copy; if it has an ID, change the copy's ID to avoid a duplicate.") }
-            }
-            if CardMetadata.parse(content).id == nil && CardMetadata.hasNonemptyID(content) {
-                return fail("Could not read card_id metadata. Check its formatting before saving.")
-            }
-            if let id = CardMetadata.parse(content).id {
-                guard !id.contains(where: { $0.isNewline || ($0.isASCII && $0.isWhitespace && $0 != " ") }) else { return fail("Card IDs must be a single line.") }
-                // An ID this same file already had was checked when it was first saved; re-reading the
-                // whole vault on every autosave made typing stall in large vaults.
-                let previousID = sameFile ? before.flatMap { try? decodeMarkdown($0) }.flatMap { CardMetadata.parse($0).id } : nil
-                let unchangedID = previousID?.caseInsensitiveCompare(id) == .orderedSame
-                var roots = [target.deletingLastPathComponent().resolvingSymlinksInPath().standardizedFileURL]
-                if !notesFolder.isEmpty {
-                    let folder = URL(fileURLWithPath: notesFolder, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL
-                    if roots[0].path == folder.path || roots[0].path.hasPrefix(folder.path + "/") { roots = [folder] }
-                    else { roots.append(folder) }
-                }
-                for root in roots where !unchangedID {
-                    if let duplicate = try CardIDIndex.ids(in: root, excluding: target.resolvingSymlinksInPath().standardizedFileURL).first(where: { $0.0.caseInsensitiveCompare(id) == .orderedSame }) {
-                        return fail("Card ID \(id) is already used by \(duplicate.1.lastPathComponent). Change the ID before saving.")
-                    }
-                }
-            }
-            guard try diskContents(at: target) == before else { return fail("The destination changed while saving. Your draft is still open; try Save As.") }
-            // Structured habit/to-do editors serialize canonical LF. Preserve an
-            // imported file's existing newline style when updating its rows.
-            var output = content
-            if sameFile, let before, cardMode == "habits" || cardMode == "todos" {
-                let original = try decodeMarkdown(before)
-                let withoutCRLF = original.replacingOccurrences(of: "\r\n", with: "")
-                if original.contains("\r\n") && !withoutCRLF.contains("\n") && !withoutCRLF.contains("\r") {
-                    output = content.replacingOccurrences(of: "\n", with: "\r\n")
-                } else if original.contains("\r") && !original.contains("\n") {
-                    output = content.replacingOccurrences(of: "\n", with: "\r")
-                }
-            }
-            let outputData = Data(output.utf8)
-            if sameFile, let saved = currentDraftSnapshot(), Data(saved.utf8) == Data(content.utf8), let before {
-                // No edit: don't normalize an imported file's formatting.
-                fileURL = target; diskSnapshots[cardMode] = before
-                status = automatic ? "Changes saved." : "Saved \(target.lastPathComponent)."
-                scheduleTitleRename()
-                return true
-            }
-            if before == nil {
-                // Link a fully written temporary file into place. linkItem refuses
-                // an existing destination, including one created after the panel.
-                let temporary = target.deletingLastPathComponent().appendingPathComponent(".cardify-\(UUID().uuidString).tmp")
-                defer { try? FileManager.default.removeItem(at: temporary) }
-                try outputData.write(to: temporary, options: .withoutOverwriting)
-                try FileManager.default.linkItem(at: temporary, to: target)
-            } else {
-                try outputData.write(to: target, options: .atomic)
-            }
-            fileURL = target; diskSnapshots[cardMode] = outputData; newDraftBaselines.removeValue(forKey: cardMode)
-            if cardMode == "habits" { savedHabitSnapshot = content }
-            else if cardMode == "todos" { savedTodoSnapshot = content }
-            else if cardMode == "outline" { savedOutlineSnapshot = content }
+        case .failed(let message):
+            status = message
+            return false
+        case .unchanged(let url, let data):
+            fileURL = url; diskSnapshots[mode] = data
+            status = automatic ? "Changes saved." : "Saved \(url.lastPathComponent)."
+            scheduleTitleRename()
+            return true
+        case .saved(let url, let data, let content, _):
+            fileURL = url; diskSnapshots[mode] = data; newDraftBaselines.removeValue(forKey: mode)
+            if mode == "habits" { savedHabitSnapshot = content }
+            else if mode == "todos" { savedTodoSnapshot = content }
+            else if mode == "outline" { savedOutlineSnapshot = content }
             else { savedMarkdownSnapshot = content }
-            if !suppressHistorySave { history.saveCurrent(target) }
+            if !suppressHistorySave { history.saveCurrent(url) }
             branchSaveFolder = nil
             // Update just this card in the library instead of rescanning every file.
             // A brand-new card does a full scan so the sidebar can reveal it in its folder.
-            if currentURL == nil { sidebarRefreshToken = UUID() } else { library.refresh(files: [target], folder: libraryFolder) }
-            status = automatic ? (currentURL == nil ? "Saved as \(target.lastPathComponent)." : "Changes saved.") : "Saved \(target.lastPathComponent)."
-            if currentURL == nil && cardMode == "markdown" { lastMode = kasterMode.rawValue }
+            if currentURL == nil { sidebarRefreshToken = UUID() } else { library.refresh(files: [url], folder: libraryFolder) }
+            status = automatic ? (currentURL == nil ? "Saved as \(url.lastPathComponent)." : "Changes saved.") : "Saved \(url.lastPathComponent)."
+            if currentURL == nil && mode == "markdown" { lastMode = kasterMode.rawValue }
             scheduleTitleRename()
             return true
-        } catch { return fail("Could not verify or write the destination: \(error.localizedDescription)") }
+        }
     }
 
-    // An inaccessible file is an error, not an absent destination. Never
-    // follow a file symlink when deciding what may be overwritten.
-    func diskContents(at url: URL) throws -> Data? {
-        let attributes: [FileAttributeKey: Any]
-        do { attributes = try FileManager.default.attributesOfItem(atPath: url.path) }
-        catch let error as NSError where error.domain == NSCocoaErrorDomain && (error.code == NSFileNoSuchFileError || error.code == NSFileReadNoSuchFileError) { return nil }
-        guard attributes[.type] as? FileAttributeType == .typeRegular else {
-            throw NSError(domain: NSCocoaErrorDomain, code: NSFileWriteInvalidFileNameError, userInfo: [NSLocalizedDescriptionKey: "The destination is not a regular file."])
-        }
-        return try Data(contentsOf: url)
+    private struct SavePrompts: CardSavePrompts {
+        let locate: (String) -> String?
+        let content: () -> String?
+        let automatic: (Bool) -> URL?
+        let choose: (URL?) -> URL?
+        let report: (String) -> Void
+        func locateNotesFolder(message: String) -> String? { locate(message) }
+        func finalContent() -> String? { content() }
+        func automaticDestination(prompting: Bool) -> URL? { automatic(prompting) }
+        func chooseDestination(startingIn folder: URL?) -> URL? { choose(folder) }
+        func reportFailure(_ message: String) { report(message) }
     }
-    func decodeMarkdown(_ data: Data) throws -> String {
-        let decoded = String(decoding: data, as: UTF8.self)
-        guard Data(decoded.utf8) == data else {
-            throw NSError(domain: NSCocoaErrorDomain, code: NSFileReadInapplicableStringEncodingError,
-                          userInfo: [NSLocalizedDescriptionKey: "This file is not valid UTF-8 Markdown."])
+
+    /// The filename offered in the Save panel for a card without a file yet.
+    func suggestedFilename(for currentURL: URL?) -> String {
+        if let currentURL { return currentURL.lastPathComponent }
+        let debate = cardMode == "markdown" ? DebateNotes.parse(text) : nil
+        let useIDInFilename = idMode != .titleOnly || debate?.role == .aff || debate?.role == .def || debate?.primary != nil
+        switch cardMode {
+        case "markdown": return NoteEditing.filename(id: useIDInFilename ? CardMetadata.parse(text).id : nil, title: NoteEditing.title(in: text))
+        case "todos": return NoteEditing.filename(id: nil, title: todo.title)
+        case "outline": return NoteEditing.filename(id: CardMetadata.parse(outline.markdown).id, title: outline.title)
+        default: return "Weekly Habits.md"
         }
-        return decoded
     }
+
+    func diskContents(at url: URL) throws -> Data? { try CardFiles.diskContents(at: url) }
+    func decodeMarkdown(_ data: Data) throws -> String { try CardFiles.decodeMarkdown(data) }
 
     func scheduleAutosave() {
         autosaveTask?.cancel()
@@ -2589,59 +2524,55 @@ struct ContentView: View {
         let alert = NSAlert(); alert.messageText = "Could not change note"; alert.informativeText = status; alert.runModal()
     }
 
-    private func sidebarSnapshot(_ url: URL) throws -> SidebarFileActions.Snapshot {
-        guard let root = sidebarRoot else { throw SidebarFileActions.ActionError.unavailable }
-        return try SidebarFileActions.capture(url, root: root)
+    /// The open cards as CardMutationService sees them, read fresh after every prompt.
+    private struct EditorCards: OpenCardState {
+        let root: () -> URL?
+        let mode: () -> String
+        let urls: () -> [String: URL]
+        let disk: () -> Data?
+        let draft: () -> String
+        let saved: () -> String?
+        let save: () -> Bool
+        let pause: () -> Void
+        var vaultRoot: URL? { root() }
+        var activeMode: String { mode() }
+        var openURLs: [String: URL] { urls() }
+        var activeDiskSnapshot: Data? { disk() }
+        var activeDraft: String { draft() }
+        var activeSaved: String? { saved() }
+        func saveActiveCard() -> Bool { save() }
+        func pauseAutosave() { pause() }
     }
 
-    // A modal confirmation can run the event loop. Remember the exact active
-    // draft and file association, and recheck both after it returns.
-    private struct SidebarMutation {
-        let snapshot: SidebarFileActions.Snapshot
-        let activeMode: String?
-        let activeDraft: Data?
+    private struct SidebarPrompts: CardActionPrompts {
+        func confirmDuplicateWithoutID() -> Bool {
+            let alert = NSAlert(); alert.messageText = "Duplicate without the card ID?"
+            alert.informativeText = "The copy will not keep this note's ID, so the two cards do not have the same identifier. The original stays unchanged."
+            alert.addButton(withTitle: "Duplicate"); alert.addButton(withTitle: "Cancel")
+            return alert.runModal() == .alertFirstButtonReturn
+        }
+        func newTitle(current: String) -> String? {
+            let field = NSTextField(string: current); field.frame.size.width = 320
+            let alert = NSAlert(); alert.messageText = "Rename card"
+            alert.informativeText = "Changes the card's title and filename together and updates links to it. Links with their own label keep the label."
+            alert.accessoryView = field; alert.addButton(withTitle: "Rename"); alert.addButton(withTitle: "Cancel")
+            alert.window.initialFirstResponder = field
+            return alert.runModal() == .alertFirstButtonReturn ? field.stringValue : nil
+        }
+        func confirmTrash(_ url: URL, closesOpenCard: Bool) -> Bool {
+            let alert = NSAlert(); alert.messageText = "Move this note to Trash?"
+            alert.informativeText = "\(url.lastPathComponent) will move to the macOS Trash. Links to this note may no longer work." + (closesOpenCard ? " The open note will close." : "")
+            alert.addButton(withTitle: "Move to Trash"); alert.addButton(withTitle: "Cancel")
+            return alert.runModal() == .alertFirstButtonReturn
+        }
     }
 
-    private func prepareSidebarMutation(_ url: URL) throws -> SidebarMutation? {
-        let active = fileURL?.standardizedFileURL == url.standardizedFileURL
-        let mode = cardMode
-        let otherURLs = fileURLs.filter { !active || $0.key != mode }.map(\.value)
-        let before = try sidebarSnapshot(url)
-        if active {
-            try SidebarFileActions.validateActive(before, activeURL: fileURL, activeDiskSnapshot: diskSnapshots[mode], otherOpenURLs: otherURLs)
-            guard flushExistingDraft() else { return nil }
-        } else {
-            try SidebarFileActions.validate(before, openURLs: otherURLs)
-        }
-        let snapshot = try sidebarSnapshot(url)
-        if active {
-            try SidebarFileActions.validateActive(snapshot, activeURL: fileURL, activeDiskSnapshot: diskSnapshots[mode], otherOpenURLs: otherURLs)
-            guard let saved = currentDraftSnapshot(), Data(saved.utf8) == Data(currentDraftContents().utf8) else {
-                throw SidebarFileActions.ActionError.changed
-            }
-        } else {
-            try SidebarFileActions.validate(snapshot, openURLs: otherURLs)
-        }
-        return SidebarMutation(snapshot: snapshot, activeMode: active ? mode : nil,
-                               activeDraft: active ? Data(currentDraftContents().utf8) : nil)
-    }
-
-    private func validateSidebarMutation(_ mutation: SidebarMutation) throws -> [URL] {
-        let snapshot = mutation.snapshot
-        guard sidebarRoot == snapshot.root else { throw SidebarFileActions.ActionError.unavailable }
-        if let mode = mutation.activeMode {
-            guard cardMode == mode, fileURL?.standardizedFileURL == snapshot.url,
-                  Data(currentDraftContents().utf8) == mutation.activeDraft,
-                  let saved = currentDraftSnapshot(), Data(saved.utf8) == mutation.activeDraft else {
-                throw SidebarFileActions.ActionError.changed
-            }
-            let otherURLs = fileURLs.filter { $0.key != mode }.map(\.value)
-            try SidebarFileActions.validateActive(snapshot, activeURL: fileURL, activeDiskSnapshot: diskSnapshots[mode], otherOpenURLs: otherURLs)
-            return otherURLs
-        }
-        let openURLs = Array(fileURLs.values)
-        try SidebarFileActions.validate(snapshot, openURLs: openURLs)
-        return openURLs
+    private var cardChanges: CardMutationService {
+        CardMutationService(
+            cards: EditorCards(root: { sidebarRoot }, mode: { cardMode }, urls: { fileURLs }, disk: { diskSnapshots[cardMode] },
+                               draft: { currentDraftContents() }, saved: { currentDraftSnapshot() },
+                               save: { flushExistingDraft() }, pause: { autosaveTask?.cancel(); renameTask?.cancel() }),
+            prompts: SidebarPrompts())
     }
 
     private func revealSidebarNote(_ url: URL) {
@@ -2658,82 +2589,43 @@ struct ContentView: View {
 
     private func duplicateSidebarNote(_ url: URL) {
         do {
-            guard let mutation = try prepareSidebarMutation(url) else { return }
-            let snapshot = mutation.snapshot
-            if snapshot.cardID != nil || BranchIDs.filenameID(for: url) != nil || BranchIDs.luhmannFilenameID(for: url) != nil || BranchIDs.debateFilenameID(for: url) != nil {
-                let alert = NSAlert(); alert.messageText = "Duplicate without the card ID?"
-                alert.informativeText = "The copy will not keep this note's ID, so the two cards do not have the same identifier. The original stays unchanged."
-                alert.addButton(withTitle: "Duplicate"); alert.addButton(withTitle: "Cancel")
-                guard alert.runModal() == .alertFirstButtonReturn else { return }
-            }
-            let otherOpenURLs = try validateSidebarMutation(mutation)
-            let copy = try SidebarFileActions.duplicate(snapshot, openURLs: otherOpenURLs)
+            guard let copy = try cardChanges.duplicate(url) else { return }
             sidebarRefreshToken = UUID(); status = "Created \(copy.lastPathComponent)."
         } catch { sidebarError(error) }
     }
 
     private func renameSidebarNote(_ url: URL) {
         do {
-            guard let mutation = try prepareSidebarMutation(url) else { return }
-            let original = String(decoding: mutation.snapshot.bytes, as: UTF8.self)
-            guard Data(original.utf8) == mutation.snapshot.bytes else { throw SidebarFileActions.ActionError.invalidMarkdown }
-            let field = NSTextField(string: KasterVault.displayTitle(for: url, text: original)); field.frame.size.width = 320
-            let alert = NSAlert(); alert.messageText = "Rename card"
-            alert.informativeText = "Changes the card's title and filename together and updates links to it. Links with their own label keep the label."
-            alert.accessoryView = field; alert.addButton(withTitle: "Rename"); alert.addButton(withTitle: "Cancel")
-            alert.window.initialFirstResponder = field
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
-            let newTitle = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            let root = mutation.snapshot.root
-            guard let filename = KasterVault.retitledFilename(for: url, root: root, text: original, title: newTitle) else {
-                throw SidebarFileActions.ActionError.invalidName
-            }
-            let newText = NoteEditing.setTitle(newTitle, in: original)
-            let otherURLs = try validateSidebarMutation(mutation)
-            if mutation.activeMode != nil { autosaveTask?.cancel(); renameTask?.cancel() }
-            let folder = url.deletingLastPathComponent()
-            let target = KasterVault.uniqueURL(in: folder, filename: filename, excluding: url)
-            let renamed = try SidebarFileActions.retitle(mutation.snapshot, newText: newText, filename: target.lastPathComponent, openURLs: otherURLs)
-            let updated = (try? KasterVault.updateLinks(root: root, oldURL: url, newURL: renamed, skip: [renamed.resolvingSymlinksInPath().standardizedFileURL.path])) ?? []
-            if mutation.activeMode != nil {
-                adoptMovedCurrentCard(from: url, to: renamed, content: newText)
+            guard let renamed = try cardChanges.rename(url) else { return }
+            if renamed.wasActive {
+                adoptMovedCurrentCard(from: url, to: renamed.to, content: renamed.text)
                 linkRequestID = UUID()
             } else {
-                for index in linkedTabs.indices where linkedTabs[index].url.standardizedFileURL == url.standardizedFileURL { linkedTabs[index].url = renamed }
+                for index in linkedTabs.indices where linkedTabs[index].url.standardizedFileURL == url.standardizedFileURL { linkedTabs[index].url = renamed.to }
                 let key = url.resolvingSymlinksInPath().standardizedFileURL
-                if let index = openTabs.firstIndex(where: { $0.resolvingSymlinksInPath().standardizedFileURL == key }) { openTabs[index] = renamed }
-                history.rename(url, to: renamed); sidebarRefreshToken = UUID()
+                if let index = openTabs.firstIndex(where: { $0.resolvingSymlinksInPath().standardizedFileURL == key }) { openTabs[index] = renamed.to }
+                history.rename(url, to: renamed.to); sidebarRefreshToken = UUID()
             }
-            reloadOpenCards(updated + [renamed])
-            status = "Renamed to “\(newTitle)”" + (updated.isEmpty ? "." : "; updated links in \(updated.count) card\(updated.count == 1 ? "" : "s").")
+            reloadOpenCards(renamed.updatedLinks + [renamed.to])
+            status = "Renamed to “\(renamed.title)”" + (renamed.updatedLinks.isEmpty ? "." : "; updated links in \(renamed.updatedLinks.count) card\(renamed.updatedLinks.count == 1 ? "" : "s").")
         } catch { scheduleAutosave(); sidebarError(error) }
     }
 
     private func moveSidebarNote(_ url: URL, to folder: URL) {
         do {
-            guard let mutation = try prepareSidebarMutation(url) else { return }
-            let otherURLs = try validateSidebarMutation(mutation)
-            if mutation.activeMode != nil { autosaveTask?.cancel() }
-            let moved = try SidebarFileActions.move(mutation.snapshot, to: folder, openURLs: otherURLs)
-            if mutation.activeMode != nil { fileURL = moved; linkRequestID = UUID() }
-            for index in linkedTabs.indices where linkedTabs[index].url.standardizedFileURL == url.standardizedFileURL { linkedTabs[index].url = moved }
-            history.rename(url, to: moved)
+            guard let moved = try cardChanges.move(url, to: folder) else { return }
+            if moved.wasActive { fileURL = moved.to; linkRequestID = UUID() }
+            for index in linkedTabs.indices where linkedTabs[index].url.standardizedFileURL == url.standardizedFileURL { linkedTabs[index].url = moved.to }
+            history.rename(url, to: moved.to)
             sidebarRefreshToken = UUID()
-            status = moved == url ? "This note is already in that folder." : "Moved \(url.lastPathComponent) to \(folder.lastPathComponent). Links using its old folder path may need updating."
+            status = moved.to == url ? "This note is already in that folder." : "Moved \(url.lastPathComponent) to \(folder.lastPathComponent). Links using its old folder path may need updating."
         } catch { scheduleAutosave(); sidebarError(error) }
     }
 
     private func trashSidebarNote(_ url: URL) {
         do {
-            guard let mutation = try prepareSidebarMutation(url) else { return }
-            let alert = NSAlert(); alert.messageText = "Move this note to Trash?"
-            alert.informativeText = "\(url.lastPathComponent) will move to the macOS Trash. Links to this note may no longer work." + (mutation.activeMode == nil ? "" : " The open note will close.")
-            alert.addButton(withTitle: "Move to Trash"); alert.addButton(withTitle: "Cancel")
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
-            _ = try validateSidebarMutation(mutation)
-            if mutation.activeMode != nil { autosaveTask?.cancel() }
-            try FileManager.default.trashItem(at: mutation.snapshot.url, resultingItemURL: nil)
-            if let mode = mutation.activeMode { clearDiscardedDraft(mode); history.detach(); linkRequestID = UUID() }
+            guard let trashed = try cardChanges.trash(url) else { return }
+            if let mode = trashed.activeMode { clearDiscardedDraft(mode); history.detach(); linkRequestID = UUID() }
             for tab in linkedTabs where tab.url.standardizedFileURL == url.standardizedFileURL { closeLinkedTab(tab.id) }
             history.remove(url); sidebarRefreshToken = UUID(); status = "Moved \(url.lastPathComponent) to Trash."
         } catch { scheduleAutosave(); sidebarError(error) }

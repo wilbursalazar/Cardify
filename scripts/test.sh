@@ -61,25 +61,10 @@ want() { [ ${#SELECTED[@]} -eq 0 ] || wanted "$1" "${SELECTED[@]}"; }
 
 for dir in "$ROOT"/Tests/*/; do
     name=$(basename "$dir")
-    case $name in Autosave|SidebarHandlers|IDModeSelection|Draft) continue ;; esac
+    case $name in IDModeSelection|Draft) continue ;; esac
     want "$name" && run "$name"
 done
 
-want Autosave && extracted Autosave "$ROOT/Tests/Autosave/SaveChecks.swift.in" '
-from pathlib import Path; import sys
-s = Path(sys.argv[1]).read_text()
-m = s[s.index("    func saveMarkdown(saveAs:"):s.index("    func scheduleAutosave()")]
-Path(sys.argv[3]).write_text(Path(sys.argv[2]).read_text().replace("    // SAVE_METHODS\n", m))'
-want SidebarHandlers && extracted SidebarHandlers "$ROOT/Tests/SidebarHandlers/Checks.swift.in" '
-from pathlib import Path; import sys
-s = Path(sys.argv[1]).read_text()
-a = s[s.index("    private var sidebarRoot:"):s.index("    private func revealSidebarNote(")]
-b = s[s.index("    private func duplicateSidebarNote("):s.index("\n}\n\n// WindowGroup")]
-m = (a + b).replace("    private ", "    ")
-old = "try FileManager.default.trashItem(at: mutation.snapshot.url, resultingItemURL: nil)"
-assert m.count(old) == 1
-m = m.replace(old, "try fakeTrash(mutation.snapshot.url)")
-Path(sys.argv[3]).write_text(Path(sys.argv[2]).read_text().replace("    // HANDLERS\n", m))'
 want IDModeSelection && extracted IDModeSelection "$ROOT/Tests/IDModeSelection/Checks.swift.in" '
 from pathlib import Path; import sys
 s = Path(sys.argv[1]).read_text()
