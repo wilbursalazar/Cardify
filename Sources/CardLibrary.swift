@@ -56,7 +56,7 @@ enum LibrarySearch {
 
 enum LibraryLinks {
     // Resolve only unambiguous paths or names. Ambiguous links are not presented as backlinks.
-    static func build(cards: [LibraryCard]) -> (outgoing: [String: [String]], incoming: [String: [String]]) {
+    static func build(cards: [LibraryCard], sources: [LibraryCard]? = nil) -> (outgoing: [String: [String]], incoming: [String: [String]]) {
         var byPath: [String: [String]] = [:]
         var byName: [String: [String]] = [:]
         for card in cards {
@@ -66,7 +66,7 @@ enum LibraryLinks {
         var outgoing: [String: [String]] = [:]
         var incoming: [String: [String]] = [:]
         let regex = try! NSRegularExpression(pattern: #"(?<!!)\[\[([^\]\r\n]+)\]\]"#)
-        for source in cards {
+        for source in sources ?? cards {
             let value = source.content as NSString
             var seen: Set<String> = []
             for match in regex.matches(in: source.content, range: NSRange(location: 0, length: value.length)) {
@@ -259,5 +259,60 @@ struct CardLibrary: View {
                 message = "\(result.cards.count) Markdown cards" + (result.unreadable > 0 ? "; \(result.unreadable) could not be read." : ".")
             }
         }
+    }
+}
+
+extension LibrarySnapshot {
+    /// The snapshot after some files changed on disk (saved, created, renamed or deleted),
+    /// without rescanning the whole folder. Links are recomputed only for changed cards unless
+    /// the set of card paths changed, which can alter how names resolve.
+    func updating(_ files: [URL], root: URL) -> LibrarySnapshot {
+        let rootPath = root.standardizedFileURL.path
+        let prefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
+        func relativePath(_ url: URL) -> String? {
+            for candidate in [url.standardizedFileURL.path, url.resolvingSymlinksInPath().standardizedFileURL.path] where candidate.hasPrefix(prefix) {
+                return String(candidate.dropFirst(prefix.count).dropLast(url.pathExtension.count + 1))
+            }
+            return nil
+        }
+        var byPath = Dictionary(cards.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
+        var touched: Set<String> = []
+        var pathsChanged = false
+        var unreadable = self.unreadable
+        for file in files where file.pathExtension.lowercased() == "md" {
+            guard let path = relativePath(file) else { continue }
+            touched.insert(path)
+            let values = try? file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+            let hidden = path.split(separator: "/").contains { $0.hasPrefix(".") }
+            guard values?.isRegularFile == true, values?.isSymbolicLink != true, !hidden,
+                  let content = try? String(contentsOf: file, encoding: .utf8) else {
+                if byPath.removeValue(forKey: path) != nil { pathsChanged = true }
+                if values?.isRegularFile == true && !hidden && values?.isSymbolicLink != true { unreadable += 1 }
+                continue
+            }
+            let url = URL(fileURLWithPath: prefix + path + "." + file.pathExtension)
+            let heading = NoteEditing.title(in: content).trimmingCharacters(in: .whitespacesAndNewlines)
+            let title = heading.isEmpty ? url.deletingPathExtension().lastPathComponent : heading
+            let cardID = CardMetadata.parse(content).id ?? BranchIDs.filenameID(for: url) ?? BranchIDs.luhmannFilenameID(for: url) ?? BranchIDs.debateFilenameID(for: url)
+            if byPath[path] == nil { pathsChanged = true }
+            byPath[path] = LibraryCard(url: url, path: path, title: title, cardID: cardID, content: content)
+        }
+        guard !touched.isEmpty else { return self }
+        let newCards = byPath.values.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+        if pathsChanged {
+            let links = LibraryLinks.build(cards: newCards)
+            return LibrarySnapshot(cards: newCards, outgoing: links.outgoing, incoming: links.incoming, unreadable: unreadable)
+        }
+        // Same paths: only the changed cards' outgoing links can differ.
+        var outgoing = self.outgoing, incoming = self.incoming
+        for path in touched {
+            for target in outgoing[path] ?? [] { incoming[target]?.removeAll { $0 == path }; if incoming[target]?.isEmpty == true { incoming[target] = nil } }
+            outgoing[path] = nil
+        }
+        let changedCards = newCards.filter { touched.contains($0.path) }
+        let partial = LibraryLinks.build(cards: newCards, sources: changedCards)
+        for (path, targets) in partial.outgoing { outgoing[path] = targets }
+        for (target, sources) in partial.incoming { incoming[target, default: []].append(contentsOf: sources) }
+        return LibrarySnapshot(cards: newCards, outgoing: outgoing, incoming: incoming, unreadable: unreadable)
     }
 }

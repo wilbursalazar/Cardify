@@ -477,3 +477,83 @@ enum KasterVault {
     }
 }
 
+// MARK: Library index
+
+/// Lookups the editor makes on every render, computed once per library snapshot
+/// so typing never walks every card.
+struct LibraryIndex {
+    let cards: [LibraryCard]
+    private let byKey: [String: Int]
+    private let byPath: [String: Int]
+    private let incoming: [String: [String]]
+    private let outgoing: [String: [String]]
+    let orders: [String: Double]
+    let modes: [String: KasterMode]
+    /// Every card ID and filename ID, lowercased-insensitive as stored, for new-ID suggestions.
+    let ids: Set<String>
+    private let byMode: [KasterMode: [LibraryCard]]
+    private let byUID: [String: Int]
+    /// Luhmann-numbered cards in sequence order (Promote → Branch From…).
+    let zettels: [LibraryCard]
+
+    static let empty = LibraryIndex(snapshot: LibrarySnapshot(cards: [], outgoing: [:], incoming: [:], unreadable: 0), root: nil)
+
+    init(snapshot: LibrarySnapshot, root: URL?) {
+        cards = snapshot.cards
+        incoming = snapshot.incoming; outgoing = snapshot.outgoing
+        var byKey: [String: Int] = [:], byPath: [String: Int] = [:], orders: [String: Double] = [:]
+        var modes: [String: KasterMode] = [:], ids: Set<String> = [], byMode: [KasterMode: [LibraryCard]] = [:], byUID: [String: Int] = [:]
+        for (index, card) in snapshot.cards.enumerated() {
+            byKey[card.url.standardizedFileURL.path] = byKey[card.url.standardizedFileURL.path] ?? index
+            byPath[card.path] = byPath[card.path] ?? index
+            if let order = KasterFrontmatter.order(in: card.content) { orders[card.path] = order }
+            if let uid = KasterFrontmatter.value("uid", in: card.content) { byUID[uid] = byUID[uid] ?? index }
+            // The card's relative path already names its type folder; avoid resolving paths per card.
+            let first = card.path.split(separator: "/", maxSplits: 1).first.map(String.init) ?? ""
+            let metadataID = CardMetadata.parse(card.content).id
+            let mode = card.path.contains("/") ? (KasterMode.allCases.first { $0.folder.caseInsensitiveCompare(first) == .orderedSame }
+                ?? (metadataID.map(LuhmannIDs.isLuhmann) == true ? .zettel : .quick)) : (metadataID.map(LuhmannIDs.isLuhmann) == true ? .zettel : .quick)
+            modes[card.path] = mode
+            byMode[mode, default: []].append(card)
+            if let id = metadataID { ids.insert(id) }
+            if let id = BranchIDs.filenameID(for: card.url), id.caseInsensitiveCompare(metadataID ?? "") != .orderedSame { ids.insert(id) }
+            else if metadataID == nil, let id = BranchIDs.luhmannFilenameID(for: card.url) { ids.insert(id) }
+            if let id = BranchIDs.debateFilenameID(for: card.url), id.caseInsensitiveCompare(metadataID ?? "") != .orderedSame { ids.insert(id) }
+        }
+        self.byKey = byKey; self.byPath = byPath; self.orders = orders; self.modes = modes; self.ids = ids; self.byUID = byUID
+        zettels = snapshot.cards.filter { $0.cardID.map(LuhmannIDs.isLuhmann) ?? false }
+            .sorted { ($0.cardID ?? "").localizedStandardCompare($1.cardID ?? "") == .orderedAscending }
+        self.byMode = byMode.mapValues { $0.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending } }
+    }
+
+    func card(for url: URL?) -> LibraryCard? {
+        guard let url else { return nil }
+        if let index = byKey[url.standardizedFileURL.path] { return cards[index] }
+        if let index = byKey[url.resolvingSymlinksInPath().standardizedFileURL.path] { return cards[index] }
+        return nil
+    }
+    func card(path: String) -> LibraryCard? { byPath[path].map { cards[$0] } }
+    func card(uid: String) -> LibraryCard? { byUID[uid].map { cards[$0] } }
+
+    private func related(_ paths: [String]?) -> [LibraryCard] {
+        Array(Set(paths ?? [])).compactMap { card(path: $0) }.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+    }
+    func backlinks(for url: URL?) -> [LibraryCard] { card(for: url).map { related(incoming[$0.path]) } ?? [] }
+    func outgoing(for url: URL?) -> [LibraryCard] { card(for: url).map { related(outgoing[$0.path]) } ?? [] }
+
+    /// Cards of one type, by title.
+    func cards(in mode: KasterMode) -> [LibraryCard] { byMode[mode] ?? [] }
+    func mode(of card: LibraryCard) -> KasterMode { modes[card.path] ?? .quick }
+
+    /// Manual order from each card's `order:` field; unordered cards follow by ID, then title.
+    func sortedByOrder(_ list: [LibraryCard]) -> [LibraryCard] {
+        list.sorted { a, b in
+            switch (orders[a.path], orders[b.path]) {
+            case let (x?, y?) where x != y: return x < y
+            case (_?, nil): return true
+            case (nil, _?): return false
+            default: return (a.cardID ?? "~" + a.title).localizedStandardCompare(b.cardID ?? "~" + b.title) == .orderedAscending
+            }
+        }
+    }
+}

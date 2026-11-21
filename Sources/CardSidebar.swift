@@ -24,6 +24,7 @@ enum NoteListSort: String, CaseIterable {
 // every change goes through the editor's guarded handlers.
 struct CardSidebar: View {
     @ObservedObject var store: LibraryStore
+    @State private var listCache = DerivedCache<[LibraryCard]>()
     let currentURL: URL?
     let openURLs: [URL]
     let draftTitle: String
@@ -297,15 +298,19 @@ struct CardSidebar: View {
     }
 
     private var recentCards: [LibraryCard] {
-        let byKey = Dictionary(store.snapshot.cards.map { (KasterPathList.key($0.url), $0) }, uniquingKeysWith: { first, _ in first })
-        return KasterPathList.decode(recents).compactMap { byKey[$0] }
+        KasterPathList.decode(recents).compactMap { store.index.card(for: URL(fileURLWithPath: $0)) }
     }
     private var favoriteCards: [LibraryCard] {
-        let keys = Set(KasterPathList.decode(favorites))
-        return store.snapshot.cards.filter { keys.contains(KasterPathList.key($0.url)) }
+        let keys = Set(KasterPathList.decode(favorites).compactMap { store.index.card(for: URL(fileURLWithPath: $0))?.path })
+        return store.snapshot.cards.filter { keys.contains($0.path) }
     }
 
     private var listedCards: [LibraryCard] {
+        let key = "\(store.generation)|\(selection)|\(sort)|\(searching)|\(query)|\(recents)|\(favorites)|\(lastPrint.timeIntervalSince1970)"
+        return listCache.value(for: key) { computeListedCards() }
+    }
+
+    private func computeListedCards() -> [LibraryCard] {
         let base: [LibraryCard]
         if searching {
             base = store.snapshot.cards.filter { LibrarySearch.matches($0, query: query) }
@@ -323,15 +328,8 @@ struct CardSidebar: View {
         }
         switch sort {
         case .manual:
-            return base.sorted { a, b in
-                // Manual position comes from each card's `order:` frontmatter.
-                switch (KasterFrontmatter.order(in: a.content), KasterFrontmatter.order(in: b.content)) {
-                case let (x?, y?) where x != y: return x < y
-                case (_?, nil): return true
-                case (nil, _?): return false
-                default: return (a.cardID ?? "~" + a.title).localizedStandardCompare(b.cardID ?? "~" + b.title) == .orderedAscending
-                }
-            }
+            // Manual position comes from each card's `order:` frontmatter, read once per scan.
+            return store.index.sortedByOrder(base)
         case .modified:
             return base.sorted { (store.modified[$0.path] ?? .distantPast) > (store.modified[$1.path] ?? .distantPast) }
         case .id:

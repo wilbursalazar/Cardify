@@ -66,10 +66,15 @@ enum BranchIDs {
     }
 
     // Recognize Cardify/Obsidian timestamp-prefixed filenames, even without frontmatter.
+    // Compiled once: these run for every card during scans.
+    private static let timestampPattern = try! NSRegularExpression(pattern: #"^((?:[0-9]{12}|[0-9]{8}|[0-9]{2}-[0-9]{2}-[0-9]{2}(?:-[0-9]{4})?)(?:-[0-9]{2,})?(?:[A-Za-z]+[0-9]*)*)(?=$|[ _-])"#)
+    private static let luhmannPattern = try! NSRegularExpression(pattern: #"^([0-9]+(?:[A-Za-z]+[0-9]*)*)(?=$|[ _-])"#)
+    private static let debatePattern = try! NSRegularExpression(pattern: #"^((?:AFF|DEF)-[0-9]+(?:[A-Za-z]+[0-9]*)*(?:-(?:OB|EV|AR|RE|NT)-[0-9]+(?:[A-Za-z]+[0-9]*)*)*)(?=$|[ _-])"#, options: [.caseInsensitive])
+
     static func filenameID(for file: URL) -> String? {
         guard file.pathExtension.lowercased() == "md" else { return nil }
         let name = file.deletingPathExtension().lastPathComponent
-        let pattern = try! NSRegularExpression(pattern: #"^((?:[0-9]{12}|[0-9]{8}|[0-9]{2}-[0-9]{2}-[0-9]{2}(?:-[0-9]{4})?)(?:-[0-9]{2,})?(?:[A-Za-z]+[0-9]*)*)(?=$|[ _-])"#)
+        let pattern = Self.timestampPattern
         guard let match = pattern.firstMatch(in: name, range: NSRange(name.startIndex..., in: name)), let range = Range(match.range(at: 1), in: name) else { return nil }
         return String(name[range])
     }
@@ -78,7 +83,7 @@ enum BranchIDs {
     static func luhmannFilenameID(for file: URL) -> String? {
         guard file.pathExtension.lowercased() == "md" else { return nil }
         let name = file.deletingPathExtension().lastPathComponent
-        let pattern = try! NSRegularExpression(pattern: #"^([0-9]+(?:[A-Za-z]+[0-9]*)*)(?=$|[ _-])"#)
+        let pattern = Self.luhmannPattern
         guard let match = pattern.firstMatch(in: name, range: NSRange(name.startIndex..., in: name)), let range = Range(match.range(at: 1), in: name) else { return nil }
         return String(name[range])
     }
@@ -88,7 +93,7 @@ enum BranchIDs {
     static func debateFilenameID(for file: URL) -> String? {
         guard file.pathExtension.lowercased() == "md" else { return nil }
         let name = file.deletingPathExtension().lastPathComponent
-        let pattern = try! NSRegularExpression(pattern: #"^((?:AFF|DEF)-[0-9]+(?:[A-Za-z]+[0-9]*)*(?:-(?:OB|EV|AR|RE|NT)-[0-9]+(?:[A-Za-z]+[0-9]*)*)*)(?=$|[ _-])"#, options: [.caseInsensitive])
+        let pattern = Self.debatePattern
         guard let match = pattern.firstMatch(in: name, range: NSRange(name.startIndex..., in: name)), let range = Range(match.range(at: 1), in: name) else { return nil }
         return String(name[range])
     }

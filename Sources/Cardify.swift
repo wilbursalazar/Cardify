@@ -783,7 +783,7 @@ struct ContentView: View {
                                    onClose: { closeLinkedTab(side.id) },
                                    onMakeMain: { closeLinkedTab(side.id); _ = loadFile(side.url) },
                                    onFollowLink: { target in followLinkFromTab(target, source: linkedTabs.first(where: { $0.id == side.id }) ?? side) },
-                                   onSaved: { sidebarRefreshToken = UUID() })
+                                   onSaved: { library.refresh(files: linkedTabs.map(\.url), folder: libraryFolder) })
                         .frame(minWidth: 260)
                 }
                 }
@@ -981,7 +981,7 @@ struct ContentView: View {
         newCardFolder = nil
         var draft = KasterFrontmatter.ensuringUID(in: mode.template)
         if mode == .zettel {
-            let existing = (try? BranchIDs.existing(in: scanRoots(for: nil))) ?? []
+            let existing = knownIDs(for: nil)
             let id = LuhmannIDs.nextTopLevel(existing: existing)
             if let updated = NoteEditing.addID(id, to: draft) { draft = updated }
             text = draft
@@ -1007,7 +1007,7 @@ struct ContentView: View {
             }
             kasterMode = mode; lastMode = mode.rawValue; storedIDMode = mode.idMode.rawValue
             if mode == .zettel, CardMetadata.parse(text).id == nil {
-                let existing = (try? BranchIDs.existing(in: scanRoots(for: nil))) ?? []
+                let existing = knownIDs(for: nil)
                 if let updated = NoteEditing.addID(LuhmannIDs.nextTopLevel(existing: existing), to: text) { text = updated }
             }
             return
@@ -1292,7 +1292,7 @@ struct ContentView: View {
         if cardMode == "markdown" && !showDebate {
             guard let root = vaultRoot else { return nil }
             if let uid = KasterFrontmatter.value("uid", in: text),
-               let same = library.snapshot.cards.first(where: { KasterFrontmatter.value("uid", in: $0.content) == uid }) {
+               let same = library.index.card(uid: uid) {
                 return same.url
             }
             name = KasterVault.filename(mode: kasterMode, id: CardMetadata.parse(text).id, title: NoteEditing.title(in: text))
@@ -1450,7 +1450,7 @@ struct ContentView: View {
         case .research: sourceControls(labels: labels)
         case .quick: promoteMenu
         case .bibliography:
-            let citing = library.backlinks(for: fileURL).filter { KasterMode.infer(url: $0.url, root: vaultRoot, text: $0.content) == .research }.count
+            let citing = library.backlinks(for: fileURL).filter { library.index.mode(of: $0) == .research }.count
             Text("Cited by \(citing)").font(.caption).foregroundStyle(.secondary).help("Research cards whose Source links here")
         }
     }
@@ -1458,8 +1458,7 @@ struct ContentView: View {
     var promoteMenu: some View {
         Menu {
             Button { relocateCurrentCard(to: .zettel, parentID: nil) } label: { Label("Promote to Zettel (new top-level)", systemImage: "number") }
-            let zettels = library.snapshot.cards.filter { $0.cardID.map(LuhmannIDs.isLuhmann) ?? false }
-                .sorted { ($0.cardID ?? "").localizedStandardCompare($1.cardID ?? "") == .orderedAscending }
+            let zettels = library.index.zettels
             if !zettels.isEmpty {
                 Menu("Promote to Zettel, Branching From…") {
                     ForEach(zettels.prefix(200)) { card in
@@ -1476,8 +1475,7 @@ struct ContentView: View {
     @ViewBuilder func sourceControls(labels: Bool) -> some View {
         let source = KasterVault.source(in: text)
         Menu {
-            let bibliography = library.snapshot.cards.filter { KasterMode.infer(url: $0.url, root: vaultRoot, text: $0.content) == .bibliography }
-                .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+            let bibliography = library.index.cards(in: .bibliography)
             ForEach(bibliography) { card in
                 Button(card.title) { setSource(link: card.url.deletingPathExtension().lastPathComponent, page: source.page) }
             }
@@ -1844,6 +1842,17 @@ struct ContentView: View {
         status = message
         let alert = NSAlert(); alert.messageText = "Can't open link"; alert.informativeText = message; alert.addButton(withTitle: "OK"); alert.runModal()
     }
+    /// IDs already in use, for suggesting a new one. Uses the library index when it covers every
+    /// folder that would be scanned; saving still checks the disk before a new ID is written.
+    func knownIDs(for file: URL?) -> Set<String> { (try? knownIDs(throwingFor: file)) ?? [] }
+    func knownIDs(throwingFor file: URL?) throws -> Set<String> {
+        let roots = scanRoots(for: file)
+        if roots.count == 1, !library.loadedFolder.isEmpty,
+           roots[0].resolvingSymlinksInPath().standardizedFileURL.path == library.loadedFolder {
+            return library.index.ids
+        }
+        return try BranchIDs.existing(in: roots)
+    }
     func scanRoots(for file: URL? = nil) -> [URL] {
         var roots: [URL] = []
         if !notesFolder.isEmpty { roots.append(URL(fileURLWithPath: notesFolder, isDirectory: true).standardizedFileURL) }
@@ -1975,7 +1984,7 @@ struct ContentView: View {
         } else if !flushExistingDraft() { return }
         guard let parentURL = fileURL else { return }
         do {
-            let existing = try BranchIDs.existing(in: scanRoots(for: parentURL))
+            let existing = try knownIDs(throwingFor: parentURL)
             let childID = try (continuation ? LuhmannIDs.continuation(of: parentID, existing: existing) : LuhmannIDs.branch(of: parentID, existing: existing))
             let root = notesFolder.isEmpty ? nil : URL(fileURLWithPath: notesFolder, isDirectory: true).standardizedFileURL.path
             let path = parentURL.deletingPathExtension().standardizedFileURL.path
@@ -2260,13 +2269,17 @@ struct ContentView: View {
             }
             if let id = CardMetadata.parse(content).id {
                 guard !id.contains(where: { $0.isNewline || ($0.isASCII && $0.isWhitespace && $0 != " ") }) else { return fail("Card IDs must be a single line.") }
+                // An ID this same file already had was checked when it was first saved; re-reading the
+                // whole vault on every autosave made typing stall in large vaults.
+                let previousID = sameFile ? before.flatMap { try? decodeMarkdown($0) }.flatMap { CardMetadata.parse($0).id } : nil
+                let unchangedID = previousID?.caseInsensitiveCompare(id) == .orderedSame
                 var roots = [target.deletingLastPathComponent().resolvingSymlinksInPath().standardizedFileURL]
                 if !notesFolder.isEmpty {
                     let folder = URL(fileURLWithPath: notesFolder, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL
                     if roots[0].path == folder.path || roots[0].path.hasPrefix(folder.path + "/") { roots = [folder] }
                     else { roots.append(folder) }
                 }
-                for root in roots {
+                for root in roots where !unchangedID {
                     if let duplicate = try CardIDIndex.ids(in: root, excluding: target.resolvingSymlinksInPath().standardizedFileURL).first(where: { $0.0.caseInsensitiveCompare(id) == .orderedSame }) {
                         return fail("Card ID \(id) is already used by \(duplicate.1.lastPathComponent). Change the ID before saving.")
                     }
@@ -2309,7 +2322,10 @@ struct ContentView: View {
             else if cardMode == "outline" { savedOutlineSnapshot = content }
             else { savedMarkdownSnapshot = content }
             if !suppressHistorySave { history.saveCurrent(target) }
-            branchSaveFolder = nil; sidebarRefreshToken = UUID()
+            branchSaveFolder = nil
+            // Update just this card in the library instead of rescanning every file.
+            // A brand-new card does a full scan so the sidebar can reveal it in its folder.
+            if currentURL == nil { sidebarRefreshToken = UUID() } else { library.refresh(files: [target], folder: libraryFolder) }
             status = automatic ? (currentURL == nil ? "Saved as \(target.lastPathComponent)." : "Changes saved.") : "Saved \(target.lastPathComponent)."
             if currentURL == nil && cardMode == "markdown" { lastMode = kasterMode.rawValue }
             scheduleTitleRename()
@@ -2405,6 +2421,9 @@ struct ContentView: View {
         if printed { lastPrintTime = Date().timeIntervalSince1970 }
         return printed
     }
+
+    /// The folder the library (sidebar, backlinks, index) reads.
+    var libraryFolder: String { notesFolder.isEmpty ? saveFolder : notesFolder }
 
     private var sidebarRoot: URL? {
         let folder = notesFolder.isEmpty ? saveFolder : notesFolder

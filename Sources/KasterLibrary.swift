@@ -13,15 +13,69 @@ final class LibraryStore: ObservableObject {
     @Published private(set) var loading = false
     @Published var message = "Choose a notes folder."
     @Published private(set) var loadedFolder = ""
+    /// Lookups (card by path, backlinks, order, type) built off the main thread with each snapshot.
+    @Published private(set) var index = LibraryIndex.empty
+    /// Bumped whenever the cards or their dates change, so views can cache what they derive.
+    @Published private(set) var generation = 0
     private var scanID = UUID()
+    // Scans and incremental refreshes run in order on one queue, each building on the last result.
+    private let queue = DispatchQueue(label: "kaster.library", qos: .userInitiated)
+    private var queueSnapshot: (root: URL, snapshot: LibrarySnapshot)?
 
     func cancel() { scanID = UUID() }
+
+    private static func extras(for cards: [LibraryCard]) -> (modified: [String: Date], created: [String: Date], themes: [String: [String]]) {
+        var modified: [String: Date] = [:], created: [String: Date] = [:], themes: [String: [String]] = [:]
+        for card in cards {
+            if let theme = KasterTypesetter.firstTag(in: card.content) { themes[theme.lowercased(), default: []].append(card.path) }
+            let values = try? card.url.resourceValues(forKeys: [.contentModificationDateKey, .creationDateKey])
+            modified[card.path] = values?.contentModificationDate
+            created[card.path] = values?.creationDate
+        }
+        return (modified, created, themes)
+    }
+
+    /// Updates the library for files Kaster just wrote, moved or deleted, without rescanning
+    /// the folder. Falls back to a full scan if no scan has finished yet.
+    func refresh(files: [URL], folder: String) {
+        guard !folder.isEmpty, !files.isEmpty else { return }
+        let root = URL(fileURLWithPath: folder, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL
+        guard root.path == loadedFolder else { scan(folder: folder); return }
+        let id = scanID
+        queue.async {
+            guard let base = self.queueSnapshot, base.root == root else {
+                DispatchQueue.main.async { if self.scanID == id { self.scan(folder: folder) } }
+                return
+            }
+            let updated = base.snapshot.updating(files, root: root)
+            self.queueSnapshot = (root, updated)
+            let index = LibraryIndex(snapshot: updated, root: root)
+            // Dates and themes change only for the touched cards; refresh just those.
+            let touchedPaths = Set(files.compactMap { file -> String? in
+                updated.cards.first(where: { $0.url.standardizedFileURL.path == file.standardizedFileURL.path })?.path
+            })
+            let touched = updated.cards.filter { touchedPaths.contains($0.path) }
+            let partial = Self.extras(for: touched)
+            let livePaths = Set(updated.cards.map(\.path))
+            DispatchQueue.main.async {
+                guard self.scanID == id, self.loadedFolder == root.path else { return }
+                var modified = self.modified.filter { livePaths.contains($0.key) }, created = self.created.filter { livePaths.contains($0.key) }
+                for (path, date) in partial.modified { modified[path] = date }
+                for (path, date) in partial.created { created[path] = date }
+                var themes = self.themes.mapValues { $0.filter { livePaths.contains($0) && !touchedPaths.contains($0) } }.filter { !$0.value.isEmpty }
+                for (theme, paths) in partial.themes { themes[theme, default: []].append(contentsOf: paths) }
+                self.snapshot = updated; self.index = index; self.generation += 1
+                self.modified = modified; self.created = created; self.themes = themes
+                self.message = updated.unreadable > 0 ? "Some notes could not be read." : ""
+            }
+        }
+    }
 
     func scan(folder: String, completion: @escaping (_ rootChanged: Bool) -> Void = { _ in }) {
         let id = UUID(); scanID = id
         guard !folder.isEmpty else {
             snapshot = LibrarySnapshot(cards: [], outgoing: [:], incoming: [:], unreadable: 0)
-            folderPaths = []; modified = [:]; created = [:]; loadedFolder = ""; loading = false
+            folderPaths = []; modified = [:]; created = [:]; loadedFolder = ""; loading = false; index = .empty
             message = "Choose a notes folder."
             return
         }
@@ -29,33 +83,26 @@ final class LibraryStore: ObservableObject {
         let rootChanged = root.path != loadedFolder
         if rootChanged {
             snapshot = LibrarySnapshot(cards: [], outgoing: [:], incoming: [:], unreadable: 0)
-            folderPaths = []; modified = [:]; created = [:]
+            folderPaths = []; modified = [:]; created = [:]; index = .empty
         }
         loading = true; message = ""
-        DispatchQueue.global(qos: .userInitiated).async {
+        queue.async {
             let found = LibrarySnapshot.load(folder: root)
+            self.queueSnapshot = found.map { (root, $0) }
             let folders = found == nil ? [] : SidebarFolders.paths(in: root)
-            var modified: [String: Date] = [:]
-            var created: [String: Date] = [:]
-            var themes: [String: [String]] = [:]
-            for card in found?.cards ?? [] {
-                if let theme = KasterTypesetter.firstTag(in: card.content) { themes[theme.lowercased(), default: []].append(card.path) }
-            }
-            for card in found?.cards ?? [] {
-                let values = try? card.url.resourceValues(forKeys: [.contentModificationDateKey, .creationDateKey])
-                modified[card.path] = values?.contentModificationDate
-                created[card.path] = values?.creationDate
-            }
+            let extras = Self.extras(for: found?.cards ?? [])
+            let modified = extras.modified, created = extras.created, themes = extras.themes
+            let index = found.map { LibraryIndex(snapshot: $0, root: root) } ?? .empty
             DispatchQueue.main.async {
                 guard self.scanID == id else { return }
                 self.loading = false
                 guard let found else {
                     self.snapshot = LibrarySnapshot(cards: [], outgoing: [:], incoming: [:], unreadable: 0)
-                    self.folderPaths = []; self.modified = [:]; self.created = [:]; self.loadedFolder = ""
+                    self.folderPaths = []; self.modified = [:]; self.created = [:]; self.loadedFolder = ""; self.index = .empty
                     self.message = "Can't read this folder. Choose it again."
                     return
                 }
-                self.snapshot = found; self.folderPaths = folders; self.modified = modified; self.created = created; self.themes = themes
+                self.snapshot = found; self.index = index; self.generation += 1; self.folderPaths = folders; self.modified = modified; self.created = created; self.themes = themes
                 self.loadedFolder = root.path
                 self.message = found.unreadable > 0 ? "Some notes could not be read." : ""
                 completion(rootChanged)
@@ -63,25 +110,9 @@ final class LibraryStore: ObservableObject {
         }
     }
 
-    func card(for url: URL?) -> LibraryCard? {
-        guard let url else { return nil }
-        let target = url.resolvingSymlinksInPath().standardizedFileURL
-        return snapshot.cards.first { $0.url.resolvingSymlinksInPath().standardizedFileURL == target }
-    }
-
-    func backlinks(for url: URL?) -> [LibraryCard] {
-        guard let card = card(for: url) else { return [] }
-        let byPath = Dictionary(snapshot.cards.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
-        return Array(Set(snapshot.incoming[card.path] ?? [])).compactMap { byPath[$0] }
-            .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
-    }
-
-    func outgoing(for url: URL?) -> [LibraryCard] {
-        guard let card = card(for: url) else { return [] }
-        let byPath = Dictionary(snapshot.cards.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
-        return Array(Set(snapshot.outgoing[card.path] ?? [])).compactMap { byPath[$0] }
-            .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
-    }
+    func card(for url: URL?) -> LibraryCard? { index.card(for: url) }
+    func backlinks(for url: URL?) -> [LibraryCard] { index.backlinks(for: url) }
+    func outgoing(for url: URL?) -> [LibraryCard] { index.outgoing(for: url) }
 }
 
 // Favorites and recents are stored as standardized absolute paths, one per line.
@@ -156,5 +187,18 @@ enum KasterSequence {
         guard let id = card.cardID, !id.isEmpty else { return [card] }
         let descendants = cards.filter { other in other.cardID.map { isDescendant($0, of: id) } ?? false }
         return [card] + descendants.sorted { ($0.cardID ?? "").localizedStandardCompare($1.cardID ?? "") == .orderedAscending }
+    }
+}
+
+/// Remembers one derived value per key, so a view can skip recomputing it on unrelated redraws
+/// (the sidebar's sorted card list while you type in the editor).
+final class DerivedCache<Value> {
+    private var key: String?
+    private var value: Value?
+    func value(for key: String, compute: () -> Value) -> Value {
+        if key == self.key, let value { return value }
+        let fresh = compute()
+        self.key = key; self.value = fresh
+        return fresh
     }
 }

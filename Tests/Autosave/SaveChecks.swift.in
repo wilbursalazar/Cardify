@@ -54,6 +54,7 @@ enum CardIDIndex {
     }
 }
 struct History { mutating func saveCurrent(_ url: URL) {} }
+final class LibraryStub { var refreshed: [URL] = []; func refresh(files: [URL], folder: String) { refreshed += files } }
 final class Harness {
     var cardMode = "markdown", text = "", tracker = HabitTracker(), todo = TodoList(), outline = OutlineDocument()
     var showDebate = false
@@ -61,6 +62,8 @@ final class Harness {
     var diskSnapshots: [String: Data] = [:], newDraftBaselines: [String: Data] = [:]
     var savedMarkdownSnapshot: String?, savedHabitSnapshot: String?, savedTodoSnapshot: String?, savedOutlineSnapshot: String?
     var autosaveTask: Task<Void, Never>?, history = History(), suppressHistorySave = false, sidebarRefreshToken = UUID()
+    let library = LibraryStub()
+    var libraryFolder: String { notesFolder.isEmpty ? saveFolder : notesFolder }
     func ensureID() -> Bool { true }
     // Kaster hooks: these checks cover the existing save paths, so no automatic
     // card-type destination is offered and title renames are no-ops here.
@@ -109,11 +112,20 @@ final class Harness {
         let race = temporary.appendingPathComponent("race.md")
         let raceOld = "card_id: 7\n# Old\n", raceExternal = "# External update\n"
         try Data(raceOld.utf8).write(to: race)
-        let racing = Harness(); racing.fileURL = race; racing.notesFolder = temporary.path; racing.text = "card_id: 7\n# My edit\n"; racing.savedMarkdownSnapshot = raceOld; racing.diskSnapshots["markdown"] = Data(raceOld.utf8)
+        let racing = Harness(); racing.fileURL = race; racing.notesFolder = temporary.path; racing.text = "card_id: 8\n# My edit\n"; racing.savedMarkdownSnapshot = raceOld; racing.diskSnapshots["markdown"] = Data(raceOld.utf8)
         CardIDIndex.onScan = { try! Data(raceExternal.utf8).write(to: race) }
         precondition(!racing.saveMarkdown(automatic: true))
         let racedData = try Data(contentsOf: race)
         precondition(racedData == Data(raceExternal.utf8))
+        // An ID the file already had is not re-checked against the whole vault on every autosave.
+        let steady = temporary.appendingPathComponent("steady.md"), steadyOld = "card_id: 9\n# Old\n"
+        try Data(steadyOld.utf8).write(to: steady)
+        let steadying = Harness(); steadying.fileURL = steady; steadying.notesFolder = temporary.path; steadying.text = "card_id: 9\n# Edited\n"; steadying.savedMarkdownSnapshot = steadyOld; steadying.diskSnapshots["markdown"] = Data(steadyOld.utf8)
+        var scanned = false
+        CardIDIndex.onScan = { scanned = true }
+        precondition(steadying.saveMarkdown(automatic: true) && !scanned, "Unchanged IDs skip the vault scan")
+        precondition(steadying.library.refreshed.map(\.lastPathComponent) == ["steady.md"], "Saving refreshes just this card in the library")
+        CardIDIndex.onScan = nil
         let habitFile = temporary.appendingPathComponent("habit.md")
         let habitDisk = "# Week\r\n\r\n| Habit | Mon |\r\n", habitOriginal = "# Week\n\n| Habit | Mon |\n", habitEdit = "# Week\n\n| Habit | Tue |\n"
         try Data(habitDisk.utf8).write(to: habitFile)
