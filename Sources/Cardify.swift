@@ -306,32 +306,6 @@ struct PDFPreview: NSViewRepresentable {
     static func dismantleNSView(_ view: StablePDFPreviewView, coordinator: ()) { view.cancelPending() }
 }
 
-struct ZoteroCreator: Decodable {
-    let firstName: String?
-    let lastName: String?
-    let name: String?
-    var display: String { [firstName, lastName].compactMap { $0 }.joined(separator: " ").isEmpty ? (name ?? "") : [firstName, lastName].compactMap { $0 }.joined(separator: " ") }
-}
-struct ZoteroData: Decodable {
-    let title: String?
-    let date: String?
-    let creators: [ZoteroCreator]?
-}
-struct ZoteroItem: Decodable, Identifiable {
-    let key: String
-    let data: ZoteroData
-    var id: String { key }
-    static func clean(_ value: String) -> String { value.components(separatedBy: .newlines).joined(separator: " ").trimmingCharacters(in: .whitespaces) }
-    var title: String { let t = Self.clean(data.title ?? ""); return t.isEmpty ? "Untitled" : t }
-    var authors: String { (data.creators ?? []).map { Self.clean($0.display) }.filter { !$0.isEmpty }.joined(separator: ", ") }
-    var description: String { [authors, title, Self.clean(data.date ?? "")].filter { !$0.isEmpty }.joined(separator: ", ") }
-    func markdown(location: String) -> String {
-        let loc = Self.clean(location)
-        let suffix = loc.isEmpty ? "" : ", " + loc
-        return "Source: " + description + suffix + "\nZotero: [Open source](zotero://select/library/items/" + key + ")"
-    }
-}
-
 struct ResearchClip: Identifiable {
     let id = UUID()
     var header: String = ""
@@ -922,10 +896,15 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $showZotero) {
-            ZoteroPicker { source in
-                let separator = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : "\n\n"
-                text += separator + source + "\n"
-                status = "Zotero source added."
+            ZoteroPicker { pick in
+                if cardMode == "markdown" && !showDebate && kasterMode == .research {
+                    // Research cards cite inline; the Zotero key stays hidden in the frontmatter.
+                    text = ZoteroSource.apply(pick.source, page: pick.location, to: text)
+                    status = "Source set: " + ZoteroSource.line(cite: pick.source.cite, page: pick.location)
+                } else {
+                    editor.insert(ZoteroSource.line(cite: pick.source.cite, page: pick.location))
+                    status = "Citation inserted."
+                }
             }
         }
     }
@@ -1473,22 +1452,63 @@ struct ContentView: View {
     }
 
     @ViewBuilder func sourceControls(labels: Bool) -> some View {
-        let source = KasterVault.source(in: text)
-        Menu {
-            let bibliography = library.index.cards(in: .bibliography)
-            ForEach(bibliography) { card in
-                Button(card.title) { setSource(link: card.url.deletingPathExtension().lastPathComponent, page: source.page) }
+        if let zotero = ZoteroSource.read(text) {
+            zoteroSourceControls(zotero, labels: labels)
+        } else {
+            let source = KasterVault.source(in: text)
+            Menu {
+                Button("Choose from Zotero…") { showZotero = true }
+                Divider()
+                let bibliography = library.index.cards(in: .bibliography)
+                ForEach(bibliography) { card in
+                    Button(card.title) { setSource(link: card.url.deletingPathExtension().lastPathComponent, page: source.page) }
+                }
+                if !bibliography.isEmpty { Divider() }
+                Button("New Bibliography Card…") { createBibliographyCard(page: source.page) }
+                if source.link != nil { Button("Remove Source") { setSource(link: nil, page: source.page) } }
+            } label: {
+                Label(source.link ?? "Source…", systemImage: "text.book.closed").lineLimit(1)
             }
-            if !bibliography.isEmpty { Divider() }
-            Button("New Bibliography Card…") { createBibliographyCard(page: source.page) }
-            if source.link != nil { Button("Remove Source") { setSource(link: nil, page: source.page) } }
-        } label: {
-            Label(source.link ?? "Source…", systemImage: "text.book.closed").lineLimit(1)
+            .menuStyle(.borderlessButton).fixedSize()
+            .help("Where this quotation comes from: a Zotero item, or a hand-made Bibliography card")
+            TextField("p.", text: Binding(get: { source.page ?? "" }, set: { setSource(link: KasterVault.source(in: text).link, page: $0) }))
+                .frame(width: 48).help("Page or location").accessibilityLabel("Page")
         }
-        .menuStyle(.borderlessButton).fixedSize()
-        .help("The Bibliography card this quotation comes from")
-        TextField("p.", text: Binding(get: { source.page ?? "" }, set: { setSource(link: KasterVault.source(in: text).link, page: $0) }))
+    }
+
+    /// A Research card citing a Zotero item inline.
+    @ViewBuilder func zoteroSourceControls(_ zotero: ZoteroSource, labels: Bool) -> some View {
+        let page = ZoteroSource.page(in: text, cite: zotero.cite)
+        let others = library.index.cards(citingZotero: zotero.key, library: zotero.library).filter { card in fileURL.map { library.card(for: $0)?.path != card.path } ?? true }
+        Menu {
+            Button("Change Zotero Source…") { showZotero = true }
+            if let url = zotero.selectURL { Button("Show in Zotero") { NSWorkspace.shared.open(url) } }
+            if !others.isEmpty {
+                Menu("Also Cited in \(others.count) Card\(others.count == 1 ? "" : "s")") {
+                    ForEach(others.prefix(100)) { card in Button(card.title) { loadFile(card.url) } }
+                }
+            }
+            Divider()
+            Button("Remove Source") { text = ZoteroSource.apply(nil, page: nil, to: text) }
+        } label: {
+            Label(zotero.cite.replacingOccurrences(of: "*", with: ""), systemImage: "books.vertical").lineLimit(1)
+        }
+        .menuStyle(.borderlessButton).frame(maxWidth: 260).fixedSize(horizontal: false, vertical: true)
+        .help("Cited from Zotero: " + ZoteroSource.line(cite: zotero.cite, page: page))
+        TextField("p.", text: Binding(get: { page ?? "" }, set: { newPage in
+            guard let current = ZoteroSource.read(text) else { return }
+            text = ZoteroSource.apply(current, page: newPage, to: text)
+        }))
             .frame(width: 48).help("Page or location").accessibilityLabel("Page")
+        Button { openZoteroPage(zotero, page: page) } label: { Image(systemName: zotero.pdf == nil || page.flatMap(ZoteroPageOpener.firstPage) == nil ? "arrow.up.forward.square" : "book") }
+            .buttonStyle(.borderless)
+            .help(zotero.pdf == nil ? "Show this source in Zotero (it has no PDF)" : page.flatMap(ZoteroPageOpener.firstPage).map { "Open page \($0) of the PDF in Zotero" } ?? "Open the PDF in Zotero")
+            .accessibilityLabel("Open in Zotero")
+    }
+
+    func openZoteroPage(_ zotero: ZoteroSource, page: String?) {
+        guard let url = ZoteroPageOpener.url(for: zotero, page: page, pdfFile: ZoteroPageOpener.localFile(for: zotero)) else { return }
+        if !NSWorkspace.shared.open(url) { status = "Could not open Zotero." }
     }
 
     func setSource(link: String?, page: String?) {

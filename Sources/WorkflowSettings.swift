@@ -46,6 +46,7 @@ struct WorkflowSettings: View {
     @AppStorage("newCardWorkflow") private var storedWorkflow = WorkflowPreference.configured.rawValue
     @AppStorage("dotGrid") private var dotGrid = false
     @AppStorage(EditorTextScale.key) private var editorScale = 1.0
+    @AppStorage(ZoteroStyle.key) private var zoteroStyle = ""
     @AppStorage("timestampDateStyle") private var timestampDateStyle = TimestampDateStyle.sortable.rawValue
     @AppStorage("timestampIncludeTime") private var timestampIncludeTime = true
     @AppStorage("kasterTypesetEngine") private var typesetEngine = TypesetEngine.typst.rawValue
@@ -92,6 +93,15 @@ struct WorkflowSettings: View {
                 .help("Makes the writing area easier to read on a large screen. Printed cards keep their own text size.")
                 Text("Shortcuts: ⌘+ bigger, ⌘− smaller, ⌘0 normal. Printed cards are not affected.")
                     .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Zotero") {
+                let styles = ZoteroStyle.installed()
+                Picker("Citation style", selection: Binding(get: { ZoteroStyle.current(stored: zoteroStyle, installed: styles) }, set: { zoteroStyle = $0 })) {
+                    ForEach(styles) { style in Text(style.title).tag(style.id) }
+                    if styles.isEmpty { Text("Chicago Manual of Style (notes)").tag("chicago-notes-bibliography") }
+                }
+                Text("Research cards cite Zotero sources inline in this style, from the styles installed in Zotero. Changing it applies to sources you add from now on.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             Section("Typesetting") {
                 Picker("Engine", selection: $typesetEngine) {

@@ -493,6 +493,8 @@ struct LibraryIndex {
     let ids: Set<String>
     private let byMode: [KasterMode: [LibraryCard]]
     private let byUID: [String: Int]
+    /// Research cards citing each Zotero item ("library/key").
+    private let zoteroCiting: [String: [LibraryCard]]
     /// Luhmann-numbered cards in sequence order (Promote → Branch From…).
     let zettels: [LibraryCard]
 
@@ -503,11 +505,15 @@ struct LibraryIndex {
         incoming = snapshot.incoming; outgoing = snapshot.outgoing
         var byKey: [String: Int] = [:], byPath: [String: Int] = [:], orders: [String: Double] = [:]
         var modes: [String: KasterMode] = [:], ids: Set<String> = [], byMode: [KasterMode: [LibraryCard]] = [:], byUID: [String: Int] = [:]
+        var zoteroCiting: [String: [LibraryCard]] = [:]
         for (index, card) in snapshot.cards.enumerated() {
             byKey[card.url.standardizedFileURL.path] = byKey[card.url.standardizedFileURL.path] ?? index
             byPath[card.path] = byPath[card.path] ?? index
             if let order = KasterFrontmatter.order(in: card.content) { orders[card.path] = order }
             if let uid = KasterFrontmatter.value("uid", in: card.content) { byUID[uid] = byUID[uid] ?? index }
+            if let key = KasterFrontmatter.value("zotero", in: card.content) {
+                zoteroCiting[(KasterFrontmatter.value("zotero-library", in: card.content) ?? "personal") + "/" + key, default: []].append(card)
+            }
             // The card's relative path already names its type folder; avoid resolving paths per card.
             let first = card.path.split(separator: "/", maxSplits: 1).first.map(String.init) ?? ""
             let metadataID = CardMetadata.parse(card.content).id
@@ -520,7 +526,7 @@ struct LibraryIndex {
             else if metadataID == nil, let id = BranchIDs.luhmannFilenameID(for: card.url) { ids.insert(id) }
             if let id = BranchIDs.debateFilenameID(for: card.url), id.caseInsensitiveCompare(metadataID ?? "") != .orderedSame { ids.insert(id) }
         }
-        self.byKey = byKey; self.byPath = byPath; self.orders = orders; self.modes = modes; self.ids = ids; self.byUID = byUID
+        self.byKey = byKey; self.byPath = byPath; self.orders = orders; self.modes = modes; self.ids = ids; self.byUID = byUID; self.zoteroCiting = zoteroCiting
         zettels = snapshot.cards.filter { $0.cardID.map(LuhmannIDs.isLuhmann) ?? false }
             .sorted { ($0.cardID ?? "").localizedStandardCompare($1.cardID ?? "") == .orderedAscending }
         self.byMode = byMode.mapValues { $0.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending } }
@@ -534,6 +540,7 @@ struct LibraryIndex {
     }
     func card(path: String) -> LibraryCard? { byPath[path].map { cards[$0] } }
     func card(uid: String) -> LibraryCard? { byUID[uid].map { cards[$0] } }
+    func cards(citingZotero key: String, library: String = "personal") -> [LibraryCard] { zoteroCiting[library + "/" + key] ?? [] }
 
     private func related(_ paths: [String]?) -> [LibraryCard] {
         Array(Set(paths ?? [])).compactMap { card(path: $0) }.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
