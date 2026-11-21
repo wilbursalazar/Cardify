@@ -1253,43 +1253,41 @@ struct ContentView: View {
 
     // MARK: Keyword register
 
-    var registerEntries: [KeywordRegister.Entry] {
-        guard let root = vaultRoot else { return [] }
-        let text = (try? String(contentsOf: KeywordRegister.url(in: root), encoding: .utf8)) ?? ""
-        return KeywordRegister.entries(in: text)
-    }
-
+    /// The keyword register (RegisterService), or nil without a notes folder.
+    var register: RegisterService? { vaultRoot.map { RegisterService(root: $0) } }
+    var registerEntries: [KeywordRegister.Entry] { register?.entries() ?? [] }
     /// Cards marked as index cards that no keyword points to yet.
-    var indexCardsNotInRegister: [LibraryCard] {
-        let linked = Set(registerEntries.flatMap(\.links).compactMap { library.index.resolve(link: $0)?.path })
-        return library.snapshot.cards.filter { IndexCardMetadata.isIndex($0.content) && !linked.contains($0.path) }
+    var indexCardsNotInRegister: [LibraryCard] { register?.indexCardsNotInRegister(index: library.index) ?? [] }
+    func ensureRegisterFile(_ root: URL) { RegisterService(root: root).ensureFile() }
+
+    /// True while Register.md is the open card with edits not yet saved.
+    var registerHasUnsavedEdits: Bool {
+        guard let url = register?.url else { return false }
+        return fileURL.map { $0.standardizedFileURL == url.standardizedFileURL } == true && savedMarkdownSnapshot != text
     }
 
-    func ensureRegisterFile(_ root: URL) {
-        let url = KeywordRegister.url(in: root)
-        if !FileManager.default.fileExists(atPath: url.path) { try? Data(KeywordRegister.template.utf8).write(to: url, options: .withoutOverwriting) }
-    }
-
-    /// Rewrites Register.md, refusing if it's open with unsaved edits.
-    func updateRegister(_ change: (String) -> String) {
-        guard let root = vaultRoot else { status = "Choose a notes folder first."; return }
-        let url = KeywordRegister.url(in: root)
-        if fileURL.map({ $0.standardizedFileURL == url.standardizedFileURL }) == true, savedMarkdownSnapshot != text {
-            status = "Register.md has unsaved edits; it saves in a moment, then try again."; return
+    /// Shows the result of a register change: refreshes it in the library and open editors.
+    @discardableResult func applyRegisterUpdate(_ update: RegisterService.Update) -> Bool {
+        switch update {
+        case .unchanged: return false
+        case .written:
+            if let url = register?.url { library.refresh(files: [url], folder: libraryFolder); reloadOpenCards([url]) }
+            return true
+        case .refused(let message), .failed(let message):
+            status = message
+            return false
         }
-        let before = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
-        let after = change(before)
-        guard after != before else { return }
-        do {
-            try Data(after.utf8).write(to: url, options: .atomic)
-            library.refresh(files: [url], folder: libraryFolder)
-            reloadOpenCards([url])
-        } catch { status = "Could not update the register: \(error.localizedDescription)" }
+    }
+
+    func updateRegister(_ change: (String) -> String) {
+        guard let register else { status = "Choose a notes folder first."; return }
+        applyRegisterUpdate(register.update(openWithUnsavedEdits: registerHasUnsavedEdits, change))
     }
 
     func addToRegister(_ url: URL) {
         guard let card = library.card(for: url) else { status = "Save the card first, then add it to the register."; return }
-        let field = NSTextField(string: KasterTypesetter.firstTag(in: card.content) ?? card.title); field.frame.size.width = 300
+        guard let register else { status = "Choose a notes folder first."; return }
+        let field = NSTextField(string: RegisterService.suggestedKeyword(for: card)); field.frame.size.width = 300
         let alert = NSAlert(); alert.messageText = "Add “\(card.title)” to the register"
         alert.informativeText = "Keyword for this entry card. A keyword usually points to 1–3 cards where a line of thought begins."
         alert.accessoryView = field; alert.addButton(withTitle: "Add"); alert.addButton(withTitle: "Cancel")
@@ -1297,23 +1295,23 @@ struct ContentView: View {
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         let keyword = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !keyword.isEmpty else { return }
-        let link = CardifyNote.shortestLink(for: card.path, among: library.snapshot.cards.map(\.path))
-        updateRegister { KeywordRegister.adding(link, to: keyword, in: $0) }
-        let count = registerEntries.first { $0.keyword.caseInsensitiveCompare(keyword) == .orderedSame }?.links.count ?? 1
+        let update = register.add(card, keyword: keyword, index: library.index, openWithUnsavedEdits: registerHasUnsavedEdits)
+        applyRegisterUpdate(update)
+        if case .refused = update { return } else if case .failed = update { return }
+        let count = max(register.entryCount(keyword), 1)
         status = "Added to “\(keyword)” in the register" + (count > KeywordRegister.suggestedLinks ? " (\(count) entries; consider a hub card)." : ".")
     }
 
     func importIndexCardsToRegister() {
-        let cards = indexCardsNotInRegister
-        let paths = library.snapshot.cards.map(\.path)
-        updateRegister { text in
-            cards.reduce(text) { KeywordRegister.adding(CardifyNote.shortestLink(for: $1.path, among: paths), to: $1.title, in: $0) }
-        }
-        status = "Added \(cards.count) index card\(cards.count == 1 ? "" : "s") to the register."
+        guard let register else { status = "Choose a notes folder first."; return }
+        let (update, count) = register.importIndexCards(index: library.index, openWithUnsavedEdits: registerHasUnsavedEdits)
+        applyRegisterUpdate(update)
+        if case .refused = update { return } else if case .failed = update { return }
+        status = "Added \(count) index card\(count == 1 ? "" : "s") to the register."
     }
 
     func printRegister() {
-        let pages = KeywordRegister.printCards(registerEntries)
+        let pages = register?.printPages() ?? []
         guard !pages.isEmpty else { return }
         let cards = pages.map { KasterTypesetter.prepare($0, cardURL: nil, links: false) }
         let layout = TypesetLayout.card(portrait: portrait, fontSize: fontSize, dotGrid: dotGrid)
