@@ -92,35 +92,23 @@ struct ZoteroPicker: View {
     }
     private func loadCollections() {
         let library = currentLibrary
-        URLSession.shared.dataTask(with: ZoteroSearchAPI.collectionsRequest(library: library)) { data, response, _ in
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200, let data,
-                  let found = try? JSONDecoder().decode([ZoteroCollection].self, from: data) else { return }
-            DispatchQueue.main.async { if library == currentLibrary { collections = found } }
-        }.resume()
+        Task { @MainActor in
+            let found = await ZoteroService().collections(in: library)
+            if library == currentLibrary { collections = found }
+        }
     }
 
     /// Looks up the item's PDF so the page can open in Zotero's reader, then hands back the source.
     @MainActor private func add(_ item: ZoteroItem) async {
         adding = true
-        let library = currentLibrary
-        var pdf: String?
-        if let (data, response) = try? await URLSession.shared.data(for: ZoteroSearchAPI.childrenRequest(library: library, key: item.key)),
-           (response as? HTTPURLResponse)?.statusCode == 200, let children = try? JSONDecoder().decode([ZoteroChild].self, from: data) {
-            pdf = ZoteroSearchAPI.readableAttachment(in: children)
-        }
-        let cite = item.citation.map { ZoteroCitation.markdown(fromHTML: $0) }.flatMap { $0.isEmpty ? nil : $0 } ?? item.description
+        let source = await ZoteroService().source(for: item, in: currentLibrary)
         adding = false
-        onPick(ZoteroPick(source: ZoteroSource(key: item.key, library: library.id, pdf: pdf, cite: cite), location: location))
+        onPick(ZoteroPick(source: source, location: location))
         dismiss()
     }
 
     private func loadGroups() {
-        URLSession.shared.dataTask(with: ZoteroSearchAPI.groupsRequest()) { data, response, _ in
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200, let data,
-                  let groups = try? JSONDecoder().decode([ZoteroGroup].self, from: data) else { return }
-            let found = groups.map { ZoteroLibrary(id: String($0.id), name: $0.title) }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-            DispatchQueue.main.async { libraries = [.personal] + found }
-        }.resume()
+        Task { @MainActor in libraries = await ZoteroService().libraries() }
     }
     @MainActor private func search(append: Bool) async {
         let id = UUID(); requestID = id
@@ -130,11 +118,8 @@ struct ZoteroPicker: View {
         if !append { items = []; selection = nil; hasMore = false }
         searching = true; message = term.isEmpty ? "Loading recently modified sources…" : "Searching Zotero…"
         do {
-            let (data, response) = try await URLSession.shared.data(for: ZoteroSearchAPI.itemsRequest(library: library, query: term, fullText: fullText, start: start, collection: collectionKey.isEmpty ? nil : collectionKey, style: style))
+            let found = try await ZoteroService().search(library: library, query: term, fullText: fullText, start: start, collection: collectionKey.isEmpty ? nil : collectionKey, style: style)
             guard requestID == id, !Task.isCancelled else { return }
-            guard let http = response as? HTTPURLResponse else { searching = false; message = "Unexpected response from Zotero."; return }
-            guard http.statusCode == 200 else { searching = false; message = ZoteroSearchAPI.responseError(http.statusCode); return }
-            let found = try JSONDecoder().decode([ZoteroItem].self, from: data)
             if append { items.append(contentsOf: found) } else { items = found }
             hasMore = found.count == 100
             searching = false
@@ -142,7 +127,11 @@ struct ZoteroPicker: View {
         } catch {
             guard requestID == id, !Task.isCancelled else { return }
             searching = false; hasMore = false
-            message = "Can't connect to Zotero. Open it and enable Settings → Advanced → Allow other applications on this computer to communicate with Zotero."
+            switch error as? ZoteroService.Failure {
+            case .refused(let reason): message = reason
+            case .unreadable: message = "Unexpected response from Zotero."
+            default: message = "Can't connect to Zotero. Open it and enable Settings → Advanced → Allow other applications on this computer to communicate with Zotero."
+            }
         }
     }
 }

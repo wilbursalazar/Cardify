@@ -1599,14 +1599,7 @@ struct ContentView: View {
     }
 
     /// The item's PDF (or EPUB) attachment key, from the running Zotero.
-    func zoteroAttachment(for zotero: ZoteroSource) async -> String? {
-        var request = ZoteroSearchAPI.childrenRequest(library: zotero.zoteroLibrary, key: zotero.key)
-        request.timeoutInterval = 4
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
-              (response as? HTTPURLResponse)?.statusCode == 200,
-              let children = try? JSONDecoder().decode([ZoteroChild].self, from: data) else { return nil }
-        return ZoteroSearchAPI.readableAttachment(in: children)
-    }
+    func zoteroAttachment(for zotero: ZoteroSource) async -> String? { await ZoteroService().attachment(for: zotero, timeout: 4) }
 
     /// An older Research card's Source line → a footnote on its quotation (one undoable edit).
     func convertLegacySource() {

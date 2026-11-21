@@ -242,22 +242,9 @@ struct BibliographyView: View {
         let zotero = collected.compactMap(\.zotero)
         guard !zotero.isEmpty else { return }
         let style = ZoteroStyle.current(stored: storedStyle)
-        var reached = false, failed = false
-        for (library, items) in Dictionary(grouping: zotero, by: \.library) {
-            for start in stride(from: 0, to: items.count, by: 50) {
-                let chunk = Array(items[start..<min(start + 50, items.count)])
-                do {
-                    let (data, response) = try await URLSession.shared.data(for: ZoteroSearchAPI.bibliographyRequest(library: chunk[0].zoteroLibrary, keys: chunk.map(\.key), style: style))
-                    guard (response as? HTTPURLResponse)?.statusCode == 200 else { failed = true; continue }
-                    for item in try JSONDecoder().decode([ZoteroBibEntry].self, from: data) {
-                        guard let bib = item.bib else { continue }
-                        let text = ZoteroCitation.markdown(fromHTML: bib, trimPeriod: false)
-                        if !text.isEmpty { formatted["zotero:\(library)/\(item.key)"] = text }
-                    }
-                    reached = true
-                } catch { failed = true }
-            }
-        }
+        let fetched = await ZoteroService().bibliography(for: zotero, style: style)
+        for (key, text) in fetched.entries { formatted["zotero:" + key] = text }
+        let reached = fetched.reachedZotero, failed = fetched.someFailed
         let title = ZoteroStyle.installed().first { $0.id == style }?.title ?? style
         note = reached ? "Zotero entries in \(title)." + (failed ? " Some could not be fetched." : "")
                        : "Zotero isn't reachable, so Zotero sources show their short citation."
