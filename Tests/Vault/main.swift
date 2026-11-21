@@ -87,5 +87,21 @@ import Foundation
   let crlf = KasterFrontmatter.setting("uid", to: "abc", in: "---\r\ncard_id: 1\r\n---\r\n# T")!
   precondition(crlf == "---\r\ncard_id: 1\r\nuid: abc\r\n---\r\n# T", "CRLF files keep CRLF")
   print("Vault: Luhmann IDs, filenames, links, sources, mode inference, migration passed")
+
+  // Retitling (sidebar Rename) and titles taken from filenames (Quick cards, Promote)
+  let vault = URL(fileURLWithPath: "/tmp/kaster-vault")
+  let zettelFile = vault.appendingPathComponent("Zettel/21-3a7-Old idea.md")
+  precondition(KasterVault.retitledFilename(for: zettelFile, root: vault, text: "---\ncard_id: \"21/3a7\"\n---\n# Old idea\n", title: "New: idea / here") == "21-3a7-New idea here.md", "Zettel keeps its ID scheme")
+  precondition(KasterVault.retitledFilename(for: vault.appendingPathComponent("Quick/Old.md"), root: vault, text: "body", title: "Fresh") == "Fresh.md")
+  precondition(KasterVault.retitledFilename(for: vault.appendingPathComponent("Notes/202611131437 Old.md"), root: vault, text: "", title: "New") == "202611131437 New.md", "Timestamp IDs stay")
+  precondition(KasterVault.retitledFilename(for: vault.appendingPathComponent("Debates/AFF-1-OB-2 Old.md"), root: vault, text: "", title: "New") == "AFF-1-OB-2 New.md", "Debate IDs stay")
+  precondition(KasterVault.retitledFilename(for: zettelFile, root: vault, text: "", title: "  ") == nil, "Empty titles are refused")
+  precondition(KasterVault.displayTitle(for: vault.appendingPathComponent("Quick/A Pocket of Infinity.md"), text: "---\nuid: x\n---\n*Three equations.*") == "A Pocket of Infinity", "No heading: filename is the title")
+  precondition(KasterVault.displayTitle(for: zettelFile, text: "---\ncard_id: \"21/3a7\"\n---\nno heading") == "Old idea", "Filename IDs are not part of the title")
+  precondition(KasterVault.displayTitle(for: zettelFile, text: "# Heading wins\n") == "Heading wins")
+  let retitled = NoteEditing.setTitle("Fresh", in: "---\nuid: x\n---\n*Body*")
+  precondition(retitled == "---\nuid: x\n---\n# Fresh\n\n*Body*", "A heading is added after the frontmatter: \(retitled)")
+  precondition(KasterVault.rewriteLinks(in: "See [[Old]] and [[Old|my label]] and [[Old#Part]].", from: ["Old"], to: "New") == "See [[New]] and [[New|my label]] and [[New#Part]].", "Labelled links keep their label")
+  print("Vault: retitling, filename titles and labelled links passed")
  }
 }

@@ -542,8 +542,6 @@ struct ContentView: View {
                 Button { showNotesSidebar.toggle() } label: { Image(systemName: "sidebar.left") }
                     .help(showNotesSidebar ? "Hide sidebar" : "Show sidebar")
                     .accessibilityLabel(showNotesSidebar ? "Hide sidebar" : "Show sidebar")
-                Image(nsImage: NSApp.applicationIconImage).resizable().interpolation(.high).frame(width: 22, height: 22)
-                    .accessibilityHidden(true)
                 Button(action: newCard) { EmptyView() }.keyboardShortcut("n").frame(width: 0, height: 0).opacity(0).accessibilityHidden(true)
                 Text("Kaster").font(.system(size: 15, weight: .semibold))
                     .foregroundColor(AppearancePreference.foreground(for: storedAppearance))
@@ -853,7 +851,8 @@ struct ContentView: View {
                 })
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
             Divider()
-            KasterStatusBar(location: statusLocation, words: KasterText.wordCount(currentDraftContents()), status: status, autosaved: isAutosaved)
+            KasterStatusBar(location: statusLocation, words: KasterText.wordCount(currentDraftContents()), status: status, autosaved: isAutosaved,
+                            onOpenVault: vaultRoot.map { root in { _ = NSWorkspace.shared.open(root) } })
         }
         .ignoresSafeArea(.container, edges: .top)
         .frame(minWidth: 1080, minHeight: 620)
@@ -1027,11 +1026,16 @@ struct ContentView: View {
             if mode == .zettel && id == nil {
                 let existing = try BranchIDs.existing(in: scanRoots(for: oldURL))
                 let assigned = try parentID.map { try LuhmannIDs.branch(of: $0, existing: existing) } ?? LuhmannIDs.nextTopLevel(existing: existing)
-                guard let updated = NoteEditing.addID(assigned, to: newText) else { status = "Could not add an ID to this card's metadata."; return }
+                guard let updated = NoteEditing.addID(assigned, to: newText) else { relocationFailed("Kaster could not add an ID to this card's metadata."); return }
                 newText = updated; id = assigned
             }
-            let title = NoteEditing.title(in: newText)
-            guard let name = KasterVault.filename(mode: mode, id: id, title: title) else { status = "Give the card a title first."; return }
+            // Quick cards often have their title only in the filename; carry it into a heading.
+            var title = NoteEditing.title(in: newText).trimmingCharacters(in: .whitespaces)
+            if title.isEmpty {
+                title = KasterVault.displayTitle(for: oldURL, text: newText)
+                if !title.isEmpty { newText = NoteEditing.setTitle(title, in: newText) }
+            }
+            guard let name = KasterVault.filename(mode: mode, id: id, title: title) else { relocationFailed("Give the card a title first: start it with a line like “# My idea”."); return }
             let folder = root.appendingPathComponent(mode.folder, isDirectory: true)
             let target = KasterVault.uniqueURL(in: folder, filename: name, excluding: oldURL)
             if confirm {
@@ -1047,12 +1051,17 @@ struct ContentView: View {
             if target.standardizedFileURL.path != oldURL.standardizedFileURL.path { try FileManager.default.moveItem(at: oldURL, to: target) }
             let updatedFiles = try KasterVault.updateLinks(root: root, oldURL: oldURL, newURL: target, skip: [target.resolvingSymlinksInPath().standardizedFileURL.path])
             adoptMovedCurrentCard(from: oldURL, to: target, content: newText)
+            reloadOpenCards(updatedFiles)
             kasterMode = mode; storedIDMode = mode.idMode.rawValue; lastMode = mode.rawValue
             status = "Now a \(mode.title) card: \(target.lastPathComponent)" + (updatedFiles.isEmpty ? "." : "; updated links in \(updatedFiles.count) card\(updatedFiles.count == 1 ? "" : "s").")
         } catch {
-            status = "Could not move the card: \(error.localizedDescription)"
-            let alert = NSAlert(); alert.messageText = "Could not move the card"; alert.informativeText = status; alert.runModal()
+            relocationFailed(error.localizedDescription)
         }
+    }
+
+    func relocationFailed(_ reason: String) {
+        status = "Could not move the card: \(reason)"
+        let alert = NSAlert(); alert.messageText = "Could not move the card"; alert.informativeText = reason; alert.runModal()
     }
 
     func createCardFromLink(_ raw: String) {
@@ -1240,6 +1249,28 @@ struct ContentView: View {
         } catch { status = "Could not move the folder: \(error.localizedDescription)" }
     }
 
+    /// After Kaster rewrote files on disk (e.g. link updates), shows the new text in any editor
+    /// holding one of them without unsaved edits, so a later save doesn't see a conflict.
+    func reloadOpenCards(_ files: [URL]) {
+        let keys = Set(files.map { $0.resolvingSymlinksInPath().standardizedFileURL.path })
+        func changed(_ url: URL) -> String? {
+            guard keys.contains(url.resolvingSymlinksInPath().standardizedFileURL.path),
+                  let data = try? Data(contentsOf: url) else { return nil }
+            let disk = String(decoding: data, as: UTF8.self)
+            return Data(disk.utf8) == data ? disk : nil
+        }
+        if cardMode == "markdown", let current = fileURL, let saved = savedMarkdownSnapshot, saved == text,
+           let disk = changed(current), disk != text {
+            adoptMovedCurrentCard(from: current, to: current, content: disk)
+        }
+        for index in linkedTabs.indices where linkedTabs[index].content == linkedTabs[index].savedContent {
+            if let disk = changed(linkedTabs[index].url), disk != linkedTabs[index].content {
+                linkedTabs[index].savedContent = disk
+                linkedTabs[index].content = disk
+            }
+        }
+    }
+
     /// Keeps the editor, tabs and history pointed at a card whose file just moved.
     func adoptMovedCurrentCard(from oldURL: URL, to newURL: URL, content: String) {
         editor.clearPendingSelection()
@@ -1339,6 +1370,7 @@ struct ContentView: View {
                 try FileManager.default.moveItem(at: current, to: target)
                 let updated = try KasterVault.updateLinks(root: root, oldURL: current, newURL: target, skip: [target.resolvingSymlinksInPath().standardizedFileURL.path])
                 adoptMovedCurrentCard(from: current, to: target, content: text)
+                reloadOpenCards(updated)
                 status = "Renamed to \(target.lastPathComponent)" + (updated.isEmpty ? "." : "; updated links in \(updated.count) card\(updated.count == 1 ? "" : "s").")
             } catch {
                 status = "Could not rename the file: \(error.localizedDescription)"
@@ -2470,17 +2502,37 @@ struct ContentView: View {
     private func renameSidebarNote(_ url: URL) {
         do {
             guard let mutation = try prepareSidebarMutation(url) else { return }
-            let field = NSTextField(string: url.lastPathComponent); field.frame.size.width = 320
-            let alert = NSAlert(); alert.messageText = "Rename file"
-            alert.informativeText = "This changes the filename, not the note heading. Links to the old filename may need to be updated."
+            let original = String(decoding: mutation.snapshot.bytes, as: UTF8.self)
+            guard Data(original.utf8) == mutation.snapshot.bytes else { throw SidebarFileActions.ActionError.invalidMarkdown }
+            let field = NSTextField(string: KasterVault.displayTitle(for: url, text: original)); field.frame.size.width = 320
+            let alert = NSAlert(); alert.messageText = "Rename card"
+            alert.informativeText = "Changes the card's title and filename together and updates links to it. Links with their own label keep the label."
             alert.accessoryView = field; alert.addButton(withTitle: "Rename"); alert.addButton(withTitle: "Cancel")
+            alert.window.initialFirstResponder = field
             guard alert.runModal() == .alertFirstButtonReturn else { return }
+            let newTitle = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            let root = mutation.snapshot.root
+            guard let filename = KasterVault.retitledFilename(for: url, root: root, text: original, title: newTitle) else {
+                throw SidebarFileActions.ActionError.invalidName
+            }
+            let newText = NoteEditing.setTitle(newTitle, in: original)
             let otherURLs = try validateSidebarMutation(mutation)
-            if mutation.activeMode != nil { autosaveTask?.cancel() }
-            let renamed = try SidebarFileActions.rename(mutation.snapshot, filename: field.stringValue, openURLs: otherURLs)
-            if mutation.activeMode != nil { fileURL = renamed; linkRequestID = UUID() }
-            for index in linkedTabs.indices where linkedTabs[index].url.standardizedFileURL == url.standardizedFileURL { linkedTabs[index].url = renamed }
-            history.rename(url, to: renamed); sidebarRefreshToken = UUID(); status = "Renamed to \(renamed.lastPathComponent)."
+            if mutation.activeMode != nil { autosaveTask?.cancel(); renameTask?.cancel() }
+            let folder = url.deletingLastPathComponent()
+            let target = KasterVault.uniqueURL(in: folder, filename: filename, excluding: url)
+            let renamed = try SidebarFileActions.retitle(mutation.snapshot, newText: newText, filename: target.lastPathComponent, openURLs: otherURLs)
+            let updated = (try? KasterVault.updateLinks(root: root, oldURL: url, newURL: renamed, skip: [renamed.resolvingSymlinksInPath().standardizedFileURL.path])) ?? []
+            if mutation.activeMode != nil {
+                adoptMovedCurrentCard(from: url, to: renamed, content: newText)
+                linkRequestID = UUID()
+            } else {
+                for index in linkedTabs.indices where linkedTabs[index].url.standardizedFileURL == url.standardizedFileURL { linkedTabs[index].url = renamed }
+                let key = url.resolvingSymlinksInPath().standardizedFileURL
+                if let index = openTabs.firstIndex(where: { $0.resolvingSymlinksInPath().standardizedFileURL == key }) { openTabs[index] = renamed }
+                history.rename(url, to: renamed); sidebarRefreshToken = UUID()
+            }
+            reloadOpenCards(updated + [renamed])
+            status = "Renamed to “\(newTitle)”" + (updated.isEmpty ? "." : "; updated links in \(updated.count) card\(updated.count == 1 ? "" : "s").")
         } catch { scheduleAutosave(); sidebarError(error) }
     }
 
@@ -2593,6 +2645,24 @@ private struct EditorWindowRoot: View {
     var body: some Scene {
         WindowGroup { EditorWindowRoot() }
             .windowStyle(.hiddenTitleBar)
-            .commands { CommandGroup(replacing: .newItem) {} }
+            .commands {
+                CommandGroup(replacing: .newItem) {}
+                EditorTextSizeCommands()
+            }
+    }
+}
+
+/// View ▸ Bigger / Smaller / Actual Size: the editor's on-screen text size only.
+struct EditorTextSizeCommands: Commands {
+    @AppStorage(EditorTextScale.key) private var editorScale = 1.0
+    var body: some Commands {
+        CommandGroup(after: .toolbar) {
+            Button("Bigger Editor Text") { editorScale = EditorTextScale.bigger(editorScale) }
+                .keyboardShortcut("=", modifiers: .command).disabled(editorScale >= EditorTextScale.steps.last!)
+            Button("Smaller Editor Text") { editorScale = EditorTextScale.smaller(editorScale) }
+                .keyboardShortcut("-", modifiers: .command).disabled(editorScale <= EditorTextScale.steps.first!)
+            Button("Normal Editor Text") { editorScale = 1 }
+                .keyboardShortcut("0", modifiers: .command).disabled(editorScale == 1)
+        }
     }
 }

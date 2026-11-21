@@ -17,6 +17,6 @@ template = Path(sys.argv[2]).read_text()
 Path(sys.argv[3]).write_text(template.replace('    // HANDLERS\n', methods))
 PY
 swiftc -target "$(uname -m)-apple-macos13.0" -module-cache-path "$TEMP_DIR/cache" -parse-as-library \
-  "$ROOT"/Sources/{CardLibrary,CuratedIndex,NotePicker,Zettelkasten,NoteEditing,BranchIDs,IDModes,CardLinks,LinkNavigation,CardGraph,CardHistory,SidebarFileActions}.swift \
+  "$ROOT"/Sources/{CardLibrary,CuratedIndex,NotePicker,Zettelkasten,NoteEditing,BranchIDs,IDModes,CardLinks,LinkNavigation,CardGraph,CardHistory,SidebarFileActions,KasterVault,HabitTracker,TodoList,DebateNotes,DebateIDs}.swift \
   "$TEMP_DIR/Checks.swift" -o "$TEMP_DIR/check"
 "$TEMP_DIR/check"

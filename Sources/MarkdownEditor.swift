@@ -109,6 +109,7 @@ final class LinkCompletionTextView: NSTextView {
     var kasterRevealed: NSRange?
     var kasterLive = false
     var kasterStyledText = ""
+    var kasterScale: CGFloat = 1
     private var originalFrontmatterAttributes: [(NSRange, [NSAttributedString.Key: Any])] = []
 
     static func frontmatterRange(in text: String) -> NSRange? { frontmatterInfo(in: text)?.range }
@@ -765,6 +766,7 @@ struct MarkdownEditor: View {
     @StateObject private var completion = LinkCompletionState()
     @StateObject private var selectionToolbar = SelectionToolbarState()
     @AppStorage("hideEditorFrontmatter") private var hideFrontmatter = true
+    @AppStorage(EditorTextScale.key) private var editorScale = 1.0
     @State private var hiddenCustomHeader: String?
     var body: some View {
         let metadata = LinkCompletionTextView.frontmatterInfo(in: text)
@@ -786,7 +788,7 @@ struct MarkdownEditor: View {
                 }.padding(.horizontal, 12).padding(.vertical, 6)
                 Divider()
             }
-            MarkdownTextView(text: $text, editor: editor, completion: completion, selectionToolbar: selectionToolbar, hideFrontmatter: isHidden, live: live, onFollowLink: onFollowLink)
+            MarkdownTextView(text: $text, editor: editor, completion: completion, selectionToolbar: selectionToolbar, hideFrontmatter: isHidden, live: live, scale: EditorTextScale.clamped(editorScale), onFollowLink: onFollowLink)
                 .overlay(alignment: .topLeading) {
                     GeometryReader { geometry in
                         if let anchor = selectionToolbar.anchor {
@@ -857,6 +859,7 @@ private struct MarkdownTextView: NSViewRepresentable {
     @ObservedObject var selectionToolbar: SelectionToolbarState
     let hideFrontmatter: Bool
     let live: Bool
+    var scale: CGFloat = 1
     let onFollowLink: (CardLinkTarget) -> Void
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> NSScrollView {
@@ -893,7 +896,8 @@ private struct MarkdownTextView: NSViewRepresentable {
         guard let view = scroll.documentView as? LinkCompletionTextView else { return }
         if view.string != text { selectionToolbar.clear(); view.replaceEditorText(text); completion.close() }
         view.setFrontmatterHidden(hideFrontmatter)
-        if live != context.coordinator.styledLive || view.string != context.coordinator.styledText || hideFrontmatter != context.coordinator.styledHidden {
+        if live != context.coordinator.styledLive || view.string != context.coordinator.styledText || hideFrontmatter != context.coordinator.styledHidden
+            || scale != context.coordinator.styledScale {
             context.coordinator.styledHidden = hideFrontmatter
             context.coordinator.restyle(view, live: live)
         }
@@ -918,10 +922,12 @@ private struct MarkdownTextView: NSViewRepresentable {
         var styledLive: Bool?
         var styledText: String?
         var styledHidden: Bool?
+        var styledScale: CGFloat?
         init(_ parent: MarkdownTextView) { self.parent = parent }
         func restyle(_ view: LinkCompletionTextView, live: Bool) {
+            view.kasterScale = parent.scale
             view.applyKasterStyle(live: live)
-            styledLive = live; styledText = view.string
+            styledLive = live; styledText = view.string; styledScale = parent.scale
         }
         @objc func scrolled() {
             guard let scroll, let view = scroll.documentView as? LinkCompletionTextView else { return }
@@ -958,6 +964,10 @@ private struct MarkdownTextView: NSViewRepresentable {
 extension LinkCompletionTextView {
     static let liveBodyFont = NSFont.systemFont(ofSize: 15)
     static let sourceFont = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+    // On-screen text size only (View ▸ Bigger/Smaller Text); printing never reads it.
+    private var bodyFont: NSFont { NSFont.systemFont(ofSize: 15 * kasterScale) }
+    private var codeFont: NSFont { NSFont.monospacedSystemFont(ofSize: 13 * kasterScale, weight: .regular) }
+    private func mono(_ size: CGFloat) -> NSFont { NSFont.monospacedSystemFont(ofSize: size * kasterScale, weight: .regular) }
     private static let hiddenFont = NSFont.systemFont(ofSize: 0.01)
     private static let defaultPurple = NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         ? NSColor(red: 0.71, green: 0.56, blue: 0.94, alpha: 1) : NSColor(red: 0.42, green: 0.25, blue: 0.76, alpha: 1) }
@@ -1014,7 +1024,7 @@ extension LinkCompletionTextView {
         let lines = cursorLines()
         let content = ns.substring(with: lines).trimmingCharacters(in: .newlines)
         if content.isEmpty {
-            typingAttributes = [.font: kasterLive ? Self.liveBodyFont : Self.sourceFont, .foregroundColor: NSColor.textColor, .paragraphStyle: baseParagraph(live: kasterLive)]
+            typingAttributes = [.font: kasterLive ? bodyFont : codeFont, .foregroundColor: NSColor.textColor, .paragraphStyle: baseParagraph(live: kasterLive)]
         }
     }
 
@@ -1025,7 +1035,7 @@ extension LinkCompletionTextView {
         let full = NSRange(location: 0, length: ns.length)
         let skip = hiddenFrontmatterRange
         let base: [NSAttributedString.Key: Any] = [
-            .font: live ? Self.liveBodyFont : Self.sourceFont,
+            .font: live ? bodyFont : codeFont,
             .foregroundColor: NSColor.textColor,
             .paragraphStyle: baseParagraph(live: live),
         ]
@@ -1061,7 +1071,7 @@ extension LinkCompletionTextView {
             if case .wiki = link.target { set([.underlineStyle: NSUnderlineStyle.single.rawValue, .underlineColor: purple.withAlphaComponent(0.4)], link.labelRange) }
         }
         if let front = Self.frontmatterRange(in: string), skip == nil {
-            set([.foregroundColor: NSColor.secondaryLabelColor, .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)], front)
+            set([.foregroundColor: NSColor.secondaryLabelColor, .font: mono(12)], front)
         }
         guard live else {
             each("^(#{1,6} )") { set([.foregroundColor: purple], $0.range(at: 1)) }
@@ -1076,7 +1086,7 @@ extension LinkCompletionTextView {
             let paragraph = NSMutableParagraphStyle()
             paragraph.paragraphSpacingBefore = level == 1 ? 2 : 6
             paragraph.paragraphSpacing = 2
-            set([.font: NSFont.systemFont(ofSize: sizes[level - 1], weight: level == 1 ? .bold : .semibold), .paragraphStyle: paragraph], match.range)
+            set([.font: NSFont.systemFont(ofSize: sizes[level - 1] * kasterScale, weight: level == 1 ? .bold : .semibold), .paragraphStyle: paragraph], match.range)
             marker(NSRange(location: match.range(at: 1).location, length: match.range(at: 2).location - match.range(at: 1).location), fontFrom: match.range(at: 2).location)
         }
         func inline(_ pattern: String, marker size: Int, trait: NSFontTraitMask?, extra: [NSAttributedString.Key: Any] = [:]) {
@@ -1084,7 +1094,7 @@ extension LinkCompletionTextView {
                 let inner = match.range(at: 1)
                 if let trait {
                     storage.enumerateAttribute(.font, in: inner) { value, range, _ in
-                        let current = (value as? NSFont) ?? Self.liveBodyFont
+                        let current = (value as? NSFont) ?? bodyFont
                         set([.font: NSFontManager.shared.convert(current, toHaveTrait: trait)], range)
                     }
                 }
@@ -1101,7 +1111,7 @@ extension LinkCompletionTextView {
         inline("==(?=\\S)([^=\\n]+?)(?<=\\S)==", marker: 2, trait: nil, extra: [.backgroundColor: NSColor.systemYellow.withAlphaComponent(0.3)])
         inline("<u>(.+?)</u>", marker: 3, trait: nil, extra: [.underlineStyle: NSUnderlineStyle.single.rawValue])
         each("(?<!`)`([^`\\n]+)`(?!`)") { match in
-            set([.font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular), .backgroundColor: NSColor.quaternaryLabelColor.withAlphaComponent(0.25)], match.range(at: 1))
+            set([.font: mono(13), .backgroundColor: NSColor.quaternaryLabelColor.withAlphaComponent(0.25)], match.range(at: 1))
             marker(NSRange(location: match.range.location, length: 1), fontFrom: match.range(at: 1).location)
             marker(NSRange(location: NSMaxRange(match.range) - 1, length: 1), fontFrom: match.range(at: 1).location)
         }
@@ -1113,14 +1123,14 @@ extension LinkCompletionTextView {
         }
         each("^(\\s*)([-*+]|\\d+[.)])( \\[[ xX]\\])? ") { match in set([.foregroundColor: purple], match.range(at: 2)); set([.foregroundColor: purple], match.range(at: 3)) }
         each("^> ?.*$") { match in
-            set([.foregroundColor: NSColor.secondaryLabelColor, .font: NSFontManager.shared.convert(Self.liveBodyFont, toHaveTrait: .italicFontMask)], match.range)
+            set([.foregroundColor: NSColor.secondaryLabelColor, .font: NSFontManager.shared.convert(bodyFont, toHaveTrait: .italicFontMask)], match.range)
         }
-        each("^\\s*\\|.*\\|\\s*$") { set([.font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)], $0.range) }
+        each("^\\s*\\|.*\\|\\s*$") { set([.font: mono(13)], $0.range) }
         each("^\\s*\\|?[\\s:|-]*-{3,}[\\s:|-]*$") { set([.foregroundColor: NSColor.tertiaryLabelColor], $0.range) }
         each("(?<![\\w#&])#[A-Za-z][\\w/-]*") { set([.foregroundColor: purple], $0.range) }
         // Math is typeset in the preview and on the card; in the editor it reads as code.
         each("\\$\\$[\\s\\S]+?\\$\\$|(?<![\\\\$])\\$(?=\\S)[^$\\n]+?(?<=\\S)\\$(?!\\d)") { match in
-            set([.font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular), .foregroundColor: purple.withAlphaComponent(0.85)], match.range)
+            set([.font: mono(13), .foregroundColor: purple.withAlphaComponent(0.85)], match.range)
         }
         // Symbols last, so each keeps the font of the text it wraps.
         let lines = cursorLines()
@@ -1132,3 +1142,4 @@ extension LinkCompletionTextView {
         fixTypingAttributes()
     }
 }
+

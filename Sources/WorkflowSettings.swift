@@ -45,6 +45,7 @@ struct WorkflowSettings: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("newCardWorkflow") private var storedWorkflow = WorkflowPreference.configured.rawValue
     @AppStorage("dotGrid") private var dotGrid = false
+    @AppStorage(EditorTextScale.key) private var editorScale = 1.0
     @AppStorage("timestampDateStyle") private var timestampDateStyle = TimestampDateStyle.sortable.rawValue
     @AppStorage("timestampIncludeTime") private var timestampIncludeTime = true
     @AppStorage("kasterTypesetEngine") private var typesetEngine = TypesetEngine.typst.rawValue
@@ -85,6 +86,12 @@ struct WorkflowSettings: View {
                 AccentColorSetting()
                 Toggle("Dot grid on cards", isOn: $dotGrid)
                     .help("Show a light dot grid in the preview and on printed cards.")
+                Picker("Editor text size", selection: $editorScale) {
+                    ForEach(EditorTextScale.steps, id: \.self) { step in Text(EditorTextScale.label(step)).tag(step) }
+                }
+                .help("Makes the writing area easier to read on a large screen. Printed cards keep their own text size.")
+                Text("Shortcuts: ⌘+ bigger, ⌘− smaller, ⌘0 normal. Printed cards are not affected.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("Typesetting") {
                 Picker("Engine", selection: $typesetEngine) {

@@ -225,6 +225,40 @@ enum KasterVault {
         return "\(safeTitle).md"
     }
 
+    /// The filename a card gets when retitled in place. Zettel cards follow the "21-3a7-Title" scheme;
+    /// any other card keeps a filename ID it already has ("202611131437 Title", "AFF-1 Title").
+    static func retitledFilename(for url: URL, root: URL?, text: String, title: String) -> String? {
+        let safeTitle = cleanTitle(title)
+        guard !safeTitle.isEmpty else { return nil }
+        if let root, let relative = relativePath(of: url, in: root), let first = relative.split(separator: "/").first,
+           KasterMode.zettel.folder.caseInsensitiveCompare(String(first)) == .orderedSame,
+           let id = CardMetadata.parse(text).id, !id.isEmpty {
+            return filename(mode: .zettel, id: id, title: safeTitle)
+        }
+        let stem = url.deletingPathExtension().lastPathComponent
+        let ids = [BranchIDs.debateFilenameID(for: url), BranchIDs.filenameID(for: url), BranchIDs.luhmannFilenameID(for: url)].compactMap { $0 }
+        guard let id = ids.max(by: { $0.count < $1.count }) else { return "\(safeTitle).md" }
+        let rest = stem.dropFirst(id.count)
+        let separator = rest.first.map(String.init) ?? " "
+        return "\(id)\(separator)\(safeTitle).md"
+    }
+
+    /// The title a card shows: its "# " heading, or its filename (minus any ID) when it has none.
+    static func displayTitle(for url: URL?, text: String) -> String {
+        let heading = NoteEditing.title(in: text).trimmingCharacters(in: .whitespaces)
+        if !heading.isEmpty { return heading }
+        guard let url else { return "" }
+        let stem = url.deletingPathExtension().lastPathComponent
+        if let id = CardMetadata.parse(text).id, !id.isEmpty {
+            let safeID = id.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ",", with: "-")
+            if stem.count > safeID.count + 1, stem.lowercased().hasPrefix(safeID.lowercased() + "-") { return String(stem.dropFirst(safeID.count + 1)) }
+        }
+        let ids = [BranchIDs.debateFilenameID(for: url), BranchIDs.filenameID(for: url), BranchIDs.luhmannFilenameID(for: url)].compactMap { $0 }
+        guard let id = ids.max(by: { $0.count < $1.count }) else { return stem }
+        let rest = String(stem.dropFirst(id.count)).trimmingCharacters(in: CharacterSet(charactersIn: " _-"))
+        return rest.isEmpty ? stem : rest
+    }
+
     /// The first free name in the folder: "Title.md", "Title 2.md", …
     static func uniqueURL(in folder: URL, filename: String, excluding: URL? = nil) -> URL {
         let base = (filename as NSString).deletingPathExtension
@@ -442,3 +476,4 @@ enum KasterVault {
         }
     }
 }
+

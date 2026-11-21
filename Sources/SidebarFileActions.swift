@@ -84,6 +84,45 @@ enum SidebarFileActions {
         return destination
     }
 
+    /// Retitles a card: writes its new contents (with the new heading) and gives it the new filename.
+    /// The filename ID must not change. If the move fails, the original bytes are restored.
+    static func retitle(_ snapshot: Snapshot, newText: String, filename: String, openURLs: [URL], allowOpen: Bool = false) throws -> URL {
+        let name = filename.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prohibited = CharacterSet(charactersIn: "/:\\").union(.controlCharacters)
+        guard !name.isEmpty, !name.hasPrefix("."), name.rangeOfCharacter(from: prohibited) == nil,
+              URL(fileURLWithPath: name).pathExtension.lowercased() == "md" else { throw ActionError.invalidName }
+        try validate(snapshot, openURLs: openURLs, allowOpen: allowOpen)
+        let destination = snapshot.url.deletingLastPathComponent().appendingPathComponent(name)
+        func filenameIDs(_ url: URL) -> Set<String> {
+            Set([BranchIDs.filenameID(for: url), BranchIDs.luhmannFilenameID(for: url), BranchIDs.debateFilenameID(for: url)]
+                .compactMap { $0?.lowercased() })
+        }
+        let sameName = destination.lastPathComponent == snapshot.url.lastPathComponent
+        if !sameName {
+            // An existing filename ID never changes; a Zettel filename without one may gain its metadata ID.
+            let before = filenameIDs(snapshot.url)
+            guard before.isEmpty || before == filenameIDs(destination) else { throw ActionError.filenameID }
+            guard !FileManager.default.fileExists(atPath: destination.path) || sameFile(destination, snapshot.url) else { throw ActionError.existingDestination }
+        }
+        let newBytes = Data(newText.utf8)
+        if newBytes != snapshot.bytes { try newBytes.write(to: snapshot.url, options: .atomic) }
+        guard !sameName else { return snapshot.url }
+        do {
+            if destination.lastPathComponent.lowercased() == snapshot.url.lastPathComponent.lowercased() {
+                // Case-only change on a case-insensitive volume: go through a temporary name.
+                let temporary = snapshot.url.deletingLastPathComponent().appendingPathComponent(".kaster-rename-\(UUID().uuidString).md")
+                try FileManager.default.moveItem(at: snapshot.url, to: temporary)
+                try FileManager.default.moveItem(at: temporary, to: destination)
+            } else {
+                try FileManager.default.moveItem(at: snapshot.url, to: destination)
+            }
+        } catch {
+            if newBytes != snapshot.bytes { try? snapshot.bytes.write(to: snapshot.url, options: .atomic) }
+            throw error
+        }
+        return destination
+    }
+
     static func move(_ snapshot: Snapshot, to folder: URL, openURLs: [URL]) throws -> URL {
         let folder = folder.standardizedFileURL
         let root = snapshot.root

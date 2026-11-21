@@ -7,9 +7,11 @@ final class NSTextField {
     var frame = CGRect.zero
     init(string: String) { stringValue = string }
 }
+final class FakeWindow { var initialFirstResponder: Any? }
 final class NSAlert {
     static var run: ((NSAlert) -> Int)?
     var messageText = "", informativeText = "", accessoryView: Any?
+    let window = FakeWindow()
     func addButton(withTitle: String) {}
     @discardableResult func runModal() -> Int { Self.run?(self) ?? 1 }
 }
@@ -22,7 +24,8 @@ final class Harness {
     var notesFolder: String, saveFolder = "", status = "", cardMode = "markdown"
     var fileURLs: [String: URL] = [:], diskSnapshots: [String: Data] = [:]
     var text = "", saved: String?, flushCount = 0, scheduleCount = 0, clearCount = 0
-    var autosaveTask: Task<Void, Never>?, history = CardHistory()
+    var autosaveTask: Task<Void, Never>?, renameTask: Task<Void, Never>?, history = CardHistory()
+    var openTabs: [URL] = [], reloaded: [URL] = []
     var linkRequestID = UUID(), sidebarRefreshToken = UUID()
     var linkedTabs: [LinkedCardTab] = []
     var trashDirectory: URL, trashShouldFail = false
@@ -48,6 +51,11 @@ final class Harness {
         clearCount += 1; fileURLs.removeValue(forKey: mode); diskSnapshots.removeValue(forKey: mode)
         text = ""; saved = nil
     }
+    func adoptMovedCurrentCard(from old: URL, to new: URL, content: String) {
+        text = content; saved = content; diskSnapshots[cardMode] = Data(content.utf8); fileURL = new; history.rename(old, to: new)
+        for index in linkedTabs.indices where linkedTabs[index].url.standardizedFileURL == old.standardizedFileURL { linkedTabs[index].url = new }
+    }
+    func reloadOpenCards(_ files: [URL]) { reloaded += files }
     func closeLinkedTab(_ id: UUID) { linkedTabs.removeAll(where: { $0.id == id }) }
     func fakeTrash(_ url: URL) throws {
         if trashShouldFail { throw NSError(domain: "test", code: 1) }
@@ -81,10 +89,10 @@ final class Harness {
         let (renaming, original) = try fixture("original.md", draft: "# Edited\n")
         let renamed = root.appendingPathComponent("renamed.md")
         renaming.linkedTabs = [LinkedCardTab(url: original)]
-        respond(1, rename: "renamed.md"); renaming.renameSidebarNote(original)
-        precondition(renaming.flushCount == 1 && renaming.fileURL == renamed && data(renamed) == Data("# Edited\n".utf8))
-        precondition(renaming.linkedTabs.first?.url == renamed)
-        precondition(data(original) == nil && renaming.diskSnapshots["markdown"] == Data("# Edited\n".utf8) && renaming.history.current == renamed)
+        respond(1, rename: "renamed"); renaming.renameSidebarNote(original)
+        precondition(renaming.flushCount == 1 && renaming.fileURL == renamed && data(renamed) == Data("# renamed\n".utf8), "Rename changes the heading with the filename")
+        precondition(renaming.linkedTabs.first?.url == renamed && renaming.text == "# renamed\n")
+        precondition(data(original) == nil && renaming.diskSnapshots["markdown"] == Data("# renamed\n".utf8) && renaming.history.current == renamed)
 
         let folder = root.appendingPathComponent("Moved", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
@@ -103,26 +111,26 @@ final class Harness {
         precondition(data(occupiedSource) == Data("# Old\n".utf8))
 
         let (cancel, cancelFile) = try fixture("cancel.md", draft: "# Pending\n")
-        respond(0, rename: "unused.md"); cancel.renameSidebarNote(cancelFile)
+        respond(0, rename: "unused"); cancel.renameSidebarNote(cancelFile)
         precondition(cancel.fileURL == cancelFile && data(cancelFile) == Data("# Pending\n".utf8) && data(root.appendingPathComponent("unused.md")) == nil)
 
         let (stale, staleFile) = try fixture("stale.md")
         try Data("# External\n".utf8).write(to: staleFile)
-        respond(1, rename: "stale-renamed.md"); stale.renameSidebarNote(staleFile)
+        respond(1, rename: "stale-renamed"); stale.renameSidebarNote(staleFile)
         precondition(stale.fileURL == staleFile && data(staleFile) == Data("# External\n".utf8) && data(root.appendingPathComponent("stale-renamed.md")) == nil)
 
         let (race, raceFile) = try fixture("race.md")
-        respond(1, rename: "race-renamed.md", hook: { _ in try! Data("# Outside\n".utf8).write(to: raceFile) })
+        respond(1, rename: "race-renamed", hook: { _ in try! Data("# Outside\n".utf8).write(to: raceFile) })
         race.renameSidebarNote(raceFile)
         precondition(race.fileURL == raceFile && data(raceFile) == Data("# Outside\n".utf8) && data(root.appendingPathComponent("race-renamed.md")) == nil)
 
         let (editedInModal, modalFile) = try fixture("modal.md")
-        respond(1, rename: "modal-renamed.md", hook: { _ in editedInModal.text = "# In progress" })
+        respond(1, rename: "modal-renamed", hook: { _ in editedInModal.text = "# In progress" })
         editedInModal.renameSidebarNote(modalFile)
         precondition(editedInModal.fileURL == modalFile && editedInModal.text == "# In progress" && data(root.appendingPathComponent("modal-renamed.md")) == nil)
 
         let (modeRace, modeFile) = try fixture("mode.md")
-        respond(1, rename: "mode-renamed.md", hook: { _ in modeRace.cardMode = "habits" })
+        respond(1, rename: "mode-renamed", hook: { _ in modeRace.cardMode = "habits" })
         modeRace.renameSidebarNote(modeFile)
         precondition(modeRace.fileURLs["markdown"] == modeFile && data(root.appendingPathComponent("mode-renamed.md")) == nil)
 
@@ -144,7 +152,7 @@ final class Harness {
         let hardlink = root.appendingPathComponent("alias-hardlink.md")
         try FileManager.default.linkItem(at: aliasFile, to: hardlink)
         alias.fileURLs["habits"] = hardlink
-        respond(1, rename: "alias-renamed.md"); alias.renameSidebarNote(aliasFile)
+        respond(1, rename: "alias-renamed"); alias.renameSidebarNote(aliasFile)
         precondition(alias.fileURL == aliasFile && data(aliasFile) != nil && data(root.appendingPathComponent("alias-renamed.md")) == nil)
 
         let (duplicate, duplicateFile) = try fixture("duplicate.md", draft: "# Updated duplicate\n")

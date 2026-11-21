@@ -201,10 +201,17 @@ struct KasterStatusBar: View {
     let words: Int
     let status: String
     let autosaved: Bool
+    var onOpenVault: (() -> Void)? = nil
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: "folder").font(.system(size: 10)).foregroundStyle(.secondary)
-            Text(location).lineLimit(1).truncationMode(.middle)
+            Button { onOpenVault?() } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "folder").font(.system(size: 10))
+                    Text(location).lineLimit(1).truncationMode(.middle)
+                }.contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).disabled(onOpenVault == nil)
+            .help("Open your notes folder in Finder").accessibilityLabel("Open notes folder in Finder")
             Spacer(minLength: 12)
             Text(status).lineLimit(1).truncationMode(.tail).foregroundStyle(.tertiary)
             Spacer(minLength: 12)

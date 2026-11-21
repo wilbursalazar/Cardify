@@ -196,3 +196,13 @@ struct CharcoalPrimaryTint: ViewModifier {
         content.tint(appearance == AppearancePreference.charcoal.rawValue ? AppearancePreference.charcoalTeal : AppearancePreference.tint(for: appearance))
     }
 }
+
+/// The editor's on-screen text size, as a multiple of the normal size. Printing ignores it.
+enum EditorTextScale {
+    static let key = "kasterEditorScale"
+    static let steps: [Double] = [0.85, 1, 1.15, 1.3, 1.5, 1.75, 2, 2.5]
+    static func clamped(_ value: Double) -> CGFloat { CGFloat(min(max(value, steps.first!), steps.last!)) }
+    static func bigger(_ value: Double) -> Double { steps.first { $0 > value + 0.001 } ?? steps.last! }
+    static func smaller(_ value: Double) -> Double { steps.last { $0 < value - 0.001 } ?? steps.first! }
+    static func label(_ value: Double) -> String { "\(Int((value * 100).rounded()))%" }
+}
