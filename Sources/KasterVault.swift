@@ -533,6 +533,13 @@ struct LibraryIndex {
     /// Card paths carrying each #tag (lowercased), and the tags as first written, by name.
     private let tagged: [String: Set<String>]
     let tags: [(name: String, count: Int)]
+    private static let zoteroSelectPattern = try! NSRegularExpression(pattern: "zotero://select/(?:library|groups/([0-9]+))/items/([A-Z0-9]+)")
+    static func zoteroItems(in text: String) -> Set<String> {
+        let ns = text as NSString
+        return Set(zoteroSelectPattern.matches(in: text, range: NSRange(location: 0, length: ns.length)).map { match in
+            (match.range(at: 1).location == NSNotFound ? "personal" : ns.substring(with: match.range(at: 1))) + "/" + ns.substring(with: match.range(at: 2))
+        })
+    }
     private static let tagPattern = try! NSRegularExpression(pattern: "(?<![\\w#&/])#([A-Za-z][\\w/-]*)")
 
     /// Every #tag in a card's text (code spans and fenced blocks included; headings need a space, so never match).
@@ -570,9 +577,11 @@ struct LibraryIndex {
             let header = KasterFrontmatter.fields(in: card.content)
             if let order = header["order"].flatMap(Double.init) { orders[card.path] = order }
             if let uid = header["uid"] { byUID[uid] = byUID[uid] ?? index }
-            if let key = header["zotero"] {
-                zoteroCiting[(header["zotero-library"] ?? "personal") + "/" + key, default: []].append(card)
-            }
+            var cited = Set<String>()
+            if let key = header["zotero"] { cited.insert((header["zotero-library"] ?? "personal") + "/" + key) }
+            // Footnote citations link the item: zotero://select/library/items/KEY
+            if card.content.contains("zotero://select/") { cited.formUnion(Self.zoteroItems(in: card.content)) }
+            for item in cited { zoteroCiting[item, default: []].append(card) }
             // The card's relative path already names its type folder; avoid resolving paths per card.
             let first = card.path.split(separator: "/", maxSplits: 1).first.map(String.init) ?? ""
             let metadataID = CardMetadata.parse(card.content).id

@@ -106,6 +106,7 @@ enum KasterTypesetter {
         var body = stripFrontmatter(normalized)
         body = body.replacingOccurrences(of: "^\\n+", with: "", options: .regularExpression)
         body = rewriteWikiLinks(body, links: links)
+        body = rewriteZoteroLinks(body, links: links)
         body = body.replacingOccurrences(of: "</?u>", with: "", options: .regularExpression)
         body = body.replacingOccurrences(of: "==(?=\\S)([^=\\n]+?)(?<=\\S)==", with: "<mark>$1</mark>", options: .regularExpression)
         var images: [String: URL] = [:]
@@ -149,6 +150,25 @@ enum KasterTypesetter {
         }
         result += ns.substring(from: last)
         return result
+    }
+
+    /// Zotero links ([42](zotero://open-pdf/…)) are clickable in the preview and plain text in print.
+    static func rewriteZoteroLinks(_ text: String, links: Bool) -> String {
+        guard text.contains("](zotero://"),
+              let regex = try? NSRegularExpression(pattern: "(?<!!)\\[((?:\\\\.|[^\\]\\\\\\n])*)\\]\\((zotero://[^)\\s]+)\\)") else { return text }
+        let ns = text as NSString
+        var result = "", last = 0
+        for match in regex.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
+            result += ns.substring(with: NSRange(location: last, length: match.range.location - last))
+            let label = ns.substring(with: match.range(at: 1))
+            if links, let action = CardPreviewLinks.action(for: .url(ns.substring(with: match.range(at: 2)))) {
+                result += "[\(label)](\(action.absoluteString))"
+            } else {
+                result += label
+            }
+            last = NSMaxRange(match.range)
+        }
+        return result + ns.substring(from: last)
     }
 
     // Typst can only read files inside the job folder, so local images are copied in.

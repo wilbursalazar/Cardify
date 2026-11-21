@@ -30,4 +30,6 @@ let emptySearch = SidebarFolders.rows(folders: folders, cards: [], expanded: [],
 precondition(rowPaths(emptySearch) == ["Empty"], "search finds empty folders")
 precondition(SidebarFolders.ancestors(of: "Research/Theology/Argument") == ["Research", "Research/Theology"])
 precondition(SidebarFolders.ancestors(of: "Root").isEmpty)
+precondition(SidebarSections.toggling("Tags", in: "") == "Tags" && SidebarSections.toggling("Folders", in: "Tags") == "Folders,Tags")
+precondition(SidebarSections.toggling("Tags", in: "Folders,Tags") == "Folders" && SidebarSections.collapsed("Folders,Tags") == ["Folders", "Tags"], "Folding a section twice unfolds it")
 print("Sidebar folders include safe empty directories, nesting, search, and active-note ancestors")

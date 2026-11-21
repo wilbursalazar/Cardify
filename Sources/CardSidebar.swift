@@ -55,6 +55,10 @@ struct CardSidebar: View {
     let onReorder: ([URL]) -> Void
     var onOpenRegister: (() -> Void)? = nil
     var onAddToRegister: ((URL) -> Void)? = nil
+    var showLibrary = true
+    var showList = true
+    /// Sidebar sections folded by clicking their heading, remembered between launches.
+    @AppStorage("kasterCollapsedSections") private var collapsedSections = ""
 
     @AppStorage("cardifyAppearance") private var appearance = AppearancePreference.system.rawValue
     @AppStorage("kasterFavorites") private var favorites = ""
@@ -78,14 +82,18 @@ struct CardSidebar: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            libraryColumn
-                .frame(width: libraryWidth)
-                .background(AppearancePreference.foreground(for: appearance) == nil ? Color.primary.opacity(0.035) : Color.clear)
-            PaneResizeHandle(width: $libraryWidth, range: 150...340)
-            noteListColumn
-                .frame(width: listWidth)
-                .background(AppearancePreference.foreground(for: appearance) == nil ? Color(nsColor: .textBackgroundColor) : Color.white.opacity(0.03))
-            PaneResizeHandle(width: $listWidth, range: 180...460)
+            if showLibrary {
+                libraryColumn
+                    .frame(width: libraryWidth)
+                    .background(AppearancePreference.foreground(for: appearance) == nil ? Color.primary.opacity(0.035) : Color.clear)
+                PaneResizeHandle(width: $libraryWidth, range: 150...340)
+            }
+            if showList {
+                noteListColumn
+                    .frame(width: listWidth)
+                    .background(AppearancePreference.foreground(for: appearance) == nil ? Color(nsColor: .textBackgroundColor) : Color.white.opacity(0.03))
+                PaneResizeHandle(width: $listWidth, range: 180...460)
+            }
         }
         .frame(maxHeight: .infinity)
         .onAppear(perform: scan)
@@ -115,10 +123,10 @@ struct CardSidebar: View {
                         .keyboardShortcut("f", modifiers: .command)
                     if let onOpenRegister { actionRow("Keyword Register", systemImage: "character.book.closed", action: onOpenRegister) }
                     if themesEnabled {
-                        Text("Themes").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                        sectionHeading("Themes")
                             .padding(.horizontal, 10).padding(.top, 16).padding(.bottom, 4)
-                        let themes = store.themes.keys.sorted()
-                        if themes.isEmpty {
+                        let themes = isCollapsed("Themes") ? [] : store.themes.keys.sorted()
+                        if themes.isEmpty && !isCollapsed("Themes") {
                             Text("Add a #tag to a card; its first tag is its theme.").font(.caption).foregroundStyle(.secondary).padding(.horizontal, 10)
                         }
                         ForEach(themes, id: \.self) { theme in
@@ -127,7 +135,7 @@ struct CardSidebar: View {
                     }
                     tagsSection
                     HStack {
-                        Text("Folders").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                        sectionHeading("Folders")
                         Spacer()
                         Button { onNewFolderInFinder(selectedFolderPath ?? "") } label: { Image(systemName: "folder.badge.plus").font(.system(size: 11)) }
                             .buttonStyle(.borderless).help("Open a Finder panel to make or pick a folder" + (selectedFolderPath.map { " inside \(($0 as NSString).lastPathComponent)" } ?? ""))
@@ -146,7 +154,7 @@ struct CardSidebar: View {
                                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                             Button("Choose Notes Folder", action: onChooseFolder)
                         }.padding(.horizontal, 10)
-                    } else {
+                    } else if !isCollapsed("Folders") {
                         ForEach(folderRows) { row in folderRow(row) }
                     }
                 }
@@ -184,11 +192,12 @@ struct CardSidebar: View {
         let tags = store.index.tags
         if !tags.isEmpty {
             HStack {
-                Text("Tags").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                sectionHeading("Tags")
                 Spacer()
                 if case .tags = selection { Button("Clear") { selection = .all }.font(.system(size: 11)).buttonStyle(.borderless) }
             }
             .padding(.horizontal, 10).padding(.top, 16).padding(.bottom, 4)
+            if !isCollapsed("Tags") {
             let chosen: [String] = { if case .tags(let names) = selection { return names } else { return [] } }()
             ForEach(tags.prefix(tagsExpanded ? tags.count : 12), id: \.name) { tag in
                 let isChosen = chosen.contains { $0.caseInsensitiveCompare(tag.name) == .orderedSame }
@@ -221,7 +230,25 @@ struct CardSidebar: View {
                 Button(tagsExpanded ? "Show Fewer" : "Show All \(tags.count) Tags") { tagsExpanded.toggle() }
                     .font(.system(size: 11)).buttonStyle(.borderless).padding(.horizontal, 10)
             }
+            }
         }
+    }
+
+    private func isCollapsed(_ section: String) -> Bool { SidebarSections.collapsed(collapsedSections).contains(section) }
+
+    /// A section title that folds its section when clicked.
+    private func sectionHeading(_ title: String) -> some View {
+        Button { collapsedSections = SidebarSections.toggling(title, in: collapsedSections) } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "chevron.right").font(.system(size: 8, weight: .bold))
+                    .rotationEffect(.degrees(isCollapsed(title) ? 0 : 90))
+                Text(title).font(.system(size: 11, weight: .semibold))
+            }
+            .foregroundStyle(.secondary).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(isCollapsed(title) ? "Show \(title)" : "Hide \(title)")
+        .accessibilityLabel("\(title), \(isCollapsed(title) ? "collapsed" : "expanded")")
     }
 
     private func navRow(_ title: String, systemImage: String, count: Int, target: SidebarSelection) -> some View {
@@ -699,3 +726,4 @@ struct PaneResizeHandle: View {
             .accessibilityLabel("Resize pane")
     }
 }
+

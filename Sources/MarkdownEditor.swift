@@ -1132,6 +1132,22 @@ extension LinkCompletionTextView {
             marker(open, fontFrom: match.range.location + hidden)
             marker(NSRange(location: NSMaxRange(match.range) - 2, length: 2), fontFrom: match.range.location + hidden)
         }
+        // Footnote markers [^1]: a small raised number; "[^" and "]" show only on the cursor's line.
+        // Definitions ("[^1]: …" at the start of a line) keep their label visible.
+        each("\\[\\^([^\\]\\s]+)\\](?!:)") { match in
+            let label = match.range(at: 1)
+            set([.font: NSFont.systemFont(ofSize: 10 * kasterScale, weight: .semibold), .baselineOffset: 5 * kasterScale, .foregroundColor: purple], label)
+            marker(NSRange(location: match.range.location, length: 2), fontFrom: label.location)
+            marker(NSRange(location: NSMaxRange(match.range) - 1, length: 1), fontFrom: label.location)
+        }
+        each("^\\[\\^[^\\]\\s]+\\]:") { set([.foregroundColor: purple], $0.range) }
+        // Markdown links [label](address): show the label; the address appears on the cursor's line.
+        each("(?<![!\\[])\\[((?:\\\\.|[^\\]\\\\\\n^])(?:\\\\.|[^\\]\\\\\\n])*)\\]\\(([^)\\s]+)\\)") { match in
+            let label = match.range(at: 1)
+            set([.foregroundColor: purple], label)
+            marker(NSRange(location: match.range.location, length: 1), fontFrom: label.location)
+            marker(NSRange(location: NSMaxRange(label), length: NSMaxRange(match.range) - NSMaxRange(label)), fontFrom: label.location)
+        }
         each("^(\\s*)([-*+]|\\d+[.)])( \\[[ xX]\\])? ") { match in set([.foregroundColor: purple], match.range(at: 2)); set([.foregroundColor: purple], match.range(at: 3)) }
         each("^> ?.*$") { match in
             set([.foregroundColor: NSColor.secondaryLabelColor, .font: NSFontManager.shared.convert(bodyFont, toHaveTrait: .italicFontMask)], match.range)

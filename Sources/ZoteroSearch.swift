@@ -480,3 +480,85 @@ enum ZoteroPageOpener {
         return files.first { $0.pathExtension.lowercased() == "pdf" }
     }
 }
+
+/// Zotero sources as Markdown footnotes: a `[^n]` marker where you're writing and, at the bottom
+/// of the card, `[^n]: [Lim, *Title*](zotero://select/…), [42](zotero://open-pdf/…?page=42).`
+/// Everything lives in the card's own text, so it also works in Obsidian; several sources per card.
+enum ZoteroFootnote {
+    private static let labelPattern = try! NSRegularExpression(pattern: "\\[\\^([^\\]\\s]+)\\]")
+    private static let definitionPattern = try! NSRegularExpression(pattern: "^\\[\\^[^\\]\\s]+\\]:", options: .anchorsMatchLines)
+
+    /// The next free number: one more than the highest numeric footnote label in the card.
+    static func nextLabel(in text: String) -> String {
+        let ns = text as NSString
+        let numbers = labelPattern.matches(in: text, range: NSRange(location: 0, length: ns.length)).compactMap { Int(ns.substring(with: $0.range(at: 1))) }
+        return String((numbers.max() ?? 0) + 1)
+    }
+
+    static func escapeLabel(_ text: String) -> String {
+        text.replacingOccurrences(of: "[", with: "\\[").replacingOccurrences(of: "]", with: "\\]")
+    }
+
+    /// The footnote text for a source and page.
+    static func citation(_ source: ZoteroSource, page rawPage: String?) -> String {
+        let page = rawPage?.trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: ".")) ?? ""
+        let cite = source.cite.trimmingCharacters(in: CharacterSet(charactersIn: ". "))
+        let select = source.selectURL?.absoluteString ?? ""
+        let pdfURL: String? = {
+            guard let pdf = source.pdf, !page.isEmpty, ZoteroPageOpener.firstPage(page) != nil,
+                  let encoded = page.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return nil }
+            let path = source.library == "personal" ? "library/items/\(pdf)" : "groups/\(source.library)/items/\(pdf)"
+            return "zotero://open-pdf/\(path)?page=\(encoded)"
+        }()
+        let pageText = pdfURL.map { "[\(escapeLabel(page))](\($0))" } ?? escapeLabel(page)
+        if page.isEmpty { return "[\(escapeLabel(cite))](\(select))." }
+        // Author-date styles: "(Lim, n.d., 42)" — the page goes inside the parentheses.
+        if cite.hasPrefix("("), cite.hasSuffix(")") {
+            return "([\(escapeLabel(String(cite.dropFirst().dropLast())))](\(select)), \(pageText))."
+        }
+        // Chicago puts the comma inside a closing quotation mark: “Title,” 42.
+        for quote in ["\u{201D}", "\""] where cite.hasSuffix("." + quote) || cite.hasSuffix("," + quote) {
+            return "[\(escapeLabel(String(cite.dropLast(2)) + "," + quote))](\(select)) \(pageText)."
+        }
+        return "[\(escapeLabel(cite))](\(select)), \(pageText)."
+    }
+
+    /// What to append at the end of the card for a new definition, so footnotes stay together at
+    /// the bottom: one newline after an existing footnote, a blank line after anything else.
+    static func appendix(label: String, citation: String, to text: String) -> String {
+        let definition = "[^\(label)]: \(citation)\n"
+        let trailingNewlines = text.reversed().prefix { $0 == "\n" || $0 == "\r\n" }.count
+        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !body.isEmpty else { return definition }
+        let lastLine = body.components(separatedBy: "\n").last ?? ""
+        let afterFootnote = lastLine.range(of: "^\\[\\^[^\\]\\s]+\\]:", options: .regularExpression) != nil
+        let wanted = afterFootnote ? 1 : 2
+        return String(repeating: "\n", count: max(0, wanted - trailingNewlines)) + definition
+    }
+
+    /// The whole card with a footnote marker inserted at `location` and its definition appended.
+    static func inserting(_ source: ZoteroSource, page: String?, into text: String, at location: Int) -> (text: String, caret: Int) {
+        let label = nextLabel(in: text)
+        let marker = "[^\(label)]"
+        let ns = text as NSString
+        let at = min(max(0, location), ns.length)
+        let withMarker = ns.replacingCharacters(in: NSRange(location: at, length: 0), with: marker)
+        return (withMarker + appendix(label: label, citation: citation(source, page: page), to: withMarker), at + (marker as NSString).length)
+    }
+}
+
+extension ZoteroPageOpener {
+    /// Any zotero:// link clicked in a card. open-pdf links with a page are matched to the PDF's
+    /// own page labels (book page 42 → the right PDF page); everything else opens as written.
+    static func resolve(_ raw: String) -> URL? {
+        guard let components = URLComponents(string: raw), components.scheme?.lowercased() == "zotero" else { return nil }
+        guard components.host?.lowercased() == "open-pdf" else { return URL(string: raw) }
+        let parts = components.path.split(separator: "/").map(String.init)
+        guard let items = parts.firstIndex(of: "items"), items + 1 < parts.count else { return URL(string: raw) }
+        let library = parts.first == "groups" && parts.count > 1 ? parts[1] : "personal"
+        let page = components.queryItems?.first { $0.name == "page" }?.value
+        let source = ZoteroSource(key: "", library: library, pdf: parts[items + 1], cite: "")
+        guard page != nil else { return URL(string: raw) }
+        return url(for: source, page: page, pdfFile: localFile(for: source)) ?? URL(string: raw)
+    }
+}

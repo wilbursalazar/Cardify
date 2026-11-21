@@ -390,7 +390,8 @@ struct ContentView: View {
     @AppStorage("newCardWorkflow") private var newCardWorkflow = WorkflowPreference.configured.rawValue
     @AppStorage("cardifyAppearance") private var storedAppearance = AppearancePreference.system.rawValue
     @AppStorage("workspaceArrangement") private var storedWorkspaceArrangement = WorkspaceArrangement.editorLeft.rawValue
-    @AppStorage("showNotesSidebar") private var showNotesSidebar = true
+    @AppStorage("showNotesSidebar") private var showNotesSidebar = true      // the card list
+    @AppStorage("kasterShowLibraryPane") private var showLibraryPane = true  // smart lists, tags, folders
     @StateObject private var editor = EditorState()
     @StateObject private var library = LibraryStore()
     @StateObject private var typeset = TypesetPreview()
@@ -518,9 +519,14 @@ struct ContentView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
-                Button { showNotesSidebar.toggle() } label: { Image(systemName: "sidebar.left") }
-                    .help(showNotesSidebar ? "Hide sidebar" : "Show sidebar")
-                    .accessibilityLabel(showNotesSidebar ? "Hide sidebar" : "Show sidebar")
+                Button { showLibraryPane.toggle() } label: { Image(systemName: "sidebar.left") }
+                    .keyboardShortcut("1", modifiers: [.control, .command])
+                    .help(showLibraryPane ? "Hide the Library: lists, tags and folders (⌃⌘1)" : "Show the Library: lists, tags and folders (⌃⌘1)")
+                    .accessibilityLabel(showLibraryPane ? "Hide Library" : "Show Library")
+                Button { showNotesSidebar.toggle() } label: { Image(systemName: "list.bullet.rectangle") }
+                    .keyboardShortcut("2", modifiers: [.control, .command])
+                    .help(showNotesSidebar ? "Hide the card list (⌃⌘2)" : "Show the card list (⌃⌘2)")
+                    .accessibilityLabel(showNotesSidebar ? "Hide card list" : "Show card list")
                 Button(action: newCard) { EmptyView() }.keyboardShortcut("n").frame(width: 0, height: 0).opacity(0).accessibilityHidden(true)
                 Text("Kaster").font(.system(size: 15, weight: .semibold))
                     .foregroundColor(AppearancePreference.foreground(for: storedAppearance))
@@ -546,7 +552,8 @@ struct ContentView: View {
                         }
                     }
                     Divider()
-                    Toggle("Show sidebar", isOn: $showNotesSidebar)
+                    Toggle("Show Library (⌃⌘1)", isOn: $showLibraryPane)
+                    Toggle("Show Card List (⌃⌘2)", isOn: $showNotesSidebar)
                 } label: { Image(systemName: "rectangle.split.3x1") }
                     .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("Layout")
                 Menu {
@@ -591,7 +598,7 @@ struct ContentView: View {
                 }
             }
             HStack(alignment: .top, spacing: 0) {
-                if showNotesSidebar {
+                if showNotesSidebar || showLibraryPane {
                     CardSidebar(store: library, currentURL: fileURL, openURLs: Array(fileURLs.values), draftTitle: currentCardTitle, draftID: cardMode == "markdown" ? CardMetadata.parse(text).id : cardMode == "outline" ? CardMetadata.parse(outline.markdown).id : nil,
                                 notesFolder: notesFolder, saveFolder: saveFolder,
                                 refreshToken: sidebarRefreshToken, onOpen: { url in
@@ -607,7 +614,8 @@ struct ContentView: View {
                                 lastPrint: Date(timeIntervalSince1970: lastPrintTime),
                                 onNewFolder: createFolder, onRenameFolder: renameFolder,
                                 onNewCardIn: newCardHere, onNewFolderInFinder: makeFolderInFinder, onReorder: saveManualOrder,
-                                onOpenRegister: { showRegister = true }, onAddToRegister: { url in addToRegister(url) })
+                                onOpenRegister: { showRegister = true }, onAddToRegister: { url in addToRegister(url) },
+                                showLibrary: showLibraryPane, showList: showNotesSidebar)
                 }
                 WorkspaceSplitView(arrangement: WorkspaceArrangement.stored(storedWorkspaceArrangement), editor: {
                 HStack(spacing: 0) {
@@ -914,16 +922,7 @@ struct ContentView: View {
                                 onOpenFile: { if let root = vaultRoot { ensureRegisterFile(root); _ = loadFile(KeywordRegister.url(in: root)) } })
         }
         .sheet(isPresented: $showZotero) {
-            ZoteroPicker { pick in
-                if cardMode == "markdown" && !showDebate && kasterMode == .research {
-                    // Research cards cite inline; the Zotero key stays hidden in the frontmatter.
-                    text = ZoteroSource.apply(pick.source, page: pick.location, to: text)
-                    status = "Source set: " + ZoteroSource.line(cite: pick.source.cite, page: pick.location)
-                } else {
-                    editor.insert(ZoteroSource.line(cite: pick.source.cite, page: pick.location))
-                    status = "Citation inserted."
-                }
-            }
+            ZoteroPicker { pick in insertFootnoteCitation(pick) }
         }
     }
     // Luhmann-style card identity, kept on one compact row above the writing area.
@@ -1596,6 +1595,28 @@ struct ContentView: View {
             .accessibilityLabel("Open in Zotero")
     }
 
+    /// A Zotero source as a footnote: [^n] at the cursor, the citation at the bottom of the card.
+    /// Both go through the text view, so one ⌘Z removes them.
+    func insertFootnoteCitation(_ pick: ZoteroPick) {
+        let label = ZoteroFootnote.nextLabel(in: text)
+        let citation = ZoteroFootnote.citation(pick.source, page: pick.location)
+        guard let view = editor.view, view.string == text else {
+            text = ZoteroFootnote.inserting(pick.source, page: pick.location, into: text, at: (text as NSString).length).text
+            status = "Footnote \(label) added."; return
+        }
+        view.undoManager?.beginUndoGrouping()
+        let caret = view.selectedRange()
+        view.insertText("[^\(label)]", replacementRange: NSRange(location: caret.location, length: caret.length))
+        let afterMarker = view.selectedRange()
+        let appendix = ZoteroFootnote.appendix(label: label, citation: citation, to: view.string)
+        view.insertText(appendix, replacementRange: NSRange(location: (view.string as NSString).length, length: 0))
+        view.undoManager?.endUndoGrouping()
+        view.setSelectedRange(afterMarker)
+        view.scrollRangeToVisible(afterMarker)
+        view.window?.makeFirstResponder(view)
+        status = "Footnote \(label): " + pick.source.cite.replacingOccurrences(of: "*", with: "") + (pick.location.isEmpty ? "" : ", \(pick.location)")
+    }
+
     func openZoteroPage(_ zotero: ZoteroSource, page: String?) {
         guard let url = ZoteroPageOpener.url(for: zotero, page: page, pdfFile: ZoteroPageOpener.localFile(for: zotero)) else { return }
         if !NSWorkspace.shared.open(url) { status = "Could not open Zotero." }
@@ -1877,9 +1898,12 @@ struct ContentView: View {
     }
     func followLink(_ target: CardLinkTarget) {
         // A Zotero source clicked in the preview: open the cited page (matched to the PDF's page labels).
-        if case .url(let raw) = target, raw.lowercased().hasPrefix("zotero://"), let zotero = ZoteroSource.read(currentDraftContents()) {
-            if let page = ZoteroSource.linkedPage(raw) { openZoteroPage(zotero, page: page); return }
-            if let url = URL(string: raw), NSWorkspace.shared.open(url) { status = "Opened in Zotero."; return }
+        if case .url(let raw) = target, raw.lowercased().hasPrefix("zotero://") {
+            if let zotero = ZoteroSource.read(currentDraftContents()), let page = ZoteroSource.linkedPage(raw), raw.contains(zotero.pdf ?? "\u{0}") {
+                openZoteroPage(zotero, page: page); return
+            }
+            // Footnote links: book page → PDF page via the PDF's own page labels.
+            if let url = ZoteroPageOpener.resolve(raw), NSWorkspace.shared.open(url) { status = "Opened in Zotero."; return }
         }
         let configuredFolder = notesFolder.isEmpty ? saveFolder : notesFolder
         let folderPath = configuredFolder.isEmpty && showDebate ? (fileURL?.deletingLastPathComponent().path ?? "") : configuredFolder

@@ -91,3 +91,13 @@ enum SidebarFolders {
         return result
     }
 }
+
+/// Folded sidebar sections, stored as one comma-separated preference.
+enum SidebarSections {
+    static func collapsed(_ stored: String) -> Set<String> { Set(stored.split(separator: ",").map(String.init)) }
+    static func toggling(_ section: String, in stored: String) -> String {
+        var set = collapsed(stored)
+        if set.contains(section) { set.remove(section) } else { set.insert(section) }
+        return set.sorted().joined(separator: ",")
+    }
+}

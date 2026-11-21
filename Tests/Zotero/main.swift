@@ -71,6 +71,37 @@ import PDFKit
         precondition(ZoteroSource.previewLinked("# Plain\n\nSource: [[Book]], p. 4\n") == "# Plain\n\nSource: [[Book]], p. 4\n", "Cards without Zotero are untouched")
         if case .external = CardLinkNavigation.resolve(.url(raw), folder: nil, currentFile: nil) {} else { preconditionFailure("open-pdf links are allowed") }
 
+        // Footnotes: [^n] at the cursor, numbered definitions together at the bottom.
+        let lim = ZoteroSource(key: "D9QP9N8Q", pdf: "DWMEC776", cite: "Lim, *How Was the Canon Formed?*")
+        precondition(ZoteroFootnote.citation(lim, page: "42") == "[Lim, *How Was the Canon Formed?*](zotero://select/library/items/D9QP9N8Q), [42](zotero://open-pdf/library/items/DWMEC776?page=42).")
+        precondition(ZoteroFootnote.citation(lim, page: nil) == "[Lim, *How Was the Canon Formed?*](zotero://select/library/items/D9QP9N8Q).")
+        precondition(ZoteroFootnote.citation(lim, page: "ch. 4") == "[Lim, *How Was the Canon Formed?*](zotero://select/library/items/D9QP9N8Q), ch. 4.", "Non-page locations aren't PDF links")
+        precondition(ZoteroFootnote.citation(ZoteroSource(key: "K", cite: "(Lim, n.d.)"), page: "7") == "([Lim, n.d.](zotero://select/library/items/K), 7).")
+        precondition(ZoteroFootnote.citation(ZoteroSource(key: "W", cite: "*Wikipedia*, \u{201C}Gospels.\u{201D}"), page: "3") == "[*Wikipedia*, \u{201C}Gospels,\u{201D}](zotero://select/library/items/W) 3.")
+        precondition(ZoteroFootnote.citation(ZoteroSource(key: "B", cite: "Doe, [Brackets]"), page: nil) == "[Doe, \\[Brackets\\]](zotero://select/library/items/B).", "Brackets in titles are escaped")
+        precondition(ZoteroFootnote.nextLabel(in: "No notes") == "1" && ZoteroFootnote.nextLabel(in: "A[^1] B[^lim] C[^3]\n\n[^1]: x\n[^3]: y") == "4")
+        var footCard = "# Canon\n\nThe canon closed early. Others disagree.\n"
+        let first = ZoteroFootnote.inserting(lim, page: "42", into: footCard, at: ("# Canon\n\nThe canon closed early." as NSString).length)
+        precondition(first.text == "# Canon\n\nThe canon closed early.[^1] Others disagree.\n\n[^1]: " + ZoteroFootnote.citation(lim, page: "42") + "\n", first.text.debugDescription)
+        precondition((first.text as NSString).substring(to: first.caret).hasSuffix("early.[^1]"), "The cursor lands after the marker")
+        footCard = first.text
+        let second = ZoteroFootnote.inserting(lim, page: "50", into: footCard, at: (footCard as NSString).range(of: "disagree.").upperBoundLocation)
+        precondition(second.text.hasSuffix("[^1]: " + ZoteroFootnote.citation(lim, page: "42") + "\n[^2]: " + ZoteroFootnote.citation(lim, page: "50") + "\n"), "Footnotes stay together: \(second.text.debugDescription)")
+        precondition(ZoteroFootnote.appendix(label: "1", citation: "c", to: "") == "[^1]: c\n")
+        precondition(ZoteroFootnote.appendix(label: "1", citation: "c", to: "Text") == "\n\n[^1]: c\n")
+        precondition(ZoteroFootnote.appendix(label: "2", citation: "c", to: "Text\n\n[^1]: a\n") == "[^2]: c\n")
+        // Clicks: book page → PDF page through labels; other zotero links open as written.
+        precondition(ZoteroPageOpener.resolve("zotero://open-pdf/library/items/NOPDFHERE?page=42")?.absoluteString == "zotero://open-pdf/library/items/NOPDFHERE?page=42")
+        precondition(ZoteroPageOpener.resolve("zotero://select/library/items/D9QP9N8Q")?.absoluteString == "zotero://select/library/items/D9QP9N8Q")
+        precondition(ZoteroPageOpener.resolve("https://example.com") == nil)
+        // Preview vs print.
+        let markdown = "Text.[^1]\n\n[^1]: [Lim](zotero://select/library/items/K), [42](zotero://open-pdf/library/items/P?page=42) and [web](https://x.org)."
+        let printed = KasterTypesetter.rewriteZoteroLinks(markdown, links: false)
+        precondition(printed == "Text.[^1]\n\n[^1]: Lim, 42 and [web](https://x.org).", printed)
+        let previewed = KasterTypesetter.rewriteZoteroLinks(markdown, links: true)
+        precondition(previewed.contains("[42](cardify-preview://url/") && !previewed.contains("](zotero://"), previewed)
+        precondition(LibraryIndex.zoteroItems(in: markdown + " [x](zotero://select/groups/12/items/G)") == ["personal/K", "12/G"])
+
         // Attachments: prefer a stored PDF, then EPUB; never a web link.
         let children = try JSONDecoder().decode([ZoteroChild].self, from: Data("""
         [{"key":"L","data":{"itemType":"attachment","contentType":"application/pdf","linkMode":"linked_url"}},
@@ -102,6 +133,7 @@ import PDFKit
             for item in items { print("Live:", ZoteroSource.line(cite: ZoteroCitation.markdown(fromHTML: item.citation ?? ""), page: "42")) }
             precondition(items.allSatisfy { $0.citation?.isEmpty == false }, "Zotero returned citations")
         }
+        print("Zotero footnotes: numbering, citations, placement, clicks, preview and print passed")
         print("Zotero inline citations, sources, page links, attachments and styles passed")
     }
 
@@ -125,3 +157,5 @@ import PDFKit
         return Data(output.utf8)
     }
 }
+
+extension NSRange { var upperBoundLocation: Int { location + length } }
