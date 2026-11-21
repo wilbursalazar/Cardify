@@ -763,6 +763,8 @@ struct MarkdownEditor: View {
     let onFollowLink: (CardLinkTarget) -> Void
     var live: Bool = true
     var onZotero: (() -> Void)? = nil
+    /// Called right after each edit, before SwiftUI redraws, so the preview can start at once.
+    var onEdit: (() -> Void)? = nil
     @StateObject private var completion = LinkCompletionState()
     @StateObject private var selectionToolbar = SelectionToolbarState()
     @AppStorage("hideEditorFrontmatter") private var hideFrontmatter = true
@@ -788,7 +790,7 @@ struct MarkdownEditor: View {
                 }.padding(.horizontal, 12).padding(.vertical, 6)
                 Divider()
             }
-            MarkdownTextView(text: $text, editor: editor, completion: completion, selectionToolbar: selectionToolbar, hideFrontmatter: isHidden, live: live, scale: EditorTextScale.clamped(editorScale), onFollowLink: onFollowLink)
+            MarkdownTextView(text: $text, editor: editor, completion: completion, selectionToolbar: selectionToolbar, hideFrontmatter: isHidden, live: live, scale: EditorTextScale.clamped(editorScale), onFollowLink: onFollowLink, onEdit: onEdit)
                 .overlay(alignment: .topLeading) {
                     GeometryReader { geometry in
                         if let anchor = selectionToolbar.anchor {
@@ -861,6 +863,7 @@ private struct MarkdownTextView: NSViewRepresentable {
     let live: Bool
     var scale: CGFloat = 1
     let onFollowLink: (CardLinkTarget) -> Void
+    var onEdit: (() -> Void)? = nil
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSScrollView()
@@ -942,6 +945,7 @@ private struct MarkdownTextView: NSViewRepresentable {
             parent.editor.editorTextDidChange(view)
             if let view = view as? LinkCompletionTextView { restyle(view, live: parent.live) }
             parent.text = view.string
+            parent.onEdit?()
             DispatchQueue.main.async { [weak self, weak view] in if let view { self?.parent.completion.refresh(in: view); self?.updateToolbar(view) } }
         }
         func textViewDidChangeSelection(_ notification: Notification) {

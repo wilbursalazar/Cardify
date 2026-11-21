@@ -738,7 +738,7 @@ struct ContentView: View {
                         }).padding(.horizontal, 14)
                     } else {
                     MarkdownEditor(text: $text, editor: editor, onFollowLink: followLink, live: (KasterEditorMode(rawValue: editorMode) ?? .live) == .live,
-                                   onZotero: { showZotero = true })
+                                   onZotero: { showZotero = true }, onEdit: { refreshTypeset() })
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }
@@ -844,6 +844,7 @@ struct ContentView: View {
             if !kasterLayoutMigrated { storedWorkspaceArrangement = WorkspaceArrangement.editorLeft.rawValue; showNotesSidebar = true; kasterLayoutMigrated = true }
             if let data = habitDraft.data(using: .utf8), let saved = try? JSONDecoder().decode(HabitTracker.self, from: data) { tracker = saved }
             if let data = todoDraft.data(using: .utf8), let saved = try? JSONDecoder().decode(TodoList.self, from: data) { todo = saved }
+            runTypingBenchmarkIfRequested()
             if let data = outlineDraft.data(using: .utf8), let saved = try? JSONDecoder().decode(OutlineDocument.self, from: data) { outline = saved }
         }
         .onChange(of: text) { _ in if cardMode == "markdown" { scheduleAutosave() } }
@@ -1600,6 +1601,38 @@ struct ContentView: View {
         return .init(text: previewText, cardURL: activeLinkedTab?.url ?? fileURL, portrait: portrait, fontSize: fontSize, dotGrid: dotGrid,
                      engine: engine, wantsDocument: previewStyle == PreviewStyle.document.rawValue, color: PrintColor.stored(printMode), themes: themesEnabled)
     }
+    /// Diagnostics only: `KASTER_TYPING_BENCH=/path/card.md` opens that card, types into it like a
+    /// person (one character every 120 ms) and prints keystroke→preview timings to stderr, then
+    /// quits. Never runs in a normal launch.
+    func runTypingBenchmarkIfRequested() {
+        guard let path = ProcessInfo.processInfo.environment["KASTER_TYPING_BENCH"] else { return }
+        let typist = TypingBenchmark()
+        // Measure as if the window were in front: no App Nap or timer coalescing.
+        typist.activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical], reason: "Typing benchmark")
+        NSApp.activate(ignoringOtherApps: true)
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            _ = loadFile(URL(fileURLWithPath: path))
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            if let view = editor.view { view.setSelectedRange(NSRange(location: (view.string as NSString).length, length: 0)) }
+            TypesetPreview.benchmark = TypesetPreview.Benchmark()
+            for character in Array(" The quick brown fox jumps over the lazy dog and keeps on typing to test the preview.") {
+                let start = Date(); let generation = typeset.generation
+                TypesetPreview.benchmark?.keystroke = start
+                editor.insert(String(character))
+                typist.keys.append(Date().timeIntervalSince(start) * 1000)
+                Task { @MainActor in
+                    while typeset.generation == generation && Date().timeIntervalSince(start) < 3 { try? await Task.sleep(nanoseconds: 1_000_000) }
+                    typist.previews.append(Date().timeIntervalSince(start) * 1000)
+                }
+                try? await Task.sleep(nanoseconds: 120_000_000)
+            }
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            typist.report(TypesetPreview.benchmark)
+            NSApp.terminate(nil)
+        }
+    }
+
     func refreshTypeset() { if let request = typesetRequest { typeset.request(request) } }
     var currentPreviewData: Data? {
         if typesetRequest != nil { return typeset.cardPDF }
@@ -2710,5 +2743,22 @@ struct EditorTextSizeCommands: Commands {
             Button("Normal Editor Text") { editorScale = 1 }
                 .keyboardShortcut("0", modifiers: .command).disabled(editorScale == 1)
         }
+    }
+}
+
+final class TypingBenchmark {
+    var keys: [Double] = []
+    var previews: [Double] = []
+    var activity: NSObjectProtocol?
+    func report(_ typeset: TypesetPreview.Benchmark?) {
+        func summary(_ values: [Double]) -> String {
+            let sorted = values.sorted(); guard !sorted.isEmpty else { return "none" }
+            return String(format: "median %.0f ms, p90 %.0f ms, max %.0f ms (n=%d)", sorted[sorted.count / 2], sorted[Int(Double(sorted.count - 1) * 0.9)], sorted.last!, sorted.count)
+        }
+        let lines = ["keystroke handling: " + summary(keys),
+                     "keystroke→render starts: " + summary(typeset?.requested ?? []),
+                     "render (Typst): " + summary(typeset?.rendered ?? []),
+                     "keystroke→preview updated: " + summary(previews)]
+        FileHandle.standardError.write(Data(lines.map { "KASTER_BENCH " + $0 + "\n" }.joined().utf8))
     }
 }

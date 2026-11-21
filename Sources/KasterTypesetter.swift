@@ -470,8 +470,12 @@ final class TypesetPreview: ObservableObject {
     /// Typst renders immediately — no debounce. While a render runs, only the newest
     /// request waits, and it starts the moment the current one finishes. LaTeX (seconds per
     /// render) waits for a short pause in typing instead.
+    /// Timings for the typing benchmark (KASTER_TYPING_BENCH); nil in normal use.
+    struct Benchmark { var keystroke: Date?; var requested: [Double] = []; var rendered: [Double] = [] }
+    static var benchmark: Benchmark?
     func request(_ request: Request) {
         guard request != lastRequest else { return }
+        if let start = Self.benchmark?.keystroke { Self.benchmark?.requested.append(Date().timeIntervalSince(start) * 1000); Self.benchmark?.keystroke = nil }
         let engineChanged = lastRequest?.engine != request.engine
         lastRequest = request
         if engineChanged { cardPDF = nil; documentPDF = nil; error = nil }
@@ -496,6 +500,7 @@ final class TypesetPreview: ObservableObject {
         queued = nil
         inFlight = true
         busy = true
+        let renderStart = Date()
         DispatchQueue.global(qos: .userInteractive).async { [weak self] in
             let card = KasterTypesetter.prepare(request.text, cardURL: request.cardURL, links: true, themes: request.themes)
             // Card and document typeset in parallel.
@@ -511,7 +516,9 @@ final class TypesetPreview: ObservableObject {
                 }
             }
             group.wait()
+            let rendered = Date().timeIntervalSince(renderStart) * 1000
             DispatchQueue.main.async {
+                Self.benchmark?.rendered.append(rendered)
                 guard let self else { return }
                 self.inFlight = false
                 // Results are applied in order, so the preview never steps backwards.
