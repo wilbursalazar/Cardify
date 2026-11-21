@@ -30,5 +30,32 @@ precondition(register.indexCardsNotInRegister(index: index()).map(\.title) == ["
 let imported = register.importIndexCards(index: index(), openWithUnsavedEdits: false)
 precondition(imported.update == .written && imported.count == 1)
 precondition(register.entries().map(\.keyword) == ["Authority", "Church history"] && register.indexCardsNotInRegister(index: index()).isEmpty)
-precondition(register.printPages().count == 1 && register.printPages()[0].contains("**Church history**"))
-print("Register service: creation, unsaved-edit guard, entry cards and index-card import passed")
+precondition(register.printPages(index: index()).count == 1 && register.printPages(index: index())[0].contains("**Church history**"))
+
+// Printed addresses: a Zettel card prints its Luhmann ID (findable in the box), others a short title.
+let printed = register.printPages(index: index())[0]
+precondition(printed.contains("**Authority** — 21") && printed.contains("**Church history** — Church history"), printed)
+precondition(KeywordRegister.address(of: nil, link: "Gone/A very long card title that goes on and on|Alias") == "Alias")
+precondition(KeywordRegister.address(of: nil, link: "A very long card title that goes on and on forever") == "A very long card title that go…")
+
+// Broken entries: a missing card and an ambiguous name are flagged; Choose Card fixes the link.
+try! manager.createDirectory(at: root.appendingPathComponent("Quick"), withIntermediateDirectories: true)
+try! Data("# Twin\n".utf8).write(to: root.appendingPathComponent("Zettel/Twin.md"))
+try! Data("# Twin\n".utf8).write(to: root.appendingPathComponent("Quick/Twin.md"))
+_ = register.update(openWithUnsavedEdits: false) { KeywordRegister.adding("Gone card", to: "Lost", in: KeywordRegister.adding("Twin", to: "Double", in: $0)) }
+precondition(RegisterService.state(of: "Gone card", index: index()) == .missing)
+guard case .ambiguous(let twins) = RegisterService.state(of: "Twin", index: index()), twins.count == 2 else { preconditionFailure("ambiguous") }
+if case .card = RegisterService.state(of: "21-Apostolic succession", index: index()) {} else { preconditionFailure("resolves") }
+precondition(Set(register.brokenEntries(index: index()).map(\.keyword)) == ["Double", "Lost"])
+let quickTwin = index().cards.first { $0.path == "Quick/Twin" }!
+precondition(register.choose(quickTwin, for: "Twin", in: "Double", index: index(), openWithUnsavedEdits: false) == .written)
+precondition(register.entries().first { $0.keyword == "Double" }?.links == ["Quick/Twin"], "\(register.entries())")
+precondition(register.choose(card, for: "Gone card", in: "Lost", index: index(), openWithUnsavedEdits: false) == .written)
+precondition(register.brokenEntries(index: index()).isEmpty && register.entries().first { $0.keyword == "Lost" }?.links == ["21-Apostolic succession"])
+precondition(KeywordRegister.replacing("A", with: "B", in: "K", text: "- K: [[A]], [[B]]") == "- K: [[B]]", "Choosing a card already listed doesn't duplicate it")
+
+// Index cards know which keywords reach them.
+let history = index().cards.first { $0.title == "Church history" }!
+precondition(register.keywords(pointingTo: history, index: index()) == ["Church history"])
+precondition(register.keywords(pointingTo: card, index: index()).sorted() == ["Authority", "Lost"])
+print("Register service: creation, unsaved-edit guard, entry cards, index-card import, printed IDs, broken entries and Choose Card passed")

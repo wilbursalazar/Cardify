@@ -80,16 +80,36 @@ enum KeywordRegister {
         return lines.joined(separator: "\n")
     }
 
+    /// Replaces one link under a keyword (Choose Card… on a broken entry).
+    static func replacing(_ old: String, with new: String, in keyword: String, text: String) -> String {
+        var lines = text.components(separatedBy: "\n")
+        guard let index = lines.firstIndex(where: { entry(in: $0)?.keyword.caseInsensitiveCompare(keyword) == .orderedSame }),
+              var existing = entry(in: lines[index]),
+              let position = existing.links.firstIndex(where: { $0.caseInsensitiveCompare(old) == .orderedSame }) else { return text }
+        if existing.links.contains(where: { $0.caseInsensitiveCompare(new) == .orderedSame }) { existing.links.remove(at: position) }
+        else { existing.links[position] = new }
+        lines[index] = line(for: existing)
+        return lines.joined(separator: "\n")
+    }
+
+    /// The address a printed register shows for a card: its Luhmann ID (21/3a), so the paper card
+    /// can be found in the box without the software; otherwise a short title.
+    static func address(of card: LibraryCard?, link: String) -> String {
+        if let id = card?.cardID, !id.isEmpty, LuhmannIDs.isLuhmann(id) { return id }
+        let title = card?.title ?? ((CardSyntax.WikiTarget(link).alias ?? CardSyntax.WikiTarget(link).name))
+        return title.count > 32 ? String(title.prefix(30)).trimmingCharacters(in: .whitespaces) + "…" : title
+    }
+
     /// Register cards for printing: alphabetical, about `perCard` keywords per 3×5 card, each card
-    /// headed with its letter range ("Register A–F").
-    static func printCards(_ entries: [Entry], perCard: Int = 9) -> [String] {
+    /// headed with its letter range ("Register A–F"). `address` turns a link into what is printed.
+    static func printCards(_ entries: [Entry], perCard: Int = 9, address: (String) -> String = { (CardSyntax.WikiTarget($0).name) }) -> [String] {
         guard !entries.isEmpty else { return [] }
         return stride(from: 0, to: entries.count, by: perCard).map { start in
             let chunk = Array(entries[start..<min(start + perCard, entries.count)])
             let first = chunk.first!.keyword.prefix(1).uppercased(), last = chunk.last!.keyword.prefix(1).uppercased()
             let title = first == last ? "Register \(first)" : "Register \(first)–\(last)"
             let lines = chunk.map { entry in
-                "**\(entry.keyword)** — " + entry.links.map { link in (link as NSString).lastPathComponent }.joined(separator: "; ")
+                "**\(entry.keyword)** — " + entry.links.map(address).joined(separator: ", ")
             }
             return "# \(title)\n\n" + lines.joined(separator: "  \n") + "\n"
         }

@@ -64,6 +64,46 @@ struct RegisterService {
         return (result, cards.count)
     }
 
-    /// The register as 3×5 cards for printing.
-    func printPages() -> [String] { KeywordRegister.printCards(entries()) }
+    /// The register as 3×5 cards for printing, each entry card shown by its address.
+    func printPages(index: LibraryIndex) -> [String] {
+        KeywordRegister.printCards(entries()) { link in KeywordRegister.address(of: index.resolve(link: link), link: link) }
+    }
+
+    enum LinkState: Equatable {
+        case card(URL)
+        /// No card has this name (deleted, or renamed outside Kaster).
+        case missing
+        /// Several cards share this name; the link must say which.
+        case ambiguous([URL])
+    }
+
+    /// Whether a register link still leads to exactly one card.
+    static func state(of link: String, index: LibraryIndex) -> LinkState {
+        let candidates = index.candidates(link: link)
+        switch candidates.count {
+        case 0: return .missing
+        case 1: return .card(candidates[0].url)
+        default: return .ambiguous(candidates.map(\.url))
+        }
+    }
+
+    /// Entries with a link that no longer leads to exactly one card.
+    func brokenEntries(index: LibraryIndex) -> [KeywordRegister.Entry] {
+        entries().filter { entry in entry.links.contains { if case .card = Self.state(of: $0, index: index) { return false }; return true } }
+    }
+
+    /// Keywords that point to this card: shown on index cards.
+    func keywords(pointingTo card: LibraryCard, index: LibraryIndex) -> [String] {
+        Self.keywords(pointingTo: card, in: entries(), index: index)
+    }
+    /// The same from the register text the library already holds (no file read while typing).
+    static func keywords(pointingTo card: LibraryCard, in entries: [KeywordRegister.Entry], index: LibraryIndex) -> [String] {
+        entries.filter { entry in entry.links.contains { index.resolve(link: $0)?.path == card.path } }.map(\.keyword)
+    }
+
+    /// Points a broken link at the chosen card (by its shortest unambiguous name).
+    func choose(_ card: LibraryCard, for link: String, in keyword: String, index: LibraryIndex, openWithUnsavedEdits: Bool) -> Update {
+        let name = CardifyNote.shortestLink(for: card.path, among: index.cards.map(\.path))
+        return update(openWithUnsavedEdits: openWithUnsavedEdits) { KeywordRegister.replacing(link, with: name, in: keyword, text: $0) }
+    }
 }

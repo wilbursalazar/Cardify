@@ -622,6 +622,15 @@ struct LibraryIndex {
         return named.count == 1 ? named[0] : nil
     }
 
+    /// Every card a link could mean: one for an exact or unique name, several when a bare
+    /// name is shared (an ambiguous link), none when nothing matches.
+    func candidates(link raw: String) -> [LibraryCard] {
+        if let card = resolve(link: raw) { return [card] }
+        let target = CardSyntax.WikiTarget(raw).path.lowercased()
+        guard !target.isEmpty, !target.contains("/") else { return [] }
+        return cards.filter { ($0.path as NSString).lastPathComponent.lowercased() == target }
+    }
+
     /// Cards carrying every one of these tags (case-insensitive).
     func cards(taggedWithAll names: [String]) -> [LibraryCard] {
         guard let first = names.first else { return cards }

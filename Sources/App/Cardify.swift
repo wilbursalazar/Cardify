@@ -639,6 +639,7 @@ struct ContentView: View {
                     }
                     .controlSize(.small)
                     sourceChips
+                    indexCardKeywords
                     if cardMode == "markdown" && showDebate {
                         DebatePanel(text: $text, showBrowser: $showDebateBrowser, currentURL: fileURL, onOpen: { url in loadFile(url) }, onNew: { draft, parent in
                             guard confirmReplaceDraft() else { return false }
@@ -918,10 +919,17 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $showRegister) {
-            KeywordRegisterView(entries: registerEntries, indexCardsToImport: indexCardsNotInRegister.count,
-                                resolve: { library.index.resolve(link: $0)?.url },
+            KeywordRegisterView(entries: registerEntries, indexCardsToImport: indexCardsNotInRegister,
+                                state: { RegisterService.state(of: $0, index: library.index) },
+                                cards: library.index.cards,
                                 onOpen: { url in _ = loadFile(url) },
                                 onRemove: { link, keyword in updateRegister { KeywordRegister.removing(link, from: keyword, in: $0) } },
+                                onChoose: { card, link, keyword in
+                                    guard let register else { return }
+                                    if applyRegisterUpdate(register.choose(card, for: link, in: keyword, index: library.index, openWithUnsavedEdits: registerHasUnsavedEdits)) {
+                                        status = "“\(keyword)” now points to \(card.title)."
+                                    }
+                                },
                                 onImportIndexCards: importIndexCardsToRegister,
                                 onPrint: printRegister,
                                 onOpenFile: { if let root = vaultRoot { ensureRegisterFile(root); _ = loadFile(KeywordRegister.url(in: root)) } })
@@ -1324,7 +1332,7 @@ struct ContentView: View {
     }
 
     func printRegister() {
-        let pages = register?.printPages() ?? []
+        let pages = register?.printPages(index: library.index) ?? []
         guard !pages.isEmpty else { return }
         let cards = pages.map { KasterTypesetter.prepare($0, cardURL: nil, links: false) }
         let layout = TypesetLayout.card(portrait: portrait, fontSize: fontSize, dotGrid: dotGrid)
@@ -1567,6 +1575,33 @@ struct ContentView: View {
                                onConvertLegacy: convertLegacySource)
                     .controlSize(.small)
             }
+        }
+    }
+
+    /// On an index card: the register keywords that lead here (Luhmann's way into a strand).
+    @ViewBuilder var indexCardKeywords: some View {
+        if cardMode == "markdown" && !showDebate && IndexCardMetadata.isIndex(text) {
+            let card = fileURL.flatMap { library.card(for: $0) }
+            let registerText = library.index.card(path: "Register")?.content ?? ""
+            let keywords = card.map { RegisterService.keywords(pointingTo: $0, in: KeywordRegister.entries(in: registerText), index: library.index) } ?? []
+            HStack(spacing: 6) {
+                Label("Index card", systemImage: "list.bullet.rectangle").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                if keywords.isEmpty {
+                    Text("No register keyword leads here yet.").font(.system(size: 11)).foregroundStyle(.secondary)
+                } else {
+                    Text("Register:").font(.system(size: 11)).foregroundStyle(.secondary)
+                    ForEach(keywords, id: \.self) { keyword in
+                        Button { showRegister = true } label: {
+                            Text(keyword).font(.system(size: 11)).padding(.horizontal, 6).padding(.vertical, 1)
+                                .background(Color.accentColor.opacity(0.12), in: Capsule())
+                        }.buttonStyle(.plain).help("Open the keyword register")
+                    }
+                }
+                Button("Add to Register…") { if let url = fileURL { addToRegister(url) } }
+                    .buttonStyle(.borderless).font(.system(size: 11)).disabled(fileURL == nil)
+                Spacer(minLength: 0)
+            }
+            .controlSize(.small)
         }
     }
 
