@@ -25,7 +25,7 @@ enum CardLinkNavigation {
             if let components = URLComponents(string: value), let scheme = components.scheme?.lowercased() {
                 guard ["http", "https", "zotero"].contains(scheme), let url = components.url else { return .failure("This link type is not supported.") }
                 if scheme == "zotero" {
-                    guard components.host?.lowercased() == "select" else { return .failure("This Zotero link is not supported.") }
+                    guard ["select", "open-pdf"].contains(components.host?.lowercased() ?? "") else { return .failure("This Zotero link is not supported.") }
                 } else {
                     guard let host = components.host, !host.isEmpty else { return .failure("This web link is invalid.") }
                 }

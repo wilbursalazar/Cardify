@@ -1595,7 +1595,9 @@ struct ContentView: View {
     var engine: TypesetEngine { TypesetEngine.stored(typesetEngine) }
     var typesetRequest: TypesetPreview.Request? {
         guard let source = typesetSource, KasterTypesetter.isAvailable(engine) else { return nil }
-        return .init(text: source, cardURL: activeLinkedTab?.url ?? fileURL, portrait: portrait, fontSize: fontSize, dotGrid: dotGrid,
+        // The preview makes a Zotero Source line clickable; printing uses the plain text.
+        let previewText = activeLinkedTab == nil && cardMode == "markdown" ? ZoteroSource.previewLinked(source) : source
+        return .init(text: previewText, cardURL: activeLinkedTab?.url ?? fileURL, portrait: portrait, fontSize: fontSize, dotGrid: dotGrid,
                      engine: engine, wantsDocument: previewStyle == PreviewStyle.document.rawValue, color: PrintColor.stored(printMode), themes: themesEnabled)
     }
     func refreshTypeset() { if let request = typesetRequest { typeset.request(request) } }
@@ -1772,6 +1774,11 @@ struct ContentView: View {
         let alert = NSAlert(); alert.messageText = "Can't open card"; alert.informativeText = message; alert.addButton(withTitle: "OK"); alert.runModal()
     }
     func followLink(_ target: CardLinkTarget) {
+        // A Zotero source clicked in the preview: open the cited page (matched to the PDF's page labels).
+        if case .url(let raw) = target, raw.lowercased().hasPrefix("zotero://"), let zotero = ZoteroSource.read(currentDraftContents()) {
+            if let page = ZoteroSource.linkedPage(raw) { openZoteroPage(zotero, page: page); return }
+            if let url = URL(string: raw), NSWorkspace.shared.open(url) { status = "Opened in Zotero."; return }
+        }
         let configuredFolder = notesFolder.isEmpty ? saveFolder : notesFolder
         let folderPath = configuredFolder.isEmpty && showDebate ? (fileURL?.deletingLastPathComponent().path ?? "") : configuredFolder
         let folder = folderPath.isEmpty ? nil : URL(fileURLWithPath: folderPath, isDirectory: true)

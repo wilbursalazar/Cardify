@@ -56,6 +56,21 @@ import PDFKit
             print("Page labels: book page → PDF page passed")
         } else { print("Page labels: this PDFKit build does not read labels from the test PDF; skipped") }
 
+        // Preview links: the page opens the PDF; no page selects the item; printing text is untouched.
+        let linkedPreview = ZoteroSource.previewLinked(cited)
+        let linkLine = linkedPreview.components(separatedBy: "\n").first { $0.hasPrefix("Source:") }!
+        precondition(linkLine.hasPrefix("Source: Lim, *How Was the Canon Formed?*, [42](cardify-preview://url/") && linkLine.hasSuffix(")."), linkLine)
+        let action = URL(string: String(linkLine.split(separator: "(").last!.dropLast(2)))!
+        guard case .url(let raw)? = CardPreviewLinks.target(from: action) else { preconditionFailure("preview link decodes") }
+        precondition(raw == "zotero://open-pdf/library/items/DWMEC776?page=42" && ZoteroSource.linkedPage(raw) == "42", raw)
+        let noPage = ZoteroSource.previewLinked(ZoteroSource.apply(source, page: nil, to: card))
+        guard let selectLine = noPage.components(separatedBy: "\n").first(where: { $0.hasPrefix("Source:") }),
+              let selectAction = URL(string: String(selectLine.split(separator: "(").last!.dropLast(1))),
+              case .url(let selectRaw)? = CardPreviewLinks.target(from: selectAction) else { preconditionFailure("select link") }
+        precondition(selectLine.hasPrefix("Source: [Lim, *How Was the Canon Formed?*.](") && selectRaw == "zotero://select/library/items/D9QP9N8Q", selectLine)
+        precondition(ZoteroSource.previewLinked("# Plain\n\nSource: [[Book]], p. 4\n") == "# Plain\n\nSource: [[Book]], p. 4\n", "Cards without Zotero are untouched")
+        if case .external = CardLinkNavigation.resolve(.url(raw), folder: nil, currentFile: nil) {} else { preconditionFailure("open-pdf links are allowed") }
+
         // Attachments: prefer a stored PDF, then EPUB; never a web link.
         let children = try JSONDecoder().decode([ZoteroChild].self, from: Data("""
         [{"key":"L","data":{"itemType":"attachment","contentType":"application/pdf","linkMode":"linked_url"}},

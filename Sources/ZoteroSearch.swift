@@ -351,6 +351,37 @@ struct ZoteroSource: Equatable {
         return result
     }
 
+    /// For the on-screen preview only: makes the Source line clickable. The page opens the PDF at
+    /// that page; without a page (or a PDF) the citation selects the item in Zotero. Printing
+    /// never sees these links.
+    static func previewLinked(_ text: String) -> String {
+        guard let source = read(text) else { return text }
+        var lines = text.components(separatedBy: "\n")
+        guard let index = lines.lastIndex(where: { $0.hasPrefix("Source:") }) else { return text }
+        let page = page(in: text, cite: source.cite)
+        func link(_ label: String, _ url: String) -> String {
+            guard let action = CardPreviewLinks.action(for: .url(url)) else { return label }
+            return "[\(label)](\(action.absoluteString))"
+        }
+        if let page, let pdf = source.pdf, ZoteroPageOpener.firstPage(page) != nil,
+           let encoded = page.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+            let attachment = source.library == "personal" ? "library/items/\(pdf)" : "groups/\(source.library)/items/\(pdf)"
+            let full = "Source: " + line(cite: source.cite, page: page)
+            guard lines[index] == full, let range = full.range(of: page, options: .backwards) else { return text }
+            lines[index] = String(full[..<range.lowerBound]) + link(page, "zotero://open-pdf/\(attachment)?page=\(encoded)") + String(full[range.upperBound...])
+        } else if let select = source.selectURL {
+            let body = String(lines[index].dropFirst("Source: ".count))
+            lines[index] = "Source: " + link(body.replacingOccurrences(of: "[", with: "\\[").replacingOccurrences(of: "]", with: "\\]"), select.absoluteString)
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// The printed page a preview link asked for (`zotero://open-pdf/…?page=42`).
+    static func linkedPage(_ raw: String) -> String? {
+        guard raw.lowercased().hasPrefix("zotero://open-pdf/"), let components = URLComponents(string: raw) else { return nil }
+        return components.queryItems?.first { $0.name == "page" }?.value
+    }
+
     /// YAML-safe double-quoted value.
     static func quoted(_ value: String) -> String {
         "\"" + value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
