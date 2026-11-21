@@ -28,16 +28,18 @@ protocol CardActionPrompts {
     func confirmTrash(_ url: URL, closesOpenCard: Bool) -> Bool
 }
 
-/// Changing card files from the sidebar: duplicate, rename (title, filename and links), move and
-/// Trash. Each change checks the file still matches what was read, that no open editor holds
-/// unsaved edits to it, and checks again after any prompt.
+/// Every change to card files goes through here: duplicate, rename (title, filename and links),
+/// move, Trash, promote, folder moves and card order. Sidebar actions check the file still matches
+/// what was read, that no open editor holds unsaved edits to it, and check again after any prompt.
+/// Each change is one journaled VaultChange: if any step fails, every step is undone and the
+/// error is thrown, so a failure is never reported as success.
 struct CardMutationService {
     let cards: OpenCardState
     let prompts: CardActionPrompts
-    var moveToTrash: (URL) throws -> Void = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) }
+    var changes = VaultChanges(journalFolder: VaultChanges.defaultJournal)
 
     struct Renamed: Equatable { let from: URL; let to: URL; let text: String; let title: String; let updatedLinks: [URL]; let wasActive: Bool }
-    struct Moved: Equatable { let from: URL; let to: URL; let wasActive: Bool }
+    struct Moved: Equatable { let from: URL; let to: URL; let updatedLinks: [URL]; let wasActive: Bool }
     struct Trashed: Equatable { let url: URL; let activeMode: String? }
 
     /// A change about to happen: the file as captured, and the active editor as it was then.
@@ -103,7 +105,10 @@ struct CardMutationService {
             guard prompts.confirmDuplicateWithoutID() else { return nil }
         }
         let others = try validate(prepared)
-        return try SidebarFileActions.duplicate(snapshot, openURLs: others)
+        let copy = try SidebarFileActions.duplicateCopy(snapshot, openURLs: others)
+        try changes.apply(VaultChange(summary: "Duplicate “\(url.deletingPathExtension().lastPathComponent)”",
+                                      steps: [.write(copy.url.standardizedFileURL.path, Data(copy.text.utf8))]))
+        return copy.url
     }
 
     /// New title: the heading and filename change together, and links to the card follow.
@@ -122,18 +127,20 @@ struct CardMutationService {
         let others = try validate(prepared)
         if prepared.activeMode != nil { cards.pauseAutosave() }
         let target = KasterVault.uniqueURL(in: url.deletingLastPathComponent(), filename: filename, excluding: url)
-        let renamed = try SidebarFileActions.retitle(prepared.snapshot, newText: newText, filename: target.lastPathComponent, openURLs: others)
-        let updated = (try? KasterVault.updateLinks(root: root, oldURL: url, newURL: renamed, skip: [renamed.resolvingSymlinksInPath().standardizedFileURL.path])) ?? []
-        return Renamed(from: url, to: renamed, text: newText, title: title, updatedLinks: updated, wasActive: prepared.activeMode != nil)
+        let destination = try SidebarFileActions.retitleDestination(prepared.snapshot, filename: target.lastPathComponent, openURLs: others)
+        let updated = try relocate(url, text: newText, to: destination, root: root, summary: "Rename “\(KasterVault.displayTitle(for: url, text: original))” to “\(title)”")
+        return Renamed(from: url, to: destination, text: newText, title: title, updatedLinks: updated, wasActive: prepared.activeMode != nil)
     }
 
     /// Into another folder of the vault. Nil when saving the open card first failed.
     func move(_ url: URL, to folder: URL) throws -> Moved? {
         guard let prepared = try prepare(url) else { return nil }
         let others = try validate(prepared)
+        let destination = try SidebarFileActions.moveDestination(prepared.snapshot, to: folder, openURLs: others)
+        guard destination.standardizedFileURL != prepared.snapshot.url else { return Moved(from: url, to: destination, updatedLinks: [], wasActive: prepared.activeMode != nil) }
         if prepared.activeMode != nil { cards.pauseAutosave() }
-        let moved = try SidebarFileActions.move(prepared.snapshot, to: folder, openURLs: others)
-        return Moved(from: url, to: moved, wasActive: prepared.activeMode != nil)
+        let updated = try relocate(url, text: nil, to: destination, root: prepared.snapshot.root, summary: "Move “\(url.lastPathComponent)” to \(folder.lastPathComponent)")
+        return Moved(from: url, to: destination, updatedLinks: updated, wasActive: prepared.activeMode != nil)
     }
 
     /// To the macOS Trash. Nil = cancelled.
@@ -142,7 +149,48 @@ struct CardMutationService {
         guard prompts.confirmTrash(url, closesOpenCard: prepared.activeMode != nil) else { return nil }
         _ = try validate(prepared)
         if prepared.activeMode != nil { cards.pauseAutosave() }
-        try moveToTrash(prepared.snapshot.url)
+        try changes.apply(VaultChange(summary: "Move “\(url.lastPathComponent)” to the Trash", steps: [.trash(prepared.snapshot.url.path)]))
         return Trashed(url: url, activeMode: prepared.activeMode)
+    }
+
+    // MARK: Changes the editor starts (it has already saved and asked)
+
+    /// Moves a card (optionally with new text) and makes every link to it follow, as one change.
+    /// Returns the other cards whose links were updated.
+    @discardableResult
+    func relocate(_ url: URL, text: String?, to destination: URL, root: URL, summary: String) throws -> [URL] {
+        let key = url.resolvingSymlinksInPath().standardizedFileURL.path
+        let moves = url.standardizedFileURL.path == destination.standardizedFileURL.path ? [] : [(from: url, to: destination)]
+        let writes = KasterVault.linkUpdates(root: root, moves: moves, overrides: text.map { [key: $0] } ?? [:])
+        let folder = destination.deletingLastPathComponent()
+        // Worked out before the change: once the card has moved its old path no longer resolves.
+        let others = writes.map(\.url).filter { $0.resolvingSymlinksInPath().standardizedFileURL.path != key }
+        try changes.apply(KasterVault.change(summary, writes: writes, moves: moves,
+                                             folders: FileManager.default.fileExists(atPath: folder.path) ? [] : [folder]))
+        return others
+    }
+
+    /// Moves or renames a folder with its cards; links that use its path follow. Returns the
+    /// cards whose links were updated.
+    @discardableResult
+    func moveFolder(_ folder: URL, to destination: URL, root: URL) throws -> [URL] {
+        let oldPath = folder.resolvingSymlinksInPath().standardizedFileURL.path
+        let newPath = destination.standardizedFileURL.path
+        let cards = KasterVault.markdownFiles(in: folder).map { card -> (from: URL, to: URL) in
+            let path = card.resolvingSymlinksInPath().standardizedFileURL.path
+            return (card, URL(fileURLWithPath: newPath + path.dropFirst(oldPath.count)))
+        }
+        let writes = KasterVault.linkUpdates(root: root, moves: cards)
+        try changes.apply(KasterVault.change("Move folder “\(folder.lastPathComponent)” to \(KasterVault.relativePath(of: destination, in: root) ?? destination.lastPathComponent)",
+                                             writes: writes, moves: [(from: folder, to: destination)]))
+        return writes.map { write in
+            let path = write.url.resolvingSymlinksInPath().standardizedFileURL.path
+            return path.hasPrefix(oldPath + "/") ? URL(fileURLWithPath: newPath + path.dropFirst(oldPath.count)) : write.url
+        }
+    }
+
+    /// Writes several cards as one change (all or none).
+    func write(_ texts: [(url: URL, text: String)], summary: String) throws {
+        try changes.apply(KasterVault.change(summary, writes: texts, moves: []))
     }
 }

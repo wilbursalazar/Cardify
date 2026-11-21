@@ -29,6 +29,27 @@ final class FakeCards: OpenCardState {
     func pauseAutosave() { pauses += 1 }
 }
 
+/// Real files, with the Trash in a test folder (or failing on demand).
+final class TestFiles: VaultFileOperations {
+    let real = RealFileOperations()
+    let trashFolder: URL
+    var trashFails = false
+    init(trash: URL) { trashFolder = trash }
+    func read(_ url: URL) throws -> Data? { try real.read(url) }
+    func exists(_ url: URL) -> Bool { real.exists(url) }
+    func write(_ data: Data, to url: URL, creating: Bool) throws { try real.write(data, to: url, creating: creating) }
+    func remove(_ url: URL) throws { try real.remove(url) }
+    func move(_ from: URL, to: URL) throws { try real.move(from, to: to) }
+    func makeFolder(_ url: URL) throws { try real.makeFolder(url) }
+    func trash(_ url: URL) throws -> URL? {
+        if trashFails { throw NSError(domain: "test", code: 1) }
+        try FileManager.default.createDirectory(at: trashFolder, withIntermediateDirectories: true)
+        let destination = trashFolder.appendingPathComponent(url.lastPathComponent)
+        try FileManager.default.moveItem(at: url, to: destination)
+        return destination
+    }
+}
+
 final class FakePrompts: CardActionPrompts {
     var answer = true
     var title: String?
@@ -52,7 +73,12 @@ final class FakePrompts: CardActionPrompts {
             return (cards, file)
         }
         func data(_ url: URL) -> Data? { try? Data(contentsOf: url) }
-        func service(_ cards: FakeCards, _ prompts: FakePrompts) -> CardMutationService { CardMutationService(cards: cards, prompts: prompts) }
+        let files = TestFiles(trash: root.deletingLastPathComponent().appendingPathComponent("trash-\(UUID().uuidString)", isDirectory: true))
+        let journal = root.deletingLastPathComponent().appendingPathComponent("journal-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: files.trashFolder); try? FileManager.default.removeItem(at: journal) }
+        func service(_ cards: FakeCards, _ prompts: FakePrompts) -> CardMutationService {
+            CardMutationService(cards: cards, prompts: prompts, changes: VaultChanges(journalFolder: journal, files: files))
+        }
         func failsSafely(_ body: () throws -> Any?) -> Bool { do { _ = try body(); return false } catch { return true } }
 
         // Rename saves the open draft first, then changes heading and filename together.
@@ -106,23 +132,17 @@ final class FakePrompts: CardActionPrompts {
 
         // Trash saves first and reports the closed editor mode; cancel or a failed Trash changes nothing.
         let (trash, trashFile) = try fixture("trash-me.md", draft: "# Saved before trash\n")
-        let trashFolder = root.appendingPathComponent("trash", isDirectory: true)
-        var trashing = service(trash, FakePrompts())
-        trashing.moveToTrash = { url in
-            try FileManager.default.createDirectory(at: trashFolder, withIntermediateDirectories: true)
-            try FileManager.default.moveItem(at: url, to: trashFolder.appendingPathComponent(url.lastPathComponent))
-        }
-        let trashed = try trashing.trash(trashFile)
+        let trashed = try service(trash, FakePrompts()).trash(trashFile)
         precondition(trashed == .init(url: trashFile, activeMode: "markdown") && data(trashFile) == nil)
-        precondition(data(trashFolder.appendingPathComponent("trash-me.md")) == Data("# Saved before trash\n".utf8))
+        precondition(data(files.trashFolder.appendingPathComponent("trash-me.md")) == Data("# Saved before trash\n".utf8))
         let (trashCancel, trashCancelFile) = try fixture("trash-cancel.md")
         prompts = FakePrompts(); prompts.answer = false
         let kept = try service(trashCancel, prompts).trash(trashCancelFile)
         precondition(kept == nil && data(trashCancelFile) != nil)
         let (trashFailure, trashFailureFile) = try fixture("trash-fail.md")
-        var failing = service(trashFailure, FakePrompts())
-        failing.moveToTrash = { _ in throw NSError(domain: "test", code: 1) }
-        precondition(failsSafely { try failing.trash(trashFailureFile) } && data(trashFailureFile) != nil)
+        files.trashFails = true
+        precondition(failsSafely { try service(trashFailure, FakePrompts()).trash(trashFailureFile) } && data(trashFailureFile) != nil)
+        files.trashFails = false
 
         // A card also open through a hardlink in another editor mode is protected.
         let (alias, aliasFile) = try fixture("alias.md")
@@ -154,6 +174,67 @@ final class FakePrompts: CardActionPrompts {
         prompts = FakePrompts(); prompts.title = "Closed renamed"
         let closed = try service(bystander, prompts).rename(other)!
         precondition(!closed.wasActive && bystander.saves == 0 && bystander.pauses == 0 && data(closed.to) == Data("# Closed renamed\n".utf8))
+        // Links follow: rename updates name links in other cards and in Register.md, as one change.
+        let linker = root.appendingPathComponent("Linker.md")
+        let register = KeywordRegister.url(in: root)
+        let target = root.appendingPathComponent("Target.md")
+        try Data("# Target\n".utf8).write(to: target)
+        try Data("# Linker\n\nSee [[Target]] and [[Target#Part|the part]].\n".utf8).write(to: linker)
+        try Data((KeywordRegister.template + "- Aim: [[Target]]\n").utf8).write(to: register)
+        let (linking, _) = try fixture("idle.md")
+        prompts = FakePrompts(); prompts.title = "Goal"
+        let goal = try service(linking, prompts).rename(target)!
+        precondition(goal.to.lastPathComponent == "Goal.md" && Set(goal.updatedLinks.map(\.lastPathComponent)) == ["Linker.md", "Register.md"], "\(goal.updatedLinks)")
+        precondition(String(decoding: data(linker)!, as: UTF8.self).contains("[[Goal]] and [[Goal#Part|the part]]"))
+        precondition(KeywordRegister.entries(in: String(decoding: data(register)!, as: UTF8.self)).first?.links == ["Goal"], "Register links follow renames")
+
+        // A rename that fails partway changes nothing and says so (no silent half-renames).
+        final class FailingSecondWrite: VaultFileOperations {
+            let real = RealFileOperations(); var writes = 0
+            func read(_ url: URL) throws -> Data? { try real.read(url) }
+            func exists(_ url: URL) -> Bool { real.exists(url) }
+            func write(_ data: Data, to url: URL, creating: Bool) throws { writes += 1; if writes == 2 { throw CocoaError(.fileWriteNoPermission) }; try real.write(data, to: url, creating: creating) }
+            func remove(_ url: URL) throws { try real.remove(url) }
+            func move(_ from: URL, to: URL) throws { try real.move(from, to: to) }
+            func makeFolder(_ url: URL) throws { try real.makeFolder(url) }
+            func trash(_ url: URL) throws -> URL? { nil }
+        }
+        let linkerBefore = data(linker), registerBefore = data(register), goalBefore = data(goal.to)
+        prompts = FakePrompts(); prompts.title = "Objective"
+        var failing = service(linking, prompts)
+        failing.changes = VaultChanges(journalFolder: journal, files: FailingSecondWrite())
+        do { _ = try failing.rename(goal.to); preconditionFailure("The rename should fail") }
+        catch let error as VaultChanges.Failure { precondition(error.undone && error.localizedDescription.contains("Nothing was changed"), "\(error)") }
+        precondition(data(linker) == linkerBefore && data(register) == registerBefore && data(goal.to) == goalBefore && data(root.appendingPathComponent("Objective.md")) == nil, "Every file is exactly as before")
+
+        // Move repairs links that use the folder path; folder moves carry their cards' links along.
+        let drawer = root.appendingPathComponent("Drawer", isDirectory: true), shelf = root.appendingPathComponent("Shelf", isDirectory: true)
+        try FileManager.default.createDirectory(at: drawer, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: shelf, withIntermediateDirectories: true)
+        let tool = drawer.appendingPathComponent("Tool.md")
+        try Data("# Tool\n".utf8).write(to: tool)
+        let pointer = root.appendingPathComponent("Pointer.md")
+        try Data("# Pointer\n\n[[Drawer/Tool]] and [[Tool]].\n".utf8).write(to: pointer)
+        let movedTool = try service(linking, FakePrompts()).move(tool, to: shelf)!
+        precondition(movedTool.updatedLinks.map(\.lastPathComponent) == ["Pointer.md"] && String(decoding: data(pointer)!, as: UTF8.self) == "# Pointer\n\n[[Shelf/Tool]] and [[Tool]].\n")
+        let cabinet = root.appendingPathComponent("Cabinet", isDirectory: true)
+        let folderLinks = try service(linking, FakePrompts()).moveFolder(shelf, to: cabinet, root: root)
+        precondition(folderLinks.map(\.lastPathComponent) == ["Pointer.md"] && String(decoding: data(pointer)!, as: UTF8.self).contains("[[Cabinet/Tool]]") && data(cabinet.appendingPathComponent("Tool.md")) != nil)
+
+        // A copy never shares its original's permanent uid.
+        let withUID = root.appendingPathComponent("Original.md")
+        try Data("---\nuid: abcd2345\n---\n# Original\n".utf8).write(to: withUID)
+        let twin = try service(linking, FakePrompts()).duplicate(withUID)!
+        let twinUID = KasterFrontmatter.value("uid", in: String(decoding: data(twin)!, as: UTF8.self))
+        precondition(twinUID != nil && twinUID != "abcd2345", "The copy gets a new uid: \(String(describing: twinUID))")
+
+        // Promote-style relocation creates the type folder and moves the card with new text.
+        let quick = root.appendingPathComponent("Loose idea.md")
+        try Data("Loose idea body\n".utf8).write(to: quick)
+        let promoted = root.appendingPathComponent("Zettel/7-Loose idea.md")
+        try service(linking, FakePrompts()).relocate(quick, text: "---\ncard_id: 7\n---\n# Loose idea\n", to: promoted, root: root, summary: "Promote")
+        precondition(String(decoding: data(promoted)!, as: UTF8.self).hasPrefix("---\ncard_id: 7") && data(quick) == nil)
         print("Card changes: open drafts, conflicts, cancellation, rename, move, Trash, hardlinks and duplicates passed")
+        print("Card changes: links and register follow renames and moves, failed renames change nothing, copies get new uids passed")
     }
 }

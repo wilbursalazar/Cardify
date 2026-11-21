@@ -854,6 +854,7 @@ struct ContentView: View {
         .onAppear {
             if storedIDMode.isEmpty { storedIDMode = (autoTimestampID ? IDMode.timestamp : IDMode.titleOnly).rawValue }
             ensureDefaultVault()
+            recoverInterruptedChanges()
             reattachOpenFiles()
             rememberTab(fileURL)
             refreshTypeset()
@@ -1047,11 +1048,8 @@ struct ContentView: View {
                 alert.addButton(withTitle: "Move"); alert.addButton(withTitle: "Cancel")
                 guard alert.runModal() == .alertFirstButtonReturn else { return }
             }
-            try KasterVault.ensureFolder(folder)
             autosaveTask?.cancel(); renameTask?.cancel()
-            if newText != text { try Data(newText.utf8).write(to: oldURL, options: .atomic) }
-            if target.standardizedFileURL.path != oldURL.standardizedFileURL.path { try FileManager.default.moveItem(at: oldURL, to: target) }
-            let updatedFiles = try KasterVault.updateLinks(root: root, oldURL: oldURL, newURL: target, skip: [target.resolvingSymlinksInPath().standardizedFileURL.path])
+            let updatedFiles = try cardChanges.relocate(oldURL, text: newText, to: target, root: root, summary: "Make “\(title)” a \(mode.title) card")
             adoptMovedCurrentCard(from: oldURL, to: target, content: newText)
             reloadOpenCards(updatedFiles)
             kasterMode = mode; storedIDMode = mode.idMode.rawValue; lastMode = mode.rawValue
@@ -1059,6 +1057,19 @@ struct ContentView: View {
         } catch {
             relocationFailed(error.localizedDescription)
         }
+    }
+
+    /// A change cut off by a crash or quit is finished or undone before anything else reads the
+    /// vault, and the person is told which.
+    func recoverInterruptedChanges() {
+        let reports = VaultChanges(journalFolder: VaultChanges.defaultJournal).recoverInterrupted()
+        guard !reports.isEmpty else { return }
+        sidebarRefreshToken = UUID()
+        status = reports.map(\.message).joined(separator: " ")
+        let alert = NSAlert()
+        alert.messageText = reports.count == 1 ? "An interrupted change was completed safely" : "Interrupted changes were completed safely"
+        alert.informativeText = reports.map(\.message).joined(separator: "\n\n")
+        alert.runModal()
     }
 
     func relocationFailed(_ reason: String) {
@@ -1146,6 +1157,7 @@ struct ContentView: View {
     /// Saves a dragged order as `order:` 10, 20, 30… in each card's frontmatter.
     func saveManualOrder(_ urls: [URL]) {
         var changed = 0
+        var others: [(url: URL, text: String)] = []
         for (index, url) in urls.enumerated() {
             let value = String((index + 1) * 10)
             if let current = fileURL, KasterPathList.key(current) == KasterPathList.key(url), cardMode == "markdown" {
@@ -1157,10 +1169,14 @@ struct ContentView: View {
             }
             guard let content = try? String(contentsOf: url, encoding: .utf8), KasterFrontmatter.value("order", in: content) != value,
                   let updated = KasterFrontmatter.setting("order", to: value, in: content) else { continue }
-            if (try? Data(updated.utf8).write(to: url, options: .atomic)) != nil { changed += 1 }
+            others.append((url, updated))
         }
+        do {
+            // The other cards' order changes as one change: all of them or none.
+            if !others.isEmpty { try cardChanges.write(others, summary: "Save the order of \(urls.count) cards"); changed += others.count }
+            status = changed == 0 ? "Order unchanged." : "Saved the new card order."
+        } catch { status = "Could not save the card order: \(error.localizedDescription)" }
         sidebarRefreshToken = UUID()
-        status = changed == 0 ? "Order unchanged." : "Saved the new card order."
     }
 
     func askForName(_ title: String, message: String, initial: String) -> String? {
@@ -1227,22 +1243,24 @@ struct ContentView: View {
         guard KasterVault.relativePath(of: old, in: root) != nil, KasterVault.relativePath(of: new, in: root) != nil else { status = "Folders can only move within your notes folder."; return }
         guard !FileManager.default.fileExists(atPath: newPath) else { status = "\(new.lastPathComponent) already exists there."; return }
         guard flushExistingDraft() else { return }
-        let cards = KasterVault.markdownFiles(in: old)
         do {
             autosaveTask?.cancel(); renameTask?.cancel()
-            try FileManager.default.moveItem(at: old, to: new)
+            let updated = try cardChanges.moveFolder(old, to: new, root: root)
             func moved(_ url: URL) -> URL? {
                 let path = url.resolvingSymlinksInPath().standardizedFileURL.path
                 guard path.hasPrefix(oldPath + "/") else { return nil }
                 return URL(fileURLWithPath: newPath + path.dropFirst(oldPath.count))
             }
-            for card in cards { if let destination = moved(card) { try KasterVault.updateLinks(root: root, oldURL: card, newURL: destination) } }
+            reloadOpenCards(updated.filter { moved($0) == nil })
             if let current = fileURL, let destination = moved(current) { adoptMovedCurrentCard(from: current, to: destination, content: text) }
             openTabs = openTabs.map { moved($0) ?? $0 }
             for index in linkedTabs.indices { if let destination = moved(linkedTabs[index].url) { linkedTabs[index].url = destination } }
             sidebarRefreshToken = UUID()
-            status = "Moved folder to \(KasterVault.relativePath(of: new, in: root) ?? new.lastPathComponent)."
-        } catch { status = "Could not move the folder: \(error.localizedDescription)" }
+            status = "Moved folder to \(KasterVault.relativePath(of: new, in: root) ?? new.lastPathComponent)" + (updated.isEmpty ? "." : "; updated links in \(updated.count) card\(updated.count == 1 ? "" : "s").")
+        } catch {
+            status = "Could not move the folder: \(error.localizedDescription)"
+            let alert = NSAlert(); alert.messageText = "Could not move the folder"; alert.informativeText = error.localizedDescription; alert.runModal()
+        }
     }
 
     // MARK: Keyword register
@@ -1433,8 +1451,7 @@ struct ContentView: View {
             let target = KasterVault.uniqueURL(in: current.deletingLastPathComponent(), filename: expected, excluding: current)
             guard target.lastPathComponent != current.lastPathComponent else { return }
             do {
-                try FileManager.default.moveItem(at: current, to: target)
-                let updated = try KasterVault.updateLinks(root: root, oldURL: current, newURL: target, skip: [target.resolvingSymlinksInPath().standardizedFileURL.path])
+                let updated = try cardChanges.relocate(current, text: nil, to: target, root: root, summary: "Rename \(current.lastPathComponent) to \(target.lastPathComponent)")
                 adoptMovedCurrentCard(from: current, to: target, content: text)
                 reloadOpenCards(updated)
                 status = "Renamed to \(target.lastPathComponent)" + (updated.isEmpty ? "." : "; updated links in \(updated.count) card\(updated.count == 1 ? "" : "s").")
@@ -2562,7 +2579,8 @@ struct ContentView: View {
             for index in linkedTabs.indices where linkedTabs[index].url.standardizedFileURL == url.standardizedFileURL { linkedTabs[index].url = moved.to }
             history.rename(url, to: moved.to)
             sidebarRefreshToken = UUID()
-            status = moved.to == url ? "This note is already in that folder." : "Moved \(url.lastPathComponent) to \(folder.lastPathComponent). Links using its old folder path may need updating."
+            reloadOpenCards(moved.updatedLinks)
+            status = moved.to == url ? "This note is already in that folder." : "Moved \(url.lastPathComponent) to \(folder.lastPathComponent)" + (moved.updatedLinks.isEmpty ? "." : "; updated links in \(moved.updatedLinks.count) card\(moved.updatedLinks.count == 1 ? "" : "s").")
         } catch { scheduleAutosave(); sidebarError(error) }
     }
 

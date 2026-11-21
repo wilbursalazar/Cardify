@@ -65,7 +65,9 @@ enum SidebarFileActions {
         return leftDevice == rightDevice && leftFile == rightFile
     }
 
-    static func rename(_ snapshot: Snapshot, filename: String, openURLs: [URL]) throws -> URL {
+    /// Where renaming the file would put it. Checks the name, open editors, the filename ID and
+    /// that nothing is there. Changes nothing: CardMutationService applies it, links included.
+    static func renameDestination(_ snapshot: Snapshot, filename: String, openURLs: [URL]) throws -> URL {
         let name = filename.trimmingCharacters(in: .whitespacesAndNewlines)
         let prohibited = CharacterSet(charactersIn: "/:\\").union(.controlCharacters)
         guard !name.isEmpty, !name.hasPrefix("."), name != ".", name != "..",
@@ -73,57 +75,35 @@ enum SidebarFileActions {
               URL(fileURLWithPath: name).pathExtension.lowercased() == "md" else { throw ActionError.invalidName }
         try validate(snapshot, openURLs: openURLs)
         let destination = snapshot.url.deletingLastPathComponent().appendingPathComponent(name)
-        func filenameIDs(_ url: URL) -> Set<String> {
-            Set([BranchIDs.filenameID(for: url), BranchIDs.luhmannFilenameID(for: url), BranchIDs.debateFilenameID(for: url)]
-                .compactMap { $0?.lowercased() })
-        }
         guard filenameIDs(snapshot.url) == filenameIDs(destination) else { throw ActionError.filenameID }
         guard !FileManager.default.fileExists(atPath: destination.path) else { throw ActionError.existingDestination }
-        // moveItem refuses an existing destination even if one appeared after the check.
-        try FileManager.default.moveItem(at: snapshot.url, to: destination)
         return destination
     }
 
-    /// Retitles a card: writes its new contents (with the new heading) and gives it the new filename.
-    /// The filename ID must not change. If the move fails, the original bytes are restored.
-    static func retitle(_ snapshot: Snapshot, newText: String, filename: String, openURLs: [URL], allowOpen: Bool = false) throws -> URL {
+    private static func filenameIDs(_ url: URL) -> Set<String> {
+        Set([BranchIDs.filenameID(for: url), BranchIDs.luhmannFilenameID(for: url), BranchIDs.debateFilenameID(for: url)]
+            .compactMap { $0?.lowercased() })
+    }
+
+    /// Where retitling puts the card (its new filename). The filename ID must not change (a
+    /// filename without one may gain one); a case-only change is allowed. Changes nothing.
+    static func retitleDestination(_ snapshot: Snapshot, filename: String, openURLs: [URL], allowOpen: Bool = false) throws -> URL {
         let name = filename.trimmingCharacters(in: .whitespacesAndNewlines)
         let prohibited = CharacterSet(charactersIn: "/:\\").union(.controlCharacters)
         guard !name.isEmpty, !name.hasPrefix("."), name.rangeOfCharacter(from: prohibited) == nil,
               URL(fileURLWithPath: name).pathExtension.lowercased() == "md" else { throw ActionError.invalidName }
         try validate(snapshot, openURLs: openURLs, allowOpen: allowOpen)
         let destination = snapshot.url.deletingLastPathComponent().appendingPathComponent(name)
-        func filenameIDs(_ url: URL) -> Set<String> {
-            Set([BranchIDs.filenameID(for: url), BranchIDs.luhmannFilenameID(for: url), BranchIDs.debateFilenameID(for: url)]
-                .compactMap { $0?.lowercased() })
-        }
-        let sameName = destination.lastPathComponent == snapshot.url.lastPathComponent
-        if !sameName {
-            // An existing filename ID never changes; a Zettel filename without one may gain its metadata ID.
+        if destination.lastPathComponent != snapshot.url.lastPathComponent {
             let before = filenameIDs(snapshot.url)
             guard before.isEmpty || before == filenameIDs(destination) else { throw ActionError.filenameID }
             guard !FileManager.default.fileExists(atPath: destination.path) || sameFile(destination, snapshot.url) else { throw ActionError.existingDestination }
         }
-        let newBytes = Data(newText.utf8)
-        if newBytes != snapshot.bytes { try newBytes.write(to: snapshot.url, options: .atomic) }
-        guard !sameName else { return snapshot.url }
-        do {
-            if destination.lastPathComponent.lowercased() == snapshot.url.lastPathComponent.lowercased() {
-                // Case-only change on a case-insensitive volume: go through a temporary name.
-                let temporary = snapshot.url.deletingLastPathComponent().appendingPathComponent(".kaster-rename-\(UUID().uuidString).md")
-                try FileManager.default.moveItem(at: snapshot.url, to: temporary)
-                try FileManager.default.moveItem(at: temporary, to: destination)
-            } else {
-                try FileManager.default.moveItem(at: snapshot.url, to: destination)
-            }
-        } catch {
-            if newBytes != snapshot.bytes { try? snapshot.bytes.write(to: snapshot.url, options: .atomic) }
-            throw error
-        }
         return destination
     }
 
-    static func move(_ snapshot: Snapshot, to folder: URL, openURLs: [URL]) throws -> URL {
+    /// Where moving the card into `folder` (inside the vault) puts it. Changes nothing.
+    static func moveDestination(_ snapshot: Snapshot, to folder: URL, openURLs: [URL]) throws -> URL {
         let folder = folder.standardizedFileURL
         let root = snapshot.root
         let prefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
@@ -140,34 +120,31 @@ enum SidebarFileActions {
         let destination = folder.appendingPathComponent(snapshot.url.lastPathComponent)
         guard destination != snapshot.url else { return destination }
         guard !FileManager.default.fileExists(atPath: destination.path) else { throw ActionError.existingDestination }
-        try FileManager.default.moveItem(at: snapshot.url, to: destination)
         return destination
     }
 
-    static func duplicate(_ snapshot: Snapshot, openURLs: [URL], allowOpen: Bool = false) throws -> URL {
+    /// The copy a duplicate creates beside the card ("Copy of …", numbered if taken): the same
+    /// text without its card ID, and with a new permanent uid if the card had one, so the two
+    /// cards never share an identity. Changes nothing.
+    static func duplicateCopy(_ snapshot: Snapshot, openURLs: [URL], allowOpen: Bool = false) throws -> (url: URL, text: String) {
         try validate(snapshot, openURLs: openURLs, allowOpen: allowOpen)
         let text = String(decoding: snapshot.bytes, as: UTF8.self)
         if hasCardIDComment(text) { throw ActionError.idComment }
         guard Data(text.utf8) == snapshot.bytes,
               CardMetadata.parse(text).id != nil || !CardMetadata.hasNonemptyID(text),
-              let copy = NoteEditing.setID("", in: text), CardMetadata.parse(copy).id == nil,
+              var copy = NoteEditing.setID("", in: text), CardMetadata.parse(copy).id == nil,
               !CardMetadata.hasNonemptyID(copy) else { throw ActionError.invalidMarkdown }
+        if KasterFrontmatter.value("uid", in: copy) != nil {
+            guard let withoutUID = KasterFrontmatter.setting("uid", to: nil, in: copy) else { throw ActionError.invalidMarkdown }
+            copy = KasterFrontmatter.ensuringUID(in: withoutUID)
+        }
         let folder = snapshot.url.deletingLastPathComponent()
         let stem = "Copy of " + snapshot.url.deletingPathExtension().lastPathComponent
-        let temporary = folder.appendingPathComponent(".cardify-copy-\(UUID().uuidString).tmp")
-        defer { try? FileManager.default.removeItem(at: temporary) }
-        try Data(copy.utf8).write(to: temporary, options: .withoutOverwriting)
-        try validate(snapshot, openURLs: openURLs, allowOpen: allowOpen)
         var suffix = 1
         while true {
-            let name = stem + (suffix == 1 ? "" : " \(suffix)") + ".md"
-            let target = folder.appendingPathComponent(name)
-            do {
-                try FileManager.default.linkItem(at: temporary, to: target)
-                return target
-            } catch let error as NSError where error.domain == NSCocoaErrorDomain && error.code == NSFileWriteFileExistsError {
-                suffix += 1
-            }
+            let target = folder.appendingPathComponent(stem + (suffix == 1 ? "" : " \(suffix)") + ".md")
+            if !FileManager.default.fileExists(atPath: target.path) { return (target, copy) }
+            suffix += 1
         }
     }
 

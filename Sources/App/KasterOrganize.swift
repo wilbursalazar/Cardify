@@ -66,7 +66,7 @@ struct MigrationSheet: View {
         working = true; failure = nil
         do {
             let backup = try KasterVault.backup(root: root)
-            try KasterVault.applyMigration(plan, root: root)
+            try KasterVault.applyMigration(plan, root: root, changes: VaultChanges(journalFolder: VaultChanges.defaultJournal))
             var moved: [URL: URL] = [:]
             for step in plan.steps { moved[step.from.standardizedFileURL] = step.to }
             onDone(moved)

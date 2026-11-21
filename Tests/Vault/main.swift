@@ -65,7 +65,7 @@ import Foundation
   precondition(moves["Debate/Weekly Habits - 11:13.md"] == "Artifacts/Habits/Weekly habits.md", "\(moves)")
   precondition(Set(plan.foldersToRemove.map(\.lastPathComponent)) == ["Habit", "Debate"], "Emptied folders are removed")
 
-  try! KasterVault.applyMigration(plan, root: root)
+  try! KasterVault.applyMigration(plan, root: root, changes: VaultChanges(journalFolder: root.deletingLastPathComponent().appendingPathComponent("journal-\(UUID().uuidString)")))
   let eco = try! String(contentsOf: root.appendingPathComponent("Zettel/1-Eco's Writing System.md"), encoding: .utf8)
   precondition(eco.contains("[[3a-The metaphor of computer-brain]]"), "Links follow moved cards: \(eco)")
   let metaphor = try! String(contentsOf: root.appendingPathComponent("Zettel/3a-The metaphor of computer-brain.md"), encoding: .utf8)

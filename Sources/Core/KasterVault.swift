@@ -333,14 +333,20 @@ enum KasterVault {
 
     /// Rewrites [[old]], [[old|label]], [[old#heading]] and folder-path forms to the new name.
     static func rewriteLinks(in text: String, from oldPaths: [String], to newPath: String) -> String? {
-        let olds = Set(oldPaths.filter { !$0.isEmpty }.map { $0.lowercased() })
-        guard !olds.isEmpty else { return nil }
+        rewriteLinks(in: text, mapping: Dictionary(oldPaths.filter { !$0.isEmpty }.map { ($0.lowercased(), newPath) }, uniquingKeysWith: { a, _ in a }))
+    }
+
+    /// Rewrites links in one pass: a link whose card path (lowercased) is a key becomes the mapped
+    /// path, keeping its #heading and |label. One pass, so renaming A→B and B→C at once never turns
+    /// a link to A into C. Nil when nothing changed.
+    static func rewriteLinks(in text: String, mapping: [String: String]) -> String? {
+        guard !mapping.isEmpty else { return nil }
         let ns = text as NSString
         var result = ""
         var last = 0
         var changed = false
         for link in CardSyntax.wikiLinks(in: text, includeEmbeds: true) {
-            guard olds.contains(link.target.path.lowercased()) else { continue }
+            guard let newPath = mapping[link.target.path.lowercased()] else { continue }
             // Keep everything after the name: "#Heading" and "|Label".
             let suffix = link.raw.firstIndex(where: { $0 == "#" || $0 == "|" }).map { String(link.raw[$0...]) } ?? ""
             result += ns.substring(with: NSRange(location: last, length: link.range.location - last))
@@ -352,30 +358,41 @@ enum KasterVault {
         return result + ns.substring(from: last)
     }
 
-    /// Updates every link to a moved card. Links use the new filename; links that used a
-    /// folder path keep using one. Returns the files that changed.
-    @discardableResult
-    static func updateLinks(root: URL, oldURL: URL, newURL: URL, skip: Set<String> = []) throws -> [URL] {
-        guard let oldRelative = relativePath(of: oldURL, in: root), let newRelative = relativePath(of: newURL, in: root) else { return [] }
-        let oldName = oldURL.deletingPathExtension().lastPathComponent
-        let newName = newURL.deletingPathExtension().lastPathComponent
-        let oldPath = (oldRelative as NSString).deletingPathExtension
-        let newPath = (newRelative as NSString).deletingPathExtension
-        guard oldPath != newPath else { return [] }
-        var changed: [URL] = []
+    /// The new text of every card whose links must follow these moves, worked out before anything
+    /// moves. Links use the new filename; links that used a folder path keep using one.
+    /// `overrides` are files the change rewrites anyway (path → new text): link changes apply on
+    /// top, and they're always included.
+    static func linkUpdates(root: URL, moves: [(from: URL, to: URL)], overrides: [String: String] = [:]) -> [(url: URL, text: String)] {
+        var mapping: [String: String] = [:]
+        for move in moves {
+            guard let oldRelative = relativePath(of: move.from, in: root), let newRelative = relativePath(of: move.to, in: root) else { continue }
+            let oldPath = (oldRelative as NSString).deletingPathExtension, newPath = (newRelative as NSString).deletingPathExtension
+            guard oldPath != newPath else { continue }
+            if oldPath.contains("/") { mapping[oldPath.lowercased()] = newPath }
+            let oldName = (oldPath as NSString).lastPathComponent, newName = (newPath as NSString).lastPathComponent
+            if oldName != newName { mapping[oldName.lowercased()] = newName }
+        }
+        var updates: [(url: URL, text: String)] = []
+        var covered = Set<String>()
         for file in markdownFiles(in: root) {
             let key = file.resolvingSymlinksInPath().standardizedFileURL.path
-            guard !skip.contains(key), let text = try? String(contentsOf: file, encoding: .utf8) else { continue }
-            var updated = text
-            // Path-style links ([[Folder/Card]]) keep a path; plain-name links keep a plain name.
-            if oldPath.contains("/"), let pathRewrite = rewriteLinks(in: updated, from: [oldPath], to: newPath) { updated = pathRewrite }
-            if oldName != newName, let nameRewrite = rewriteLinks(in: updated, from: [oldName], to: newName) { updated = nameRewrite }
-            if updated != text {
-                try Data(updated.utf8).write(to: file, options: .atomic)
-                changed.append(file)
-            }
+            covered.insert(key)
+            let override = overrides[key]
+            guard let base = override ?? (try? String(contentsOf: file, encoding: .utf8)) else { continue }
+            let updated = rewriteLinks(in: base, mapping: mapping) ?? base
+            if override != nil || updated != base { updates.append((file, updated)) }
         }
-        return changed
+        // A file the change writes that isn't a card in the vault (yet) is still written.
+        for (path, text) in overrides where !covered.contains(path) { updates.append((URL(fileURLWithPath: path), text)) }
+        return updates
+    }
+
+    /// One journaled change: write these texts (each at its current path), then do these moves.
+    static func change(_ summary: String, writes: [(url: URL, text: String)], moves: [(from: URL, to: URL)], folders: [URL] = []) -> VaultChange {
+        VaultChange(summary: summary, steps:
+            folders.map { .makeFolder($0.standardizedFileURL.path) } +
+            writes.map { .write($0.url.standardizedFileURL.path, Data($0.text.utf8)) } +
+            moves.map { .move($0.from.standardizedFileURL.path, $0.to.standardizedFileURL.path) })
     }
 
     // MARK: Migration
@@ -463,13 +480,18 @@ enum KasterVault {
     }
 
     /// Moves every card, then rewrites links vault-wide, then removes emptied folders.
-    static func applyMigration(_ plan: MigrationPlan, root: URL) throws {
-        for step in plan.steps {
-            try ensureFolder(step.to.deletingLastPathComponent())
-            if let content = step.newContent { try Data(content.utf8).write(to: step.from, options: .atomic) }
-            try FileManager.default.moveItem(at: step.from, to: step.to)
-        }
-        for step in plan.steps { try updateLinks(root: root, oldURL: step.from, newURL: step.to) }
+    /// The migration as one journaled change: new contents, link updates and moves.
+    static func migrationChange(_ plan: MigrationPlan, root: URL) -> VaultChange {
+        var overrides: [String: String] = [:]
+        for step in plan.steps { if let content = step.newContent { overrides[step.from.resolvingSymlinksInPath().standardizedFileURL.path] = content } }
+        let moves = plan.steps.map { (from: $0.from, to: $0.to) }
+        let folders = Array(Set(plan.steps.map { $0.to.deletingLastPathComponent().standardizedFileURL })).sorted { $0.path < $1.path }
+        return change("Organize \(plan.steps.count) card\(plan.steps.count == 1 ? "" : "s") into Kaster's folders",
+                      writes: linkUpdates(root: root, moves: moves, overrides: overrides), moves: moves, folders: folders)
+    }
+
+    static func applyMigration(_ plan: MigrationPlan, root: URL, changes: VaultChanges) throws {
+        try changes.apply(migrationChange(plan, root: root))
         for folder in plan.foldersToRemove {
             let leftovers = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil, options: [])) ?? []
             if leftovers.allSatisfy({ $0.lastPathComponent == ".DS_Store" }) { try? FileManager.default.removeItem(at: folder) }
