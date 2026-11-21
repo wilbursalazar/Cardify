@@ -22,6 +22,10 @@ enum UIDRepair {
         guard !index.duplicateUIDs.isEmpty else { return [] }
         var used = Set(index.cards.compactMap { KasterFrontmatter.value("uid", in: $0.content) })
         func older(_ a: LibraryCard, _ b: LibraryCard) -> Bool {
+            // A file named like a copy is the copy, whatever its dates (Finder can keep the
+            // original's creation date).
+            let aCopy = looksLikeCopy(a.url), bCopy = looksLikeCopy(b.url)
+            if aCopy != bCopy { return bCopy }
             let ad = created[a.path] ?? modified[a.path] ?? .distantFuture, bd = created[b.path] ?? modified[b.path] ?? .distantFuture
             return ad != bd ? ad < bd : a.path < b.path
         }
@@ -37,6 +41,14 @@ enum UIDRepair {
             }
         }
         return fixes
+    }
+
+    /// "Canon copy", "Canon copy 2", "Copy of Canon", "Canon 2": the names Finder, Obsidian and
+    /// Kaster give duplicates.
+    static func looksLikeCopy(_ url: URL) -> Bool {
+        let name = url.deletingPathExtension().lastPathComponent.lowercased()
+        return name.hasPrefix("copy of ") || name.range(of: #"(^|[ _-])copy( [0-9]+)?$"#, options: .regularExpression) != nil
+            || name.range(of: #" [0-9]+$"#, options: .regularExpression) != nil && !name.contains("-")
     }
 
     /// "“Copy of Canon” had the same permanent ID as “Canon”; it now has its own."
