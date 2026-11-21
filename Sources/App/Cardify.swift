@@ -2005,50 +2005,28 @@ struct ContentView: View {
         }
         return try BranchIDs.existing(in: roots)
     }
-    func scanRoots(for file: URL? = nil) -> [URL] {
-        var roots: [URL] = []
-        if !notesFolder.isEmpty { roots.append(URL(fileURLWithPath: notesFolder, isDirectory: true).standardizedFileURL) }
-        let fallback = file?.deletingLastPathComponent() ?? (!saveFolder.isEmpty ? URL(fileURLWithPath: saveFolder, isDirectory: true) : nil)
-        if let folder = fallback?.standardizedFileURL,
-           !roots.contains(where: { folder.path == $0.path || folder.path.hasPrefix($0.path + "/") }) { roots.append(folder) }
-        return roots
+    /// Card IDs for this card: folders to check, style changes and new IDs (CardIDService).
+    var cardIDs: CardIDService {
+        CardIDService(notesFolder: notesFolder, saveFolder: saveFolder,
+                      timestampStyle: TimestampDateStyle(rawValue: timestampDateStyle) ?? .sortable, timestampIncludeTime: timestampIncludeTime)
     }
+    func scanRoots(for file: URL? = nil) -> [URL] { cardIDs.scanRoots(for: file) }
     func selectIDMode(_ mode: IDMode) {
         guard mode != idMode else { return }
-        let currentID = CardMetadata.parse(text).id
         let debate = DebateNotes.parse(text)
         let isDebateCard = showDebate || debate.role != nil || debate.primary != nil || !debate.projects.isEmpty || !debate.related.isEmpty
-        if mode == .titleOnly { storedIDMode = mode.rawValue; return }
-        if isDebateCard && currentID != nil {
+        switch cardIDs.changeStyle(to: mode, text: text, fileURL: fileURL, isDebateCard: isDebateCard) {
+        case .keepText(let message):
             storedIDMode = mode.rawValue
-            status = "Debate cards keep their existing IDs."
-            return
-        }
-        guard currentID != nil || !CardMetadata.hasNonemptyID(text) else {
-            status = "Fix existing card_id metadata before changing ID style."
-            return
-        }
-        let roots = scanRoots(for: fileURL)
-        guard currentID == nil || !roots.isEmpty else {
-            status = "Choose a notes or save folder before changing the card ID."
-            let alert = NSAlert(); alert.messageText = "Can't check card IDs"; alert.informativeText = status; alert.runModal()
-            return
-        }
-        do {
-            let existing = try BranchIDs.existing(in: roots, excluding: fileURL)
-            guard let proposedID = CardIDs.newID(mode: mode, existing: existing,
-                                                 timestampStyle: TimestampDateStyle(rawValue: timestampDateStyle) ?? .sortable,
-                                                 timestampIncludeTime: timestampIncludeTime),
-                  let updated = NoteEditing.setID(proposedID, in: text),
-                  CardMetadata.parse(updated).id == proposedID else {
-                status = "Could not prepare a \(mode.rawValue) ID. Check the card metadata."
-                return
-            }
-            if let currentID, proposedID != currentID {
+            if let message { status = message }
+        case .refuse(let message, let alert):
+            status = message
+            if alert { let panel = NSAlert(); panel.messageText = "Can't check card IDs"; panel.informativeText = message; panel.runModal() }
+        case .replace(let updated, let id, let confirm):
+            if let confirm {
                 let alert = NSAlert()
-                alert.messageText = "Replace the current card ID?"
-                alert.informativeText = "Current ID: \(currentID)\nSuggested \(mode.rawValue) ID: \(proposedID)" +
-                    (fileURL == nil ? "\n\nThis changes the unsaved draft." : "\n\nThe saved file will keep its filename. Links using the old ID may need updating.")
+                alert.messageText = confirm.message
+                alert.informativeText = confirm.details(style: mode)
                 alert.addButton(withTitle: "Replace ID")
                 alert.addButton(withTitle: "Keep Current ID")
                 guard alert.runModal() == .alertFirstButtonReturn else {
@@ -2057,26 +2035,15 @@ struct ContentView: View {
                 }
             }
             text = updated; storedIDMode = mode.rawValue
-            status = "\(mode.rawValue) ID added: \(proposedID)."
-        } catch {
-            status = "Could not check card IDs: \(error.localizedDescription)"
-            let alert = NSAlert(); alert.messageText = "Can't check card IDs"; alert.informativeText = status; alert.runModal()
+            status = "\(mode.rawValue) ID added: \(id)."
         }
     }
     @discardableResult func ensureID() -> Bool {
-        if idMode == .titleOnly { return true }
-        if CardMetadata.parse(text).id != nil { return true }
-        if CardMetadata.hasNonemptyID(text) { status = "Fix existing card_id metadata before adding an ID."; return false }
-        if let file = fileURL, let existingID = (BranchIDs.filenameID(for: file) ?? (idMode == .luhmann ? BranchIDs.luhmannFilenameID(for: file) : nil)) {
-            guard let updated = NoteEditing.addID(existingID, to: text) else { status = "Could not add ID to the existing metadata."; return false }
-            text = updated; status = "Kept the existing filename ID: \(existingID)."; return true
+        switch cardIDs.ensureID(text: text, style: idMode, fileURL: fileURL) {
+        case .unchanged: return true
+        case .added(let updated, let message): text = updated; status = message; return true
+        case .failed(let message): status = message; return false
         }
-        do {
-            let existing = try BranchIDs.existing(in: scanRoots(for: fileURL))
-            guard let id = CardIDs.newID(mode: idMode, existing: existing, timestampStyle: TimestampDateStyle(rawValue: timestampDateStyle) ?? .sortable, timestampIncludeTime: timestampIncludeTime) else { return true }
-            guard let updated = NoteEditing.addID(id, to: text) else { status = "Could not add ID to the existing metadata."; return false }
-            text = updated; status = "Card ID added: \(id)."; return true
-        } catch { status = "Could not check existing IDs: \(error.localizedDescription)"; return false }
     }
     func insertTemplate(_ template: InlineTemplate) {
         switchMode(to: "markdown")
@@ -2117,7 +2084,7 @@ struct ContentView: View {
         do {
             let newID: String?
             if idMode == .titleOnly { newID = nil }
-            else { newID = CardIDs.newID(mode: idMode, existing: try BranchIDs.existing(in: scanRoots(for: parentURL)), timestampStyle: TimestampDateStyle(rawValue: timestampDateStyle) ?? .sortable, timestampIncludeTime: timestampIncludeTime) }
+            else { newID = cardIDs.newID(idMode, existing: try BranchIDs.existing(in: scanRoots(for: parentURL))) }
             editor.discardUndoHistory()
             text = CardMetadata.frontmatter(newID ?? "") + "# Idea\n\n\n\n## Related cards\n\n- [[\(link)]] — develops this card.\n"
             branchSaveFolder = parentURL.deletingLastPathComponent(); fileURL = nil; savedMarkdownSnapshot = nil; history.detach()

@@ -61,15 +61,10 @@ want() { [ ${#SELECTED[@]} -eq 0 ] || wanted "$1" "${SELECTED[@]}"; }
 
 for dir in "$ROOT"/Tests/*/; do
     name=$(basename "$dir")
-    case $name in IDModeSelection|Draft) continue ;; esac
+    case $name in Draft) continue ;; esac
     want "$name" && run "$name"
 done
 
-want IDModeSelection && extracted IDModeSelection "$ROOT/Tests/IDModeSelection/Checks.swift.in" '
-from pathlib import Path; import sys
-s = Path(sys.argv[1]).read_text()
-m = s[s.index("    func scanRoots("):s.index("    func insertTemplate(")]
-Path(sys.argv[3]).write_text(Path(sys.argv[2]).read_text().replace("    // METHODS\n", m))'
 want Draft && extracted Draft "$ROOT/Tests/Draft/DraftChecks.swift.in" '
 from pathlib import Path; import sys
 s = Path(sys.argv[1]).read_text()
