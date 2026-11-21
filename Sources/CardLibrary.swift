@@ -190,7 +190,7 @@ struct CardLibrary: View {
                                     Button("Open Card") { onOpen(note.url); dismiss() }
                                     Button("Insert Link") {
                                         let context = explanation.trimmingCharacters(in: .whitespacesAndNewlines)
-                                        onInsert(CardifyNote(path: note.path).wikiLink + (context.isEmpty ? "" : " — " + context)); dismiss()
+                                        onInsert(CardifyNote(path: note.path).wikiLink(among: snapshot.cards.map(\.path)) + (context.isEmpty ? "" : " — " + context)); dismiss()
                                     }.disabled(!note.canLink || !allowInsert)
                                 }
                                 if allowInsert {

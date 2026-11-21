@@ -110,5 +110,28 @@ import Foundation
     }
   }
   print("Vault: retitling, filename titles and labelled links passed")
+
+  // Links: the card name alone unless another card shares it.
+  let paths = ["Zettel/1-1-Atomic notes", "Research/Canon", "Zettel/Canon", "Quick/Idea"]
+  precondition(CardifyNote.shortestLink(for: "Zettel/1-1-Atomic notes", among: paths) == "1-1-Atomic notes")
+  precondition(CardifyNote.shortestLink(for: "Research/Canon", among: paths) == "Research/Canon", "Shared names keep their folder")
+  precondition(CardifyNote(path: "Quick/Idea").wikiLink(among: paths) == "[[Idea]]")
+  precondition(KasterTypesetter.rewriteWikiLinks("See [[Zettel/1-1-Atomic notes]], [[Research/Canon#Part]] and [[Zettel/Canon|the other]].", links: false) == "See 1-1-Atomic notes, Canon#Part and the other.", "Printed links show names, not folders")
+
+  // Tags: sidebar list, ⌘-click narrowing (all tags), and #tag search.
+  func libraryCard(_ path: String, _ text: String) -> LibraryCard {
+    LibraryCard(url: URL(fileURLWithPath: "/vault/\(path).md"), path: path, title: (path as NSString).lastPathComponent, cardID: nil, content: text)
+  }
+  let tagCards = [libraryCard("Zettel/A", "# A\nOn #method and #Luhmann."), libraryCard("Zettel/B", "# B\n#method only, see https://x.org/#frag"),
+                  libraryCard("Quick/C", "# C\nAbout #luhmann and boxes."), libraryCard("Quick/D", "# Heading\n## Not a tag\nplain")]
+  let tagIndex = LibraryIndex(snapshot: LibrarySnapshot(cards: tagCards, outgoing: [:], incoming: [:], unreadable: 0), root: URL(fileURLWithPath: "/vault"))
+  precondition(tagIndex.tags.map(\.name) == ["Luhmann", "method"] && tagIndex.tags.map(\.count) == [2, 2], "\(tagIndex.tags)")
+  precondition(tagIndex.cards(taggedWithAll: ["luhmann"]).map(\.path) == ["Zettel/A", "Quick/C"])
+  precondition(tagIndex.cards(taggedWithAll: ["luhmann", "METHOD"]).map(\.path) == ["Zettel/A"], "⌘-click narrows to cards with all tags")
+  precondition(tagIndex.search("#method").map(\.path) == ["Zettel/A", "Zettel/B"])
+  precondition(tagIndex.search("#luhmann boxes").map(\.path) == ["Quick/C"], "Tags and words combine")
+  precondition(tagIndex.search("heading").map(\.path) == ["Quick/D"], "Plain words still search text")
+  precondition(LibraryIndex.tags(in: "url https://a.b/#frag and C# and #ok") == ["ok"], "URL fragments are not tags")
+  print("Vault: name-only links, printed link names, tags and #tag search passed")
  }
 }

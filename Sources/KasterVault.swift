@@ -523,6 +523,21 @@ struct LibraryIndex {
     private let zoteroCiting: [String: [LibraryCard]]
     /// Cards inside each folder path, including subfolders.
     private let folderCounts: [String: Int]
+    /// Card paths carrying each #tag (lowercased), and the tags as first written, by name.
+    private let tagged: [String: Set<String>]
+    let tags: [(name: String, count: Int)]
+    private static let tagPattern = try! NSRegularExpression(pattern: "(?<![\\w#&/])#([A-Za-z][\\w/-]*)")
+
+    /// Every #tag in a card's text (code spans and fenced blocks included; headings need a space, so never match).
+    static func tags(in text: String) -> [String] {
+        let ns = text as NSString
+        var seen: [String] = []
+        for match in tagPattern.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
+            let tag = ns.substring(with: match.range(at: 1))
+            if !seen.contains(where: { $0.caseInsensitiveCompare(tag) == .orderedSame }) { seen.append(tag) }
+        }
+        return seen
+    }
     /// Luhmann-numbered cards in sequence order (Promote → Branch From…).
     let zettels: [LibraryCard]
 
@@ -534,11 +549,17 @@ struct LibraryIndex {
         var byKey: [String: Int] = [:], byPath: [String: Int] = [:], orders: [String: Double] = [:]
         var modes: [String: KasterMode] = [:], ids: Set<String> = [], byMode: [KasterMode: [LibraryCard]] = [:], byUID: [String: Int] = [:]
         var zoteroCiting: [String: [LibraryCard]] = [:], folderCounts: [String: Int] = [:]
+        var tagged: [String: Set<String>] = [:], spelled: [String: String] = [:]
         for (index, card) in snapshot.cards.enumerated() {
             byKey[card.url.standardizedFileURL.path] = byKey[card.url.standardizedFileURL.path] ?? index
             byPath[card.path] = byPath[card.path] ?? index
             var folder = (card.path as NSString).deletingLastPathComponent
             while !folder.isEmpty { folderCounts[folder, default: 0] += 1; folder = (folder as NSString).deletingLastPathComponent }
+            for tag in Self.tags(in: card.content) {
+                let key = tag.lowercased()
+                tagged[key, default: []].insert(card.path)
+                if spelled[key] == nil { spelled[key] = tag }
+            }
             let header = KasterFrontmatter.fields(in: card.content)
             if let order = header["order"].flatMap(Double.init) { orders[card.path] = order }
             if let uid = header["uid"] { byUID[uid] = byUID[uid] ?? index }
@@ -558,6 +579,9 @@ struct LibraryIndex {
             if let id = BranchIDs.debateFilenameID(for: card.url), id.caseInsensitiveCompare(metadataID ?? "") != .orderedSame { ids.insert(id) }
         }
         self.byKey = byKey; self.byPath = byPath; self.orders = orders; self.modes = modes; self.ids = ids; self.byUID = byUID; self.zoteroCiting = zoteroCiting; self.folderCounts = folderCounts
+        self.tagged = tagged
+        tags = tagged.map { (name: spelled[$0.key] ?? $0.key, count: $0.value.count) }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         zettels = snapshot.cards.filter { $0.cardID.map(LuhmannIDs.isLuhmann) ?? false }
             .sorted { ($0.cardID ?? "").localizedStandardCompare($1.cardID ?? "") == .orderedAscending }
         self.byMode = byMode.mapValues { $0.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending } }
@@ -571,6 +595,22 @@ struct LibraryIndex {
     }
     func card(path: String) -> LibraryCard? { byPath[path].map { cards[$0] } }
     func count(inFolder path: String) -> Int { folderCounts[path] ?? 0 }
+
+    /// Cards carrying every one of these tags (case-insensitive).
+    func cards(taggedWithAll names: [String]) -> [LibraryCard] {
+        guard let first = names.first else { return cards }
+        var paths = tagged[first.lowercased()] ?? []
+        for name in names.dropFirst() { paths.formIntersection(tagged[name.lowercased()] ?? []) }
+        return cards.filter { paths.contains($0.path) }
+    }
+
+    /// Sidebar search: "#tag" words must all be on the card; other words search its text.
+    func search(_ query: String) -> [LibraryCard] {
+        let words = query.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        let tagWords = words.filter { $0.hasPrefix("#") && $0.count > 1 }.map { String($0.dropFirst()) }
+        let text = words.filter { !($0.hasPrefix("#") && $0.count > 1) }.joined(separator: " ")
+        return cards(taggedWithAll: tagWords).filter { LibrarySearch.matches($0, query: text) }
+    }
     func card(uid: String) -> LibraryCard? { byUID[uid].map { cards[$0] } }
     func cards(citingZotero key: String, library: String = "personal") -> [LibraryCard] { zoteroCiting[library + "/" + key] ?? [] }
 

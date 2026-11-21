@@ -4,6 +4,7 @@ import AppKit
 enum SidebarSelection: Hashable {
     case all, recent, favorites, unprinted
     case theme(String)
+    case tags([String])
     case folder(String)
 }
 
@@ -26,6 +27,7 @@ struct CardSidebar: View {
     @ObservedObject var store: LibraryStore
     @State private var listCache = DerivedCache<[LibraryCard]>()
     @State private var favoriteCache = DerivedCache<Set<String>>()
+    @State private var tagsExpanded = false
     let currentURL: URL?
     let openURLs: [URL]
     let draftTitle: String
@@ -122,6 +124,7 @@ struct CardSidebar: View {
                             navRow("#" + theme, systemImage: "tag", count: store.themes[theme]?.count ?? 0, target: .theme(theme))
                         }
                     }
+                    tagsSection
                     HStack {
                         Text("Folders").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
                         Spacer()
@@ -172,6 +175,52 @@ struct CardSidebar: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain).padding(.bottom, 4)
+    }
+
+    /// Every #tag with its count. Click to list a tag's cards; ⌘-click to add or remove tags,
+    /// narrowing to cards that carry all of the chosen ones.
+    @ViewBuilder private var tagsSection: some View {
+        let tags = store.index.tags
+        if !tags.isEmpty {
+            HStack {
+                Text("Tags").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                Spacer()
+                if case .tags = selection { Button("Clear") { selection = .all }.font(.system(size: 11)).buttonStyle(.borderless) }
+            }
+            .padding(.horizontal, 10).padding(.top, 16).padding(.bottom, 4)
+            let chosen: [String] = { if case .tags(let names) = selection { return names } else { return [] } }()
+            ForEach(tags.prefix(tagsExpanded ? tags.count : 12), id: \.name) { tag in
+                let isChosen = chosen.contains { $0.caseInsensitiveCompare(tag.name) == .orderedSame }
+                Button {
+                    searching = false; query = ""
+                    if NSEvent.modifierFlags.contains(.command) {
+                        var names = chosen.filter { $0.caseInsensitiveCompare(tag.name) != .orderedSame }
+                        if !isChosen { names.append(tag.name) }
+                        selection = names.isEmpty ? .all : .tags(names)
+                    } else {
+                        selection = isChosen && chosen.count == 1 ? .all : .tags([tag.name])
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "number").foregroundStyle(isChosen ? accent : .secondary).frame(width: 18)
+                        Text(tag.name).font(.system(size: 13)).lineLimit(1)
+                        Spacer()
+                        Text("\(tag.count)").font(.system(size: 11, weight: .medium)).monospacedDigit().foregroundStyle(.secondary)
+                            .padding(.horizontal, 6).padding(.vertical, 1)
+                            .background(Color.secondary.opacity(0.12), in: Capsule())
+                    }
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(isChosen && !searching ? selectionFill : .clear, in: RoundedRectangle(cornerRadius: 7))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Show cards tagged #\(tag.name). ⌘-click to combine tags.")
+            }
+            if tags.count > 12 {
+                Button(tagsExpanded ? "Show Fewer" : "Show All \(tags.count) Tags") { tagsExpanded.toggle() }
+                    .font(.system(size: 11)).buttonStyle(.borderless).padding(.horizontal, 10)
+            }
+        }
     }
 
     private func navRow(_ title: String, systemImage: String, count: Int, target: SidebarSelection) -> some View {
@@ -294,6 +343,7 @@ struct CardSidebar: View {
         case .favorites: return "Favorites"
         case .unprinted: return "Unprinted"
         case .theme(let theme): return "#" + theme
+        case .tags(let names): return names.map { "#" + $0 }.joined(separator: " ")
         case .folder(let path): return (path as NSString).lastPathComponent
         }
     }
@@ -318,7 +368,7 @@ struct CardSidebar: View {
     private func computeListedCards() -> [LibraryCard] {
         let base: [LibraryCard]
         if searching {
-            base = store.snapshot.cards.filter { LibrarySearch.matches($0, query: query) }
+            base = store.index.search(query)
         } else {
             switch selection {
             case .all: base = store.snapshot.cards
@@ -328,6 +378,7 @@ struct CardSidebar: View {
             case .theme(let theme):
                 let paths = Set(store.themes[theme] ?? [])
                 base = store.snapshot.cards.filter { paths.contains($0.path) }
+            case .tags(let names): base = store.index.cards(taggedWithAll: names)
             case .folder(let path): base = store.snapshot.cards.filter { $0.path.hasPrefix(path + "/") }
             }
         }
@@ -423,6 +474,7 @@ struct CardSidebar: View {
         case .favorites: return "star"
         case .unprinted: return "printer"
         case .theme: return "tag"
+        case .tags: return "number"
         case .folder: return "folder"
         }
     }

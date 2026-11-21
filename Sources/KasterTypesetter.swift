@@ -136,7 +136,9 @@ enum KasterTypesetter {
             result += ns.substring(with: NSRange(location: last, length: match.range.location - last))
             let target = ns.substring(with: match.range(at: 1))
             let fragment = match.range(at: 2).location == NSNotFound ? "" : ns.substring(with: match.range(at: 2))
-            let label = match.range(at: 3).location == NSNotFound ? target + fragment : ns.substring(with: match.range(at: 3))
+            // A link shows the card's name, not its folder path ("Zettel/Idea" → "Idea").
+            let name = (target as NSString).lastPathComponent.isEmpty ? target : (target as NSString).lastPathComponent
+            let label = match.range(at: 3).location == NSNotFound ? name + fragment : ns.substring(with: match.range(at: 3))
             let escaped = label.replacingOccurrences(of: "[", with: "\\[").replacingOccurrences(of: "]", with: "\\]")
             if links, let action = CardPreviewLinks.action(for: .wiki(target + fragment)) {
                 result += "[\(escaped)](\(action.absoluteString))"

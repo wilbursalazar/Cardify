@@ -2021,7 +2021,8 @@ struct ContentView: View {
         guard let parentURL = fileURL else { return }
         let root = notesFolder.isEmpty ? nil : URL(fileURLWithPath: notesFolder, isDirectory: true).standardizedFileURL.path
         let path = parentURL.deletingPathExtension().standardizedFileURL.path
-        let link = root != nil && path.hasPrefix(root! + "/") ? String(path.dropFirst(root!.count + 1)) : parentURL.deletingPathExtension().lastPathComponent
+        let fullLink = root != nil && path.hasPrefix(root! + "/") ? String(path.dropFirst(root!.count + 1)) : parentURL.deletingPathExtension().lastPathComponent
+        let link = CardifyNote.shortestLink(for: fullLink, among: library.snapshot.cards.map(\.path))
         guard CardifyNote(path: link).canLink else { status = "The saved card's filename cannot be used in an Obsidian link."; return }
         do {
             let newID: String?
@@ -2050,7 +2051,8 @@ struct ContentView: View {
             let childID = try (continuation ? LuhmannIDs.continuation(of: parentID, existing: existing) : LuhmannIDs.branch(of: parentID, existing: existing))
             let root = notesFolder.isEmpty ? nil : URL(fileURLWithPath: notesFolder, isDirectory: true).standardizedFileURL.path
             let path = parentURL.deletingPathExtension().standardizedFileURL.path
-            let link = root != nil && path.hasPrefix(root! + "/") ? String(path.dropFirst(root!.count + 1)) : parentURL.deletingPathExtension().lastPathComponent
+            let fullLink = root != nil && path.hasPrefix(root! + "/") ? String(path.dropFirst(root!.count + 1)) : parentURL.deletingPathExtension().lastPathComponent
+            let link = CardifyNote.shortestLink(for: fullLink, among: library.snapshot.cards.map(\.path))
             guard !link.contains(where: { "[]|#^\n\r".contains($0) }) else { status = "The parent filename cannot be used in an Obsidian link."; return }
             let relation = continuation ? "continues this card" : "branches from this card"
             editor.discardUndoHistory()

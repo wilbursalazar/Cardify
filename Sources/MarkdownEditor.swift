@@ -643,7 +643,7 @@ final class LinkCompletionState: ObservableObject {
         guard let view, view.selectedRange().length == 0,
               let current = LinkCompletionContext.find(in: view.string, caret: view.selectedRange().location), current == context else { close(); return }
         close()
-        view.insertText(note.wikiLink, replacementRange: current.range)
+        view.insertText(note.wikiLink(among: cachedNotes.map(\.path)), replacementRange: current.range)
         view.window?.makeFirstResponder(view)
     }
     func chooseFolder() {
@@ -1121,9 +1121,16 @@ extension LinkCompletionTextView {
         }
         // Wiki links: hide the brackets (and the target, when an alias is shown).
         each("\\[\\[([^\\]|\\n]*\\|)?([^\\]\\n]+)\\]\\]") { match in
-            let open = NSRange(location: match.range.location, length: 2 + (match.range(at: 1).location == NSNotFound ? 0 : match.range(at: 1).length))
-            marker(open, fontFrom: match.range(at: 2).location)
-            marker(NSRange(location: NSMaxRange(match.range) - 2, length: 2), fontFrom: match.range(at: 2).location)
+            var hidden = 2 + (match.range(at: 1).location == NSNotFound ? 0 : match.range(at: 1).length)
+            // Without an alias, show only the card name: hide a folder path ("Zettel/") too.
+            if match.range(at: 1).location == NSNotFound {
+                let target = ns.substring(with: match.range(at: 2))
+                let name = target.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? target
+                if let slash = name.lastIndex(of: "/"), name.index(after: slash) < name.endIndex { hidden += (String(name[...slash]) as NSString).length }
+            }
+            let open = NSRange(location: match.range.location, length: hidden)
+            marker(open, fontFrom: match.range.location + hidden)
+            marker(NSRange(location: NSMaxRange(match.range) - 2, length: 2), fontFrom: match.range.location + hidden)
         }
         each("^(\\s*)([-*+]|\\d+[.)])( \\[[ xX]\\])? ") { match in set([.foregroundColor: purple], match.range(at: 2)); set([.foregroundColor: purple], match.range(at: 3)) }
         each("^> ?.*$") { match in

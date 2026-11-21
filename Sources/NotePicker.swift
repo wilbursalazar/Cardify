@@ -8,6 +8,15 @@ struct CardifyNote: Identifiable, Hashable {
     // Obsidian treats these characters as link syntax rather than filename characters.
     var canLink: Bool { !path.contains("%%") && !path.contains(where: { "[]|#^:\n\r".contains($0) }) }
     var wikiLink: String { "[[\(path)]]" }
+    /// "[[Name]]" when no other note shares that file name, else "[[Folder/Name]]", so links stay
+    /// short and readable but never ambiguous.
+    func wikiLink(among paths: [String]) -> String { "[[\(Self.shortestLink(for: path, among: paths))]]" }
+    static func shortestLink(for path: String, among paths: [String]) -> String {
+        let name = (path as NSString).lastPathComponent
+        let lowered = name.lowercased()
+        let clashes = paths.contains { $0 != path && ($0 as NSString).lastPathComponent.lowercased() == lowered }
+        return clashes ? path : name
+    }
 }
 
 enum CardifyNoteIndex {
@@ -75,7 +84,7 @@ struct NotePicker: View {
                 Button("Insert Link") {
                     if let note = notes.first(where: { $0.path == selected && $0.canLink }) {
                         let context = explanation.components(separatedBy: .newlines).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
-                        onInsert(note.wikiLink + (context.isEmpty ? "" : " — " + context))
+                        onInsert(note.wikiLink(among: notes.map(\.path)) + (context.isEmpty ? "" : " — " + context))
                         dismiss()
                     }
                 }.disabled(!notes.contains { $0.path == selected && $0.canLink }).keyboardShortcut(.defaultAction)
