@@ -45,7 +45,6 @@ struct CardSidebar: View {
     let onMove: (URL, URL) -> Void
     let onNew: () -> Void
     let onChooseFolder: () -> Void
-    let onGraph: () -> Void
     let onSettings: () -> Void
     let onPrint: ([URL], String) -> Void
     let lastPrint: Date
@@ -112,7 +111,6 @@ struct CardSidebar: View {
                     navRow("Favorites", systemImage: "star", count: favoriteCards.count, target: .favorites)
                     navRow("Unprinted", systemImage: "printer", count: unprintedCards.count, target: .unprinted)
                         .help("Cards created or changed since your last print — keep the paper box in step")
-                    actionRow("Graph", systemImage: "point.3.connected.trianglepath.dotted", action: onGraph)
                     actionRow("Search", systemImage: "magnifyingglass", shortcut: "⌘F") { startSearch() }
                         .keyboardShortcut("f", modifiers: .command)
                     if let onOpenRegister { actionRow("Keyword Register", systemImage: "character.book.closed", action: onOpenRegister) }

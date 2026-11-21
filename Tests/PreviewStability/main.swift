@@ -124,10 +124,14 @@ import PDFKit
   precondition(clip.bounds.origin.y < 2, "changing files resets scroll")
   _ = checkRendered(0)
   let unzoomedWidth = preview.pagesView.pageRects[0].width
-  let wheel = NSEvent(cgEvent: CGEvent(scrollWheelEvent2Source: nil, units: .line,
-                                      wheelCount: 1, wheel1: 2, wheel2: 0, wheel3: 0)!)!
-  preview.scrollView.scrollWheel(with: wheel)
-  precondition(preview.pagesView.pageRects[0].width > unzoomedWidth, "wheel zooms the on-screen page")
+  let plainEvent = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: 2, wheel2: 0, wheel3: 0)!
+  preview.scrollView.scrollWheel(with: NSEvent(cgEvent: plainEvent)!)
+  precondition(abs(preview.pagesView.pageRects[0].width - unzoomedWidth) < 0.5, "a plain scroll moves through cards, it doesn't zoom")
+  let commandEvent = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: 2, wheel2: 0, wheel3: 0)!
+  commandEvent.flags = .maskCommand
+  precondition(PreviewZoomScrollView.zooms(NSEvent(cgEvent: commandEvent)!), "⌘+scroll is a zoom")
+  preview.scrollView.scrollWheel(with: NSEvent(cgEvent: commandEvent)!)
+  precondition(preview.pagesView.pageRects[0].width > unzoomedWidth, "⌘+scroll zooms the on-screen page")
   preview.update(data: document("# Another note"), revision: key("Another note", "/vault/another.md"))
   precondition(abs(preview.pagesView.pageRects[0].width - unzoomedWidth) < 2, "changing cards resets preview zoom")
   preview.cancelPending(); window.close()

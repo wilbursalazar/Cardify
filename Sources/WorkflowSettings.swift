@@ -149,7 +149,7 @@ struct WorkflowSettings: View {
                               empty: "Asked the first time you make one",
                               help: "Where \(artifact.title) files are kept.", clearable: true)
                 }
-            } header: { Text("Artifacts") }
+            } header: { Text("Workspaces") }
         }
         .formStyle(.grouped)
     }

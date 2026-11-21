@@ -171,11 +171,16 @@ final class PreviewPagesView: NSView {
     }
 }
 
+/// The card preview: scrolling moves through the cards; ⌘+scroll zooms around the pointer.
 final class PreviewZoomScrollView: NSScrollView {
     var onWheel: ((NSEvent) -> Void)?
 
+    static func zooms(_ event: NSEvent) -> Bool {
+        event.modifierFlags.contains(.command) && event.scrollingDeltaY != 0 && abs(event.scrollingDeltaY) >= abs(event.scrollingDeltaX)
+    }
+
     override func scrollWheel(with event: NSEvent) {
-        guard event.scrollingDeltaY != 0, abs(event.scrollingDeltaY) >= abs(event.scrollingDeltaX), let onWheel else {
+        guard Self.zooms(event), let onWheel else {
             super.scrollWheel(with: event)
             return
         }
@@ -387,7 +392,6 @@ struct ContentView: View {
     @AppStorage("workspaceArrangement") private var storedWorkspaceArrangement = WorkspaceArrangement.editorLeft.rawValue
     @AppStorage("showNotesSidebar") private var showNotesSidebar = true
     @StateObject private var editor = EditorState()
-    @StateObject private var graphWindow = GraphWindowManager()
     @StateObject private var library = LibraryStore()
     @StateObject private var typeset = TypesetPreview()
     @AppStorage("kasterTypesetEngine") private var typesetEngine = TypesetEngine.typst.rawValue
@@ -566,11 +570,7 @@ struct ContentView: View {
                     Button("Settings…") { showSettings = true }
                 } label: { Image(systemName: "ellipsis.circle") }
                     .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("File")
-                Button(action: savePDFBesideCard) { Image(systemName: "doc.richtext") }
-                    .help("Save a PDF of this card next to its Markdown file (cards autosave)")
                 Button { _ = saveMarkdown() } label: { EmptyView() }.keyboardShortcut("s").frame(width: 0, height: 0).opacity(0).accessibilityHidden(true)
-                Button(action: printCards) { Image(systemName: "printer") }
-                    .keyboardShortcut("p").help("Print this card (⌘P)")
                 Picker("Print colors", selection: $printMode) {
                     ForEach(PrintColor.allCases) { mode in
                         Label(mode.title, systemImage: mode == .black ? "circle.lefthalf.filled" : "paintpalette").tag(mode.rawValue)
@@ -578,7 +578,9 @@ struct ContentView: View {
                 }
                 .pickerStyle(.menu).labelsHidden().fixedSize()
                 .help("Black only: pure black ink for everything, images in grayscale. Color: black text, purple links, color images. The preview shows what will print.")
-                saveAndPrintButton
+                Button(action: savePDFBesideCard) { Label("Save PDF", systemImage: "doc.richtext").labelStyle(.titleAndIcon) }
+                    .fixedSize().help("Save a PDF of this card next to its Markdown file")
+                printButton
             }
             .buttonStyle(.borderless)
             .font(.system(size: 14))
@@ -600,7 +602,7 @@ struct ContentView: View {
                                 }, onOpenParallel: { url in openLinkedTab(url) }, onReveal: revealSidebarNote, onDuplicate: duplicateSidebarNote,
                                 onRename: renameSidebarNote, onTrash: trashSidebarNote,
                                 onCopyPath: copySidebarPath, onMove: { url, destination in moveSidebarItem(url, to: destination) }, onNew: newCard, onChooseFolder: chooseNotesFolder,
-                                onGraph: showGraph, onSettings: { showSettings = true },
+                                onSettings: { showSettings = true },
                                 onPrint: { urls, label in printBatch(urls, label: label) },
                                 lastPrint: Date(timeIntervalSince1970: lastPrintTime),
                                 onNewFolder: createFolder, onRenameFolder: renameFolder,
@@ -868,7 +870,7 @@ struct ContentView: View {
         .onChange(of: habitDraft) { _ in if cardMode == "habits" { scheduleAutosave() } }
         .onChange(of: todoDraft) { _ in if cardMode == "todos" { scheduleAutosave() } }
         .onChange(of: outlineDraft) { _ in if cardMode == "outline" { scheduleAutosave() } }
-        .onDisappear { _ = flushExistingDraft(automatic: true); graphWindow.close() }
+        .onDisappear { _ = flushExistingDraft(automatic: true) }
         .onReceive(EditorWindowCoordinator.shared.$pendingURL) { incomingURL in
             guard let url = incomingURL else { return }
             if let clip = ResearchClip.from(url) { research = clip }
@@ -1395,7 +1397,7 @@ struct ContentView: View {
         panel.prompt = "Use This Folder"
         panel.message = "Choose where \(artifact.title) files are kept. You can change this later in Settings."
         if let root = vaultRoot {
-            let suggested = root.appendingPathComponent("Artifacts/\(artifact.folderName)", isDirectory: true)
+            let suggested = KasterArtifact.defaultFolder(artifact, in: root)
             try? KasterVault.ensureFolder(suggested)
             panel.directoryURL = suggested
         }
@@ -1639,7 +1641,7 @@ struct ContentView: View {
             ForEach(KasterArtifact.allCases) { artifact in
                 Button { openArtifact(artifact) } label: { Label(artifact.title, systemImage: artifact.systemImage) }
             }
-        } label: { Label("Artifacts", systemImage: "square.grid.2x2") }
+        } label: { Label("Workspaces", systemImage: "square.grid.2x2") }
             .menuStyle(.borderlessButton).fixedSize()
             .help("Habit trackers, to-do lists and debates — kept apart from the slip box")
     }
@@ -1648,7 +1650,7 @@ struct ContentView: View {
         var result: [KasterArtifact: URL] = [:]
         for artifact in KasterArtifact.allCases {
             let stored = artifactFolderPath(artifact)
-            result[artifact] = stored.isEmpty ? root.appendingPathComponent("Artifacts/\(artifact.folderName)", isDirectory: true) : URL(fileURLWithPath: stored, isDirectory: true)
+            result[artifact] = stored.isEmpty ? KasterArtifact.defaultFolder(artifact, in: root) : URL(fileURLWithPath: stored, isDirectory: true)
         }
         return result
     }
@@ -1804,15 +1806,15 @@ struct ContentView: View {
         }
     }
 
-    // Kept front and center: saving and printing a card is Kaster's core loop.
-    @ViewBuilder var saveAndPrintButton: some View {
-        let label = Label("Save & Print", systemImage: "printer.fill").labelStyle(.titleAndIcon)
+    // Printing is Kaster's core loop; cards autosave, so Print is the one prominent action.
+    @ViewBuilder var printButton: some View {
+        let label = Label("Print", systemImage: "printer.fill").labelStyle(.titleAndIcon)
         if storedAppearance == AppearancePreference.charcoal.rawValue {
-            Button { if saveMarkdown() { printCards() } } label: { label }.fixedSize().buttonStyle(CharcoalPrimaryButtonStyle())
+            Button(action: printCards) { label }.fixedSize().buttonStyle(CharcoalPrimaryButtonStyle()).keyboardShortcut("p").help("Print this card (⌘P)")
         } else if storedAppearance == AppearancePreference.slate.rawValue || storedAppearance == AppearancePreference.midnight.rawValue {
-            Button { if saveMarkdown() { printCards() } } label: { label }.fixedSize().buttonStyle(SlatePrimaryButtonStyle(midnight: storedAppearance == AppearancePreference.midnight.rawValue))
+            Button(action: printCards) { label }.fixedSize().buttonStyle(SlatePrimaryButtonStyle(midnight: storedAppearance == AppearancePreference.midnight.rawValue)).keyboardShortcut("p").help("Print this card (⌘P)")
         } else {
-            Button { if saveMarkdown() { printCards() } } label: { label }.fixedSize().buttonStyle(.borderedProminent).controlSize(.regular)
+            Button(action: printCards) { label }.fixedSize().buttonStyle(.borderedProminent).controlSize(.regular).keyboardShortcut("p").help("Print this card (⌘P)")
         }
     }
 
@@ -1872,26 +1874,6 @@ struct ContentView: View {
     func chooseNotesFolder() {
         let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true
         if panel.runModal() == .OK, let url = panel.url { notesFolder = url.path; status = "ID and notes folder: \(url.path)" }
-    }
-    func showGraph() {
-        let editorWindow = NSApplication.shared.keyWindow
-        graphWindow.show(currentURL: fileURL) { [weak editorWindow] url in
-            guard let editorWindow else { return }
-            guard research == nil && !showNotes && !showOutlineNotes && !showLibrary && !showDebateBrowser && !showSettings && !showZotero else {
-                graphError("Finish the open dialog before opening a card from the graph.")
-                return
-            }
-            let folderPath = notesFolder.isEmpty ? saveFolder : notesFolder
-            guard !folderPath.isEmpty, CardGraph.canOpen(url, in: URL(fileURLWithPath: folderPath, isDirectory: true)) else {
-                graphError("This card is no longer available in the selected notes folder. Refresh the graph.")
-                return
-            }
-            if loadFile(url) { editorWindow.makeKeyAndOrderFront(nil) }
-        }
-    }
-    func graphError(_ message: String) {
-        status = message
-        let alert = NSAlert(); alert.messageText = "Can't open card"; alert.informativeText = message; alert.addButton(withTitle: "OK"); alert.runModal()
     }
     func followLink(_ target: CardLinkTarget) {
         // A Zotero source clicked in the preview: open the cited page (matched to the PDF's page labels).

@@ -57,10 +57,17 @@ enum KasterMode: String, CaseIterable, Identifiable {
     }
 }
 
-/// To-Do, Habit and Debate stay available as artifacts, each in a folder you choose once.
+/// Workspaces (To-Do, Habit Tracker, Debate), each in a folder you choose once.
+/// (Called "artifacts" in code and older settings; the UI says "Workspaces".)
 enum KasterArtifact: String, CaseIterable, Identifiable {
     case habits, todos, debates
     var id: String { rawValue }
+    /// New vaults suggest Workspaces/<name>; a vault that already has Artifacts/<name> keeps it.
+    static func defaultFolder(_ artifact: KasterArtifact, in root: URL) -> URL {
+        let legacy = root.appendingPathComponent("Artifacts/\(artifact.folderName)", isDirectory: true)
+        if FileManager.default.fileExists(atPath: legacy.path) { return legacy }
+        return root.appendingPathComponent("Workspaces/\(artifact.folderName)", isDirectory: true)
+    }
     var title: String {
         switch self {
         case .habits: return "Habit Tracker"

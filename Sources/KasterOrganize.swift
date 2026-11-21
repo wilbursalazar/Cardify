@@ -19,7 +19,7 @@ struct MigrationSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Organize Vault into Kaster Folders").font(.title2.bold())
-            Text("Cards with a Luhmann ID move to Zettel/ as ID-Title; habit tables, to-do lists and debates move to their artifact folders; everything else becomes a Quick card. Titles come from each card's heading. Links between cards are updated. A zip backup of the whole folder is made first, next to it.")
+            Text("Cards with a Luhmann ID move to Zettel/ as ID-Title; habit tables, to-do lists and debates move to their workspace folders; everything else becomes a Quick card. Titles come from each card's heading. Links between cards are updated. A zip backup of the whole folder is made first, next to it.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if let plan {
                 if plan.steps.isEmpty {
