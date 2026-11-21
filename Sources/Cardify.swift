@@ -430,6 +430,7 @@ struct ContentView: View {
     @State private var branchSaveFolders: [String: URL] = [:]
     @State private var showZotero = false
     @State private var showRegister = false
+    @State private var showBibliography = false
     @State private var showNotes = false
     @State private var showOutlineNotes = false
     @State private var outlineLinkCompletion: ((String) -> Void)?
@@ -614,7 +615,8 @@ struct ContentView: View {
                                 lastPrint: Date(timeIntervalSince1970: lastPrintTime),
                                 onNewFolder: createFolder, onRenameFolder: renameFolder,
                                 onNewCardIn: newCardHere, onNewFolderInFinder: makeFolderInFinder, onReorder: saveManualOrder,
-                                onOpenRegister: { showRegister = true }, onAddToRegister: { url in addToRegister(url) },
+                                onOpenRegister: { showRegister = true }, onOpenBibliography: { showBibliography = true },
+                                onAddToRegister: { url in addToRegister(url) },
                                 showLibrary: showLibraryPane, showList: showNotesSidebar)
                 }
                 WorkspaceSplitView(arrangement: WorkspaceArrangement.stored(storedWorkspaceArrangement), editor: {
@@ -636,6 +638,7 @@ struct ContentView: View {
                         cardTypeControls
                     }
                     .controlSize(.small)
+                    sourceChips
                     if cardMode == "markdown" && showDebate {
                         DebatePanel(text: $text, showBrowser: $showDebateBrowser, currentURL: fileURL, onOpen: { url in loadFile(url) }, onNew: { draft, parent in
                             guard confirmReplaceDraft() else { return false }
@@ -924,6 +927,9 @@ struct ContentView: View {
         .sheet(isPresented: $showZotero) {
             ZoteroPicker { pick in insertFootnoteCitation(pick) }
         }
+        .sheet(isPresented: $showBibliography) {
+            BibliographyView(cards: library.index.cards, onOpen: { url in _ = loadFile(url) }, onPrint: printBibliography)
+        }
     }
     // Luhmann-style card identity, kept on one compact row above the writing area.
     var researchIDControls: some View {
@@ -1124,7 +1130,7 @@ struct ContentView: View {
         guard let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
         let vault = documents.appendingPathComponent("Kaster", isDirectory: true)
         do {
-            for mode in KasterMode.allCases { try KasterVault.ensureFolder(vault.appendingPathComponent(mode.folder, isDirectory: true)) }
+            for mode in KasterMode.creatable { try KasterVault.ensureFolder(vault.appendingPathComponent(mode.folder, isDirectory: true)) }
             notesFolder = vault.path
             if !saveFolder.isEmpty && !FileManager.default.fileExists(atPath: saveFolder) { saveFolder = vault.path }
             sidebarRefreshToken = UUID()
@@ -1482,7 +1488,7 @@ struct ContentView: View {
     func modePicker(labels: Bool) -> some View {
         let accent = AppearancePreference.accent(for: storedAppearance) ?? AppearancePreference.kasterPurple
         return HStack(spacing: 0) {
-            ForEach(KasterMode.allCases) { mode in
+            ForEach(KasterMode.creatable) { mode in
                 let selected = mode == kasterMode
                 Button { changeMode(mode) } label: {
                     HStack(spacing: 4) {
@@ -1515,11 +1521,8 @@ struct ContentView: View {
         }
         switch kasterMode {
         case .zettel: researchIDRow(labels: labels)
-        case .research: sourceControls(labels: labels)
         case .quick: promoteMenu
-        case .bibliography:
-            let citing = library.backlinks(for: fileURL).filter { library.index.mode(of: $0) == .research }.count
-            Text("Cited by \(citing)").font(.caption).foregroundStyle(.secondary).help("Research cards whose Source links here")
+        case .research, .bibliography: EmptyView()   // Sources are in the row below.
         }
     }
 
@@ -1540,59 +1543,95 @@ struct ContentView: View {
             .help(fileURL == nil ? "Type a title first — the card saves itself, then it can be promoted" : "Turn this Quick card into a Zettel or Research card")
     }
 
-    @ViewBuilder func sourceControls(labels: Bool) -> some View {
-        if let zotero = ZoteroSource.read(text) {
-            zoteroSourceControls(zotero, labels: labels)
-        } else {
-            let source = KasterVault.source(in: text)
-            Menu {
-                Button("Choose from Zotero…") { showZotero = true }
-                Divider()
-                let bibliography = library.index.cards(in: .bibliography)
-                ForEach(bibliography) { card in
-                    Button(card.title) { setSource(link: card.url.deletingPathExtension().lastPathComponent, page: source.page) }
-                }
-                if !bibliography.isEmpty { Divider() }
-                Button("New Bibliography Card…") { createBibliographyCard(page: source.page) }
-                if source.link != nil { Button("Remove Source") { setSource(link: nil, page: source.page) } }
-            } label: {
-                Label(source.link ?? "Source…", systemImage: "text.book.closed").lineLimit(1)
+    /// One chip per footnote source, under the card-type row: on Research cards always, and on
+    /// any other card that cites Zotero.
+    @ViewBuilder var sourceChips: some View {
+        if cardMode == "markdown" && !showDebate {
+            let sources = FootnoteSources.parse(text)
+            let legacy = FootnoteSources.legacy(in: text)
+            if kasterMode == .research || legacy != nil || sources.contains(where: { $0.zotero != nil }) {
+                SourceChipsRow(sources: sources, alsoCited: { otherCardsCiting($0) }, onSetPage: setFootnotePage, onOpen: openFootnoteSource,
+                               onJump: { editor.reveal($0.range) }, onRemove: removeFootnote, onOpenCard: { _ = loadFile($0) },
+                               onAdd: { showZotero = true }, legacy: legacy,
+                               onOpenLegacy: { if let legacy { openZoteroPage(legacy.source, page: legacy.page) } },
+                               onConvertLegacy: convertLegacySource)
+                    .controlSize(.small)
             }
-            .menuStyle(.borderlessButton).fixedSize()
-            .help("Where this quotation comes from: a Zotero item, or a hand-made Bibliography card")
-            TextField("p.", text: Binding(get: { source.page ?? "" }, set: { setSource(link: KasterVault.source(in: text).link, page: $0) }))
-                .frame(width: 48).help("Page or location").accessibilityLabel("Page")
         }
     }
 
-    /// A Research card citing a Zotero item inline.
-    @ViewBuilder func zoteroSourceControls(_ zotero: ZoteroSource, labels: Bool) -> some View {
-        let page = ZoteroSource.page(in: text, cite: zotero.cite)
-        let others = library.index.cards(citingZotero: zotero.key, library: zotero.library).filter { card in fileURL.map { library.card(for: $0)?.path != card.path } ?? true }
-        Menu {
-            Button("Change Zotero Source…") { showZotero = true }
-            if let url = zotero.selectURL { Button("Show in Zotero") { NSWorkspace.shared.open(url) } }
-            if !others.isEmpty {
-                Menu("Also Cited in \(others.count) Card\(others.count == 1 ? "" : "s")") {
-                    ForEach(others.prefix(100)) { card in Button(card.title) { loadFile(card.url) } }
-                }
-            }
-            Divider()
-            Button("Remove Source") { text = ZoteroSource.apply(nil, page: nil, to: text) }
-        } label: {
-            Label(zotero.cite.replacingOccurrences(of: "*", with: ""), systemImage: "books.vertical").lineLimit(1)
+    func otherCardsCiting(_ zotero: ZoteroSource) -> [LibraryCard] {
+        let current = fileURL.flatMap { library.card(for: $0)?.path }
+        return library.index.cards(citingZotero: zotero.key, library: zotero.library).filter { $0.path != current }
+    }
+
+    /// Applies footnote edits through the editor, so ⌘Z undoes them and the cursor stays put.
+    func applyFootnoteEdits(_ edits: [FootnoteSources.Edit]) {
+        guard !edits.isEmpty else { return }
+        if !editor.replace(edits, expected: text) { text = FootnoteSources.apply(edits, to: text) }
+    }
+
+    /// A page typed in a chip: rewrites that footnote. A footnote without its PDF asks Zotero for
+    /// it, so the page becomes a link that opens the PDF there.
+    func setFootnotePage(_ source: FootnoteSource, _ page: String) {
+        guard let edit = FootnoteSources.settingPage(page, label: source.label, in: text) else { return }
+        applyFootnoteEdits([edit])
+        status = page.isEmpty ? "Removed the page from footnote \(source.label)." : "Footnote \(source.label): page \(page)."
+        guard let zotero = source.zotero, zotero.pdf == nil, ZoteroPageOpener.firstPage(page) != nil else { return }
+        Task { @MainActor in
+            guard let pdf = await zoteroAttachment(for: zotero),
+                  let link = FootnoteSources.linkingPDF(pdf, label: source.label, key: zotero.key, in: text) else { return }
+            applyFootnoteEdits([link])
         }
-        .menuStyle(.borderlessButton).frame(maxWidth: 260).fixedSize(horizontal: false, vertical: true)
-        .help("Cited from Zotero: " + ZoteroSource.line(cite: zotero.cite, page: page))
-        TextField("p.", text: Binding(get: { page ?? "" }, set: { newPage in
-            guard let current = ZoteroSource.read(text) else { return }
-            text = ZoteroSource.apply(current, page: newPage, to: text)
-        }))
-            .frame(width: 48).help("Page or location").accessibilityLabel("Page")
-        Button { openZoteroPage(zotero, page: page) } label: { Image(systemName: zotero.pdf == nil || page.flatMap(ZoteroPageOpener.firstPage) == nil ? "arrow.up.forward.square" : "book") }
-            .buttonStyle(.borderless)
-            .help(zotero.pdf == nil ? "Show this source in Zotero (it has no PDF)" : page.flatMap(ZoteroPageOpener.firstPage).map { "Open page \($0) of the PDF in Zotero" } ?? "Open the PDF in Zotero")
-            .accessibilityLabel("Open in Zotero")
+    }
+
+    /// The book button: opens the cited page in Zotero's reader, or shows the item.
+    func openFootnoteSource(_ source: FootnoteSource) {
+        guard var zotero = source.zotero else { return }
+        guard zotero.pdf == nil, let page = source.page, ZoteroPageOpener.firstPage(page) != nil else {
+            openZoteroPage(zotero, page: source.page); return
+        }
+        Task { @MainActor in
+            if let pdf = await zoteroAttachment(for: zotero) {
+                zotero.pdf = pdf
+                if let link = FootnoteSources.linkingPDF(pdf, label: source.label, key: zotero.key, in: text) { applyFootnoteEdits([link]) }
+            }
+            openZoteroPage(zotero, page: page)
+        }
+    }
+
+    /// The item's PDF (or EPUB) attachment key, from the running Zotero.
+    func zoteroAttachment(for zotero: ZoteroSource) async -> String? {
+        var request = ZoteroSearchAPI.childrenRequest(library: zotero.zoteroLibrary, key: zotero.key)
+        request.timeoutInterval = 4
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let children = try? JSONDecoder().decode([ZoteroChild].self, from: data) else { return nil }
+        return ZoteroSearchAPI.readableAttachment(in: children)
+    }
+
+    /// An older Research card's Source line → a footnote on its quotation (one undoable edit).
+    func convertLegacySource() {
+        guard let converted = FootnoteSources.convertingLegacy(text) else { return }
+        applyFootnoteEdits([(NSRange(location: 0, length: (text as NSString).length), converted.text)])
+        if text == converted.text { editor.reveal(converted.marker) }
+        status = "The source is now footnote \((converted.text as NSString).substring(with: converted.marker).dropFirst(2).dropLast())."
+    }
+
+    func removeFootnote(_ source: FootnoteSource) {
+        applyFootnoteEdits(FootnoteSources.removing(label: source.label, in: text))
+        status = "Removed footnote \(source.label)."
+    }
+
+    func printBibliography(_ entries: [String]) {
+        let pages = FootnoteBibliography.printCards(entries)
+        guard !pages.isEmpty else { return }
+        let cards = pages.map { KasterTypesetter.prepare($0, cardURL: nil, links: false) }
+        let layout = TypesetLayout.card(portrait: portrait, fontSize: fontSize, dotGrid: dotGrid)
+        guard KasterTypesetter.isAvailable(engine), case .success(let data) = KasterTypesetter.render(cards, layout: layout, engine: engine, color: PrintColor.stored(printMode)) else {
+            status = "Could not typeset the bibliography."; return
+        }
+        if runPrint(data) { status = "Sent \(pages.count) bibliography card\(pages.count == 1 ? "" : "s") to the printer." }
     }
 
     /// A Zotero source as a footnote: [^n] at the cursor, the citation at the bottom of the card.
@@ -1620,41 +1659,6 @@ struct ContentView: View {
     func openZoteroPage(_ zotero: ZoteroSource, page: String?) {
         guard let url = ZoteroPageOpener.url(for: zotero, page: page, pdfFile: ZoteroPageOpener.localFile(for: zotero)) else { return }
         if !NSWorkspace.shared.open(url) { status = "Could not open Zotero." }
-    }
-
-    func setSource(link: String?, page: String?) {
-        text = KasterVault.setSource(.init(link: link, page: page), in: text)
-    }
-
-    func createBibliographyCard(page: String?) {
-        guard let root = vaultRoot else { status = "Choose a notes folder first."; return }
-        let titleField = NSTextField(string: ""); titleField.placeholderString = "Title"
-        let authorField = NSTextField(string: ""); authorField.placeholderString = "Author"
-        let yearField = NSTextField(string: ""); yearField.placeholderString = "Year"
-        let stack = NSStackView(views: [titleField, authorField, yearField])
-        stack.orientation = .vertical; stack.spacing = 6
-        stack.frame = NSRect(x: 0, y: 0, width: 300, height: 84)
-        for field in [titleField, authorField, yearField] { field.frame.size.width = 300 }
-        let alert = NSAlert()
-        alert.messageText = "New Bibliography Card"
-        alert.informativeText = "One card per source. Research cards that cite it are listed on it automatically."
-        alert.accessoryView = stack
-        alert.addButton(withTitle: "Create"); alert.addButton(withTitle: "Cancel")
-        alert.window.initialFirstResponder = titleField
-        guard alert.runModal() == .alertFirstButtonReturn,
-              let name = KasterVault.filename(mode: .bibliography, id: nil, title: titleField.stringValue) else { return }
-        do {
-            let folder = root.appendingPathComponent(KasterMode.bibliography.folder, isDirectory: true)
-            try KasterVault.ensureFolder(folder)
-            let url = KasterVault.uniqueURL(in: folder, filename: name)
-            let body = KasterFrontmatter.ensuringUID(in: KasterVault.bibliographyMarkdown(title: KasterVault.cleanTitle(titleField.stringValue), author: authorField.stringValue, year: yearField.stringValue))
-            try Data(body.utf8).write(to: url, options: .withoutOverwriting)
-            setSource(link: url.deletingPathExtension().lastPathComponent, page: page)
-            sidebarRefreshToken = UUID()
-            status = "Created \(KasterMode.bibliography.folder)/\(url.lastPathComponent)."
-        } catch {
-            status = "Could not create the Bibliography card: \(error.localizedDescription)"
-        }
     }
 
     var artifactsMenu: some View {
@@ -1706,9 +1710,7 @@ struct ContentView: View {
     var engine: TypesetEngine { TypesetEngine.stored(typesetEngine) }
     var typesetRequest: TypesetPreview.Request? {
         guard let source = typesetSource, KasterTypesetter.isAvailable(engine) else { return nil }
-        // The preview makes a Zotero Source line clickable; printing uses the plain text.
-        let previewText = activeLinkedTab == nil && cardMode == "markdown" ? ZoteroSource.previewLinked(source) : source
-        return .init(text: previewText, cardURL: activeLinkedTab?.url ?? fileURL, portrait: portrait, fontSize: fontSize, dotGrid: dotGrid,
+        return .init(text: source, cardURL: activeLinkedTab?.url ?? fileURL, portrait: portrait, fontSize: fontSize, dotGrid: dotGrid,
                      engine: engine, wantsDocument: previewStyle == PreviewStyle.document.rawValue, color: PrintColor.stored(printMode), themes: themesEnabled)
     }
     /// Diagnostics only: `KASTER_TYPING_BENCH=/path/card.md` opens that card, types into it like a
@@ -1899,9 +1901,6 @@ struct ContentView: View {
     func followLink(_ target: CardLinkTarget) {
         // A Zotero source clicked in the preview: open the cited page (matched to the PDF's page labels).
         if case .url(let raw) = target, raw.lowercased().hasPrefix("zotero://") {
-            if let zotero = ZoteroSource.read(currentDraftContents()), let page = ZoteroSource.linkedPage(raw), raw.contains(zotero.pdf ?? "\u{0}") {
-                openZoteroPage(zotero, page: page); return
-            }
             // Footnote links: book page → PDF page via the PDF's own page labels.
             if let url = ZoteroPageOpener.resolve(raw), NSWorkspace.shared.open(url) { status = "Opened in Zotero."; return }
         }

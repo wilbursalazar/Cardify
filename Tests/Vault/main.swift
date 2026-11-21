@@ -28,13 +28,10 @@ import Foundation
   precondition(rewritten == "See [[1-Eco's Writing System]], [[1-Eco's Writing System|Eco]], [[1-Eco's Writing System#Steps]] and [[Other]].", rewritten)
   precondition(KasterVault.rewriteLinks(in: "[[Other]]", from: ["Gone"], to: "New") == nil)
 
-  // Research source line
-  var research = KasterMode.research.template
-  research = KasterVault.setSource(.init(link: "The Name of the Rose", page: "42"), in: research)
-  precondition(research.contains("Source: [[The Name of the Rose]], p. 42"), research)
-  precondition(KasterVault.source(in: research) == .init(link: "The Name of the Rose", page: "42"))
-  research = KasterVault.setSource(.init(link: "How to Write a Thesis", page: nil), in: research)
-  precondition(research.components(separatedBy: "Source:").count == 2 && research.contains("Source: [[How to Write a Thesis]]\n"), "Source line is replaced, not duplicated")
+  // Card types: Bibliography is no longer offered; sources are footnotes.
+  precondition(KasterMode.creatable == [.research, .zettel, .quick])
+  precondition(KasterMode.stored("bibliography") == .zettel && KasterMode.stored("research") == .research && KasterMode.stored("junk") == .zettel)
+  precondition(!KasterMode.research.template.contains("Source:"), "Research cards cite sources as footnotes")
 
   // Mode inference
   let root = FileManager.default.temporaryDirectory.appendingPathComponent("kaster-vault-\(UUID().uuidString)")
@@ -42,6 +39,7 @@ import Foundation
   precondition(KasterMode.infer(url: root.appendingPathComponent("Zettel/1-A.md"), root: root, text: "") == .zettel)
   precondition(KasterMode.infer(url: root.appendingPathComponent("Loose.md"), root: root, text: "---\ncard_id: \"3a\"\n---\n# A") == .zettel)
   precondition(KasterMode.infer(url: root.appendingPathComponent("Loose.md"), root: root, text: "# A") == .quick)
+  precondition(KasterMode.infer(url: root.appendingPathComponent("Bibliography/Old.md"), root: root, text: "# Old") == .bibliography, "Existing Bibliography cards still open in place")
 
   // Migration on a vault shaped like a real Cardify folder
   let fm = FileManager.default

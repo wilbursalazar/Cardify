@@ -72,6 +72,34 @@ final class EditorState: ObservableObject {
         view.scrollRangeToVisible(pending.range)
         view.window?.makeFirstResponder(view)
     }
+    /// Replaces parts of the text as one undoable edit, keeping the cursor where it was.
+    /// Returns false (changing nothing) if the view isn't showing `expected`.
+    @discardableResult func replace(_ edits: [(range: NSRange, replacement: String)], expected: String) -> Bool {
+        guard let view, view.string == expected, !edits.isEmpty else { return false }
+        let length = (view.string as NSString).length
+        guard edits.allSatisfy({ $0.range.location != NSNotFound && NSMaxRange($0.range) <= length }) else { return false }
+        var selection = view.selectedRange()
+        view.undoManager?.beginUndoGrouping()
+        for edit in edits.sorted(by: { $0.range.location > $1.range.location }) {
+            guard view.shouldChangeText(in: edit.range, replacementString: edit.replacement) else { continue }
+            view.textStorage?.replaceCharacters(in: edit.range, with: edit.replacement)
+            view.didChangeText()
+            let delta = (edit.replacement as NSString).length - edit.range.length
+            if selection.location >= NSMaxRange(edit.range) { selection.location += delta }
+            else if selection.location > edit.range.location { selection = NSRange(location: edit.range.location, length: 0) }
+        }
+        view.undoManager?.endUndoGrouping()
+        view.setSelectedRange(NSRange(location: min(selection.location, (view.string as NSString).length),
+                                      length: min(selection.length, (view.string as NSString).length - min(selection.location, (view.string as NSString).length))))
+        return true
+    }
+    /// Selects a range, scrolls to it and puts the cursor in the editor.
+    func reveal(_ range: NSRange) {
+        guard let view, NSMaxRange(range) <= (view.string as NSString).length else { return }
+        view.setSelectedRange(range)
+        view.scrollRangeToVisible(range)
+        view.window?.makeFirstResponder(view)
+    }
     func insert(_ content: String) {
         guard let view else { return }
         view.insertText(content, replacementRange: view.selectedRange())

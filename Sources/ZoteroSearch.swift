@@ -63,6 +63,12 @@ struct ZoteroChild: Decodable {
     let data: Details
 }
 
+/// One item from an `include=bib` request: its formatted bibliography entry as HTML.
+struct ZoteroBibEntry: Decodable {
+    let key: String
+    let bib: String?
+}
+
 enum ZoteroSearchAPI {
     static func request(_ path: String, _ params: [URLQueryItem] = [], timeout: TimeInterval = 15) -> URLRequest {
         var components = URLComponents(string: "http://127.0.0.1:23119/api/" + path)!
@@ -99,6 +105,12 @@ enum ZoteroSearchAPI {
         request.setValue("3", forHTTPHeaderField: "Zotero-API-Version")
         request.timeoutInterval = 15
         return request
+    }
+    /// Full bibliography entries (formatted HTML) for up to 50 items of one library.
+    static func bibliographyRequest(library: ZoteroLibrary, keys: [String], style: String) -> URLRequest {
+        request("\(library.prefix)/items", [URLQueryItem(name: "itemKey", value: keys.prefix(50).joined(separator: ",")),
+                                            URLQueryItem(name: "include", value: "bib"), URLQueryItem(name: "style", value: style),
+                                            URLQueryItem(name: "limit", value: "50")], timeout: 10)
     }
     static func groupsRequest() -> URLRequest {
         var request = URLRequest(url: URL(string: "http://127.0.0.1:23119/api/users/0/groups")!)
@@ -218,7 +230,7 @@ struct ZoteroPicker: View {
            (response as? HTTPURLResponse)?.statusCode == 200, let children = try? JSONDecoder().decode([ZoteroChild].self, from: data) {
             pdf = ZoteroSearchAPI.readableAttachment(in: children)
         }
-        let cite = item.citation.map(ZoteroCitation.markdown(fromHTML:)).flatMap { $0.isEmpty ? nil : $0 } ?? item.description
+        let cite = item.citation.map { ZoteroCitation.markdown(fromHTML: $0) }.flatMap { $0.isEmpty ? nil : $0 } ?? item.description
         adding = false
         onPick(ZoteroPick(source: ZoteroSource(key: item.key, library: library.id, pdf: pdf, cite: cite), location: location))
         dismiss()
@@ -257,150 +269,42 @@ struct ZoteroPicker: View {
     }
 }
 
-// MARK: Inline citations (Zotero is the system of record; no Bibliography card is created)
+// MARK: Sources (Zotero is the system of record; citations live in each card's footnotes)
 
-/// A Research card's Zotero source, kept in its frontmatter:
-/// `zotero` (item key), `zotero-library` (group ID; absent for My Library),
-/// `zotero-pdf` (attachment key, when the item has a PDF/EPUB) and `zotero-cite`
-/// (the formatted citation without a page). The visible line is "Source: <cite>, <page>."
+/// A Zotero item as cited in a footnote: item key, library ("personal" or a group ID),
+/// the PDF/EPUB attachment key when known, and the short citation without a page.
 struct ZoteroSource: Equatable {
     var key: String
     var library: String = "personal"
     var pdf: String?
     var cite: String
 
-    private static let fields = ["zotero", "zotero-library", "zotero-pdf", "zotero-cite"]
-
-    static func read(_ text: String) -> ZoteroSource? {
-        guard let key = KasterFrontmatter.value("zotero", in: text), !key.isEmpty else { return nil }
-        return ZoteroSource(key: key, library: KasterFrontmatter.value("zotero-library", in: text) ?? "personal",
-                            pdf: KasterFrontmatter.value("zotero-pdf", in: text),
-                            cite: unescape(KasterFrontmatter.value("zotero-cite", in: text) ?? ""))
-    }
-
     var itemPath: String { library == "personal" ? "library/items/\(key)" : "groups/\(library)/items/\(key)" }
     var selectURL: URL? { URL(string: "zotero://select/\(itemPath)") }
-
-    /// The page as written after the citation on the Source line ("42", "42–44", "ch. 4").
-    static func page(in text: String, cite: String) -> String? {
-        guard let line = text.components(separatedBy: "\n").last(where: { $0.hasPrefix("Source:") }) else { return nil }
-        var rest = String(line.dropFirst("Source:".count)).trimmingCharacters(in: .whitespaces)
-        let cleanCite = cite.trimmingCharacters(in: CharacterSet(charactersIn: ". "))
-        // "(Lim, n.d., 42)." keeps the page inside the parentheses; "Lim, *Title*, 42." after the citation.
-        let parenthetical = cleanCite.hasPrefix("(") && cleanCite.hasSuffix(")")
-        var base = parenthetical ? String(cleanCite.dropLast()) : cleanCite
-        var separator = ", "
-        for quote in ["\u{201D}", "\""] where !parenthetical && (cleanCite.hasSuffix("." + quote) || cleanCite.hasSuffix("," + quote)) {
-            base = String(cleanCite.dropLast(2)) + "," + quote; separator = " "
-        }
-        guard rest.hasPrefix(base + separator) else { return nil }
-        rest = String(rest.dropFirst(base.count + separator.count))
-        if rest.hasSuffix(".") { rest.removeLast() }
-        if parenthetical { guard rest.hasSuffix(")") else { return nil }; rest.removeLast() }
-        let page = rest.trimmingCharacters(in: .whitespaces)
-        return page.isEmpty ? nil : page
-    }
-
-    /// "Lim, *Title*, 42." or "(Lim, n.d., 42)."; without a page, just the citation.
-    static func line(cite: String, page: String?) -> String {
-        let page = page?.trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: ".")) ?? ""
-        let cleanCite = cite.trimmingCharacters(in: CharacterSet(charactersIn: ". "))
-        if cleanCite.hasPrefix("("), cleanCite.hasSuffix(")") {
-            return page.isEmpty ? cleanCite + "." : String(cleanCite.dropLast()) + ", " + page + ")."
-        }
-        // Chicago puts the comma inside a closing quotation mark: “Title,” 42.
-        for quote in ["\u{201D}", "\""] where cleanCite.hasSuffix("." + quote) || cleanCite.hasSuffix("," + quote) {
-            let stem = String(cleanCite.dropLast(2))
-            return page.isEmpty ? stem + "." + quote : stem + "," + quote + " " + page + "."
-        }
-        return page.isEmpty ? cleanCite + "." : cleanCite + ", " + page + "."
-    }
-
-    /// Writes (or with nil, removes) the source: frontmatter fields plus the Source line.
-    static func apply(_ source: ZoteroSource?, page: String?, to text: String) -> String {
-        var result = text
-        if let source {
-            let values: [String: String?] = ["zotero": source.key, "zotero-library": source.library == "personal" ? nil : source.library,
-                                             "zotero-pdf": source.pdf, "zotero-cite": quoted(source.cite)]
-            for field in fields {
-                if let updated = KasterFrontmatter.setting(field, to: values[field] ?? nil, in: result) { result = updated }
-            }
-        } else {
-            for field in fields { if let updated = KasterFrontmatter.setting(field, to: nil, in: result) { result = updated } }
-        }
-        let cite = source.map { line(cite: $0.cite, page: page) }
-        var lines = result.components(separatedBy: "\n")
-        if let index = lines.lastIndex(where: { $0.hasPrefix("Source:") }) {
-            // The old picker added a "Zotero: [Open source](…)" line under its Source line.
-            if index + 1 < lines.count, lines[index + 1].hasPrefix("Zotero: [Open source](zotero://") { lines.remove(at: index + 1) }
-            if let cite { lines[index] = "Source: " + cite } else { lines.remove(at: index) }
-            return lines.joined(separator: "\n")
-        }
-        guard let cite else { return result }
-        return result.trimmingCharacters(in: .newlines) + "\n\nSource: " + cite + "\n"
-    }
-
-    /// Reverses `quoted` (the frontmatter reader already removed the outer quotes).
-    static func unescape(_ value: String) -> String {
-        var result = "", escaping = false
-        for character in value {
-            if escaping { result.append(character); escaping = false }
-            else if character == "\\" { escaping = true }
-            else { result.append(character) }
-        }
-        return result
-    }
-
-    /// For the on-screen preview only: makes the Source line clickable. The page opens the PDF at
-    /// that page; without a page (or a PDF) the citation selects the item in Zotero. Printing
-    /// never sees these links.
-    static func previewLinked(_ text: String) -> String {
-        guard let source = read(text) else { return text }
-        var lines = text.components(separatedBy: "\n")
-        guard let index = lines.lastIndex(where: { $0.hasPrefix("Source:") }) else { return text }
-        let page = page(in: text, cite: source.cite)
-        func link(_ label: String, _ url: String) -> String {
-            guard let action = CardPreviewLinks.action(for: .url(url)) else { return label }
-            return "[\(label)](\(action.absoluteString))"
-        }
-        if let page, let pdf = source.pdf, ZoteroPageOpener.firstPage(page) != nil,
-           let encoded = page.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
-            let attachment = source.library == "personal" ? "library/items/\(pdf)" : "groups/\(source.library)/items/\(pdf)"
-            let full = "Source: " + line(cite: source.cite, page: page)
-            guard lines[index] == full, let range = full.range(of: page, options: .backwards) else { return text }
-            lines[index] = String(full[..<range.lowerBound]) + link(page, "zotero://open-pdf/\(attachment)?page=\(encoded)") + String(full[range.upperBound...])
-        } else if let select = source.selectURL {
-            let body = String(lines[index].dropFirst("Source: ".count))
-            lines[index] = "Source: " + link(body.replacingOccurrences(of: "[", with: "\\[").replacingOccurrences(of: "]", with: "\\]"), select.absoluteString)
-        }
-        return lines.joined(separator: "\n")
-    }
-
-    /// The printed page a preview link asked for (`zotero://open-pdf/…?page=42`).
-    static func linkedPage(_ raw: String) -> String? {
-        guard raw.lowercased().hasPrefix("zotero://open-pdf/"), let components = URLComponents(string: raw) else { return nil }
-        return components.queryItems?.first { $0.name == "page" }?.value
-    }
-
-    /// YAML-safe double-quoted value.
-    static func quoted(_ value: String) -> String {
-        "\"" + value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
-    }
+    func attachmentPath(_ attachment: String) -> String { library == "personal" ? "library/items/\(attachment)" : "groups/\(library)/items/\(attachment)" }
+    var zoteroLibrary: ZoteroLibrary { library == "personal" ? .personal : ZoteroLibrary(id: library, name: library) }
 }
 
 enum ZoteroCitation {
     /// Zotero's HTML citation ("<ol><li>Lim, <i>Title</i></li></ol>") as Markdown ("Lim, *Title*").
-    static func markdown(fromHTML html: String) -> String {
-        var text = html
+    /// `trimPeriod` drops the final period (citations get a page after them); bibliography entries keep it.
+    static func markdown(fromHTML html: String, trimPeriod: Bool = true) -> String {
+        var text = html.replacingOccurrences(of: "</div>", with: " ")
         for (tag, mark) in [("i", "*"), ("em", "*"), ("b", "**"), ("strong", "**")] {
             text = text.replacingOccurrences(of: "<\(tag)>", with: mark).replacingOccurrences(of: "</\(tag)>", with: mark)
         }
         text = text.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
-        for (entity, char) in [("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"), ("&quot;", "\""), ("&#39;", "'"), ("&nbsp;", " ")] {
+        for (entity, char) in [("&lt;", "<"), ("&gt;", ">"), ("&quot;", "\""), ("&#39;", "'"), ("&nbsp;", " ")] {
             text = text.replacingOccurrences(of: entity, with: char)
         }
+        // Numeric entities (CSL writes "&#38;" for "&"); &amp; last so "&amp;lt;" stays literal.
+        while let range = text.range(of: "&#[0-9]{1,6};", options: .regularExpression) {
+            let number = UInt32(text[range].dropFirst(2).dropLast()) ?? 0
+            text.replaceSubrange(range, with: Unicode.Scalar(number).map { String(Character($0)) } ?? "")
+        }
+        text = text.replacingOccurrences(of: "&amp;", with: "&")
         text = text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespaces)
-        return text.trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        return trimPeriod ? text.trimmingCharacters(in: CharacterSet(charactersIn: ".")) : text
     }
 }
 
@@ -465,7 +369,7 @@ enum ZoteroPageOpener {
 
     static func url(for source: ZoteroSource, page: String?, pdfFile: URL?) -> URL? {
         guard let pdf = source.pdf, let page = page.flatMap(firstPage) else { return source.selectURL }
-        let attachmentPath = source.library == "personal" ? "library/items/\(pdf)" : "groups/\(source.library)/items/\(pdf)"
+        let attachmentPath = source.attachmentPath(pdf)
         var number = Int(page)
         if let pdfFile, let document = PDFDocument(url: pdfFile), let index = pageIndex(label: page, in: document) { number = index + 1 }
         guard let number else { return URL(string: "zotero://open-pdf/\(attachmentPath)") }
@@ -507,11 +411,16 @@ enum ZoteroFootnote {
         let pdfURL: String? = {
             guard let pdf = source.pdf, !page.isEmpty, ZoteroPageOpener.firstPage(page) != nil,
                   let encoded = page.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return nil }
-            let path = source.library == "personal" ? "library/items/\(pdf)" : "groups/\(source.library)/items/\(pdf)"
-            return "zotero://open-pdf/\(path)?page=\(encoded)"
+            return "zotero://open-pdf/\(source.attachmentPath(pdf))?page=\(encoded)"
         }()
         let pageText = pdfURL.map { "[\(escapeLabel(page))](\($0))" } ?? escapeLabel(page)
-        if page.isEmpty { return "[\(escapeLabel(cite))](\(select))." }
+        if page.isEmpty {
+            // A citation ending in a quoted title closes with the period inside: “Title.”
+            for quote in ["\u{201D}", "\""] where cite.hasSuffix("." + quote) || cite.hasSuffix("," + quote) {
+                return "[\(escapeLabel(String(cite.dropLast(2)) + "." + quote))](\(select))"
+            }
+            return "[\(escapeLabel(cite))](\(select))."
+        }
         // Author-date styles: "(Lim, n.d., 42)" — the page goes inside the parentheses.
         if cite.hasPrefix("("), cite.hasSuffix(")") {
             return "([\(escapeLabel(String(cite.dropFirst().dropLast())))](\(select)), \(pageText))."

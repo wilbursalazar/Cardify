@@ -54,6 +54,7 @@ struct CardSidebar: View {
     let onNewFolderInFinder: (String) -> Void
     let onReorder: ([URL]) -> Void
     var onOpenRegister: (() -> Void)? = nil
+    var onOpenBibliography: (() -> Void)? = nil
     var onAddToRegister: ((URL) -> Void)? = nil
     var showLibrary = true
     var showList = true
@@ -122,6 +123,10 @@ struct CardSidebar: View {
                     actionRow("Search", systemImage: "magnifyingglass", shortcut: "⌘F") { startSearch() }
                         .keyboardShortcut("f", modifiers: .command)
                     if let onOpenRegister { actionRow("Keyword Register", systemImage: "character.book.closed", action: onOpenRegister) }
+                    if let onOpenBibliography {
+                        actionRow("Bibliography", systemImage: "text.book.closed", action: onOpenBibliography)
+                            .help("Every source cited in your cards' footnotes, with the cards that cite it")
+                    }
                     if themesEnabled {
                         sectionHeading("Themes")
                             .padding(.horizontal, 10).padding(.top, 16).padding(.bottom, 4)

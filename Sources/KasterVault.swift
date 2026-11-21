@@ -25,10 +25,10 @@ enum KasterMode: String, CaseIterable, Identifiable {
     }
     var summary: String {
         switch self {
-        case .research: return "Eco reading card: a quotation, your response, and its source"
+        case .research: return "Eco reading card: a quotation, your response, and its sources as footnotes"
         case .zettel: return "Luhmann card: one idea with a sequence ID like 21/3a"
         case .quick: return "Just a title — capture now, promote later"
-        case .bibliography: return "One card per source; lists every Research card citing it"
+        case .bibliography: return "Older Kaster card type; sources now live in footnotes and the sidebar Bibliography"
         }
     }
     var usesID: Bool { self == .zettel }
@@ -37,14 +37,18 @@ enum KasterMode: String, CaseIterable, Identifiable {
     /// New-card body. The cursor goes right after the first "# ".
     var template: String {
         switch self {
-        case .research: return "# \n\n## Quotation\n\n> \n\n## Response\n\n\n\nSource: \n"
+        case .research: return "# \n\n## Quotation\n\n> \n\n## Response\n\n"
         case .zettel: return "# \n\n\n\n## Related cards\n\n"
         case .quick: return "# "
         case .bibliography: return "# \n\nAuthor: \nYear: \n"
         }
     }
 
-    static func stored(_ value: String) -> KasterMode { KasterMode(rawValue: value) ?? .zettel }
+    /// The types a new card can be. Bibliography is kept only so existing Bibliography/ cards still
+    /// open; sources are footnotes now, gathered in the sidebar's Bibliography view.
+    static let creatable: [KasterMode] = [.research, .zettel, .quick]
+
+    static func stored(_ value: String) -> KasterMode { KasterMode(rawValue: value).flatMap { creatable.contains($0) ? $0 : nil } ?? .zettel }
 
     /// A card's type comes from the folder it lives in; otherwise from its ID.
     static func infer(url: URL?, root: URL?, text: String) -> KasterMode {
@@ -375,42 +379,6 @@ enum KasterVault {
         return changed
     }
 
-    // MARK: Research sources
-
-    struct Source: Equatable { var link: String?; var page: String? }
-
-    static func source(in text: String) -> Source {
-        guard let line = text.components(separatedBy: "\n").last(where: { $0.hasPrefix("Source:") }) else { return Source() }
-        let ns = line as NSString
-        var source = Source()
-        if let regex = try? NSRegularExpression(pattern: "\\[\\[([^\\]|#]+)"), let match = regex.firstMatch(in: line, range: NSRange(location: 0, length: ns.length)) {
-            source.link = ns.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespaces)
-        }
-        if let regex = try? NSRegularExpression(pattern: "(?:,\\s*|\\s)pp?\\.\\s*(.+)$"), let match = regex.firstMatch(in: line, range: NSRange(location: 0, length: ns.length)) {
-            source.page = ns.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespaces)
-        }
-        return source
-    }
-
-    /// Writes "Source: [[Bibliography card]], p. 42", replacing the last Source line or appending one.
-    static func setSource(_ source: Source, in text: String) -> String {
-        var parts: [String] = []
-        if let link = source.link, !link.isEmpty { parts.append("[[\(link)]]") }
-        if let page = source.page?.trimmingCharacters(in: .whitespaces), !page.isEmpty { parts.append("p. \(page)") }
-        let line = "Source: " + parts.joined(separator: ", ")
-        var lines = text.components(separatedBy: "\n")
-        if let index = lines.lastIndex(where: { $0.hasPrefix("Source:") }) {
-            lines[index] = line
-            return lines.joined(separator: "\n")
-        }
-        let trimmed = text.trimmingCharacters(in: .newlines)
-        return trimmed + "\n\n" + line + "\n"
-    }
-
-    static func bibliographyMarkdown(title: String, author: String, year: String) -> String {
-        "# \(title)\n\nAuthor: \(author)\nYear: \(year)\n"
-    }
-
     // MARK: Migration
 
     struct MigrationStep: Identifiable, Equatable {
@@ -578,7 +546,6 @@ struct LibraryIndex {
             if let order = header["order"].flatMap(Double.init) { orders[card.path] = order }
             if let uid = header["uid"] { byUID[uid] = byUID[uid] ?? index }
             var cited = Set<String>()
-            if let key = header["zotero"] { cited.insert((header["zotero-library"] ?? "personal") + "/" + key) }
             // Footnote citations link the item: zotero://select/library/items/KEY
             if card.content.contains("zotero://select/") { cited.formUnion(Self.zoteroItems(in: card.content)) }
             for item in cited { zoteroCiting[item, default: []].append(card) }
