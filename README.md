@@ -4,7 +4,7 @@
 
 Kaster is a free, open-source Mac app that does one thing: it turns research into a permanent, interconnected system of index cards that live both on your Mac and in a box on your desk. Cards are plain Markdown files you own. Kaster gives them numbers, links and a typeset look, and prints them exactly to size.
 
-[Download Kaster for Mac](https://github.com/wilbursalazar/Cardify/raw/refs/heads/main/Downloads/Kaster-Mac.zip) · [Philosophy](#philosophy) · [Card types](#card-types) · [Features](#features) · [Printing](#printing) · [Build from source](#build-from-source)
+[Download Kaster for Mac](https://github.com/wilbursalazar/Cardify/releases/latest/download/Kaster-Mac.zip) · [Philosophy](#philosophy) · [Card types](#card-types) · [Features](#features) · [Printing](#printing) · [Build from source](#build-from-source)
 
 ## Philosophy
 
@@ -92,9 +92,9 @@ Kaster typesets cards with [Typst](https://typst.app), bundled inside the app, s
 
 ## Download and open
 
-1. [Download Kaster-Mac.zip](https://github.com/wilbursalazar/Cardify/raw/refs/heads/main/Downloads/Kaster-Mac.zip) and unzip it.
+1. [Download Kaster-Mac.zip](https://github.com/wilbursalazar/Cardify/releases/latest/download/Kaster-Mac.zip) (always the latest release; earlier versions are on the [Releases page](https://github.com/wilbursalazar/Cardify/releases)) and unzip it.
 2. Move **Kaster.app** to Applications, then open it. The first time, Kaster creates your slip box at `~/Documents/Kaster`. Choose another folder with **File → Choose Notes Folder…**.
-3. If macOS blocks the app, look in **System Settings → Privacy & Security** for an option to allow it to open.
+3. If macOS says Kaster can't be checked for malicious software, Control-click **Kaster.app** and choose **Open**, or open **System Settings → Privacy & Security** and click **Open Anyway**. You only need to do this once.
 
 Kaster requires **macOS 13 or later**. The app is ad-hoc signed and **not Apple-notarized**, so macOS may ask for confirmation. The bundled Typst engine is for Apple silicon; on Intel Macs, Kaster uses an installed `typst` if one is present, or a basic built-in renderer otherwise.
 
