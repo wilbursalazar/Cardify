@@ -1,0 +1,19 @@
+# Builds Kaster and runs every test on each push and pull request.
+name: CI
+on:
+  push:
+  pull_request:
+jobs:
+  test:
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Typst (bundled into the app; the typesetting tests use it)
+        run: brew install typst
+      - name: Tool versions
+        run: swift --version && typst --version
+      - name: Build the app
+        run: scripts/build.sh
+      - name: Run the tests
+        run: scripts/test.sh

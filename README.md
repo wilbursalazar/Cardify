@@ -123,7 +123,11 @@ Install the Apple Command Line Tools and [Typst](https://typst.app) (`brew insta
 open build/Kaster.app
 ```
 
-The script builds a universal app for macOS 13 and later, bundles Typst and its Markdown and math packages (licenses in `Resources/Typst/NOTICE.md`), and signs the app ad hoc. Run `./scripts/test.sh` for the test suite, which covers the library, IDs, links, vault organization, typesetting and print colors, autosave, and editor behavior.
+The script builds a universal app for macOS 13 and later, bundles Typst and its Markdown and math packages (licenses in `Resources/Typst/NOTICE.md`), and signs the app ad hoc.
+
+The code is in two parts. `Sources/Core` is everything that isn't screen code: cards and the vault, saving, card changes, IDs, links, the library index, the keyword register and Zotero. It never imports SwiftUI. `Sources/App` holds the windows and views, and `Sources/Main.swift` is the entry point.
+
+Run `./scripts/test.sh` for the test suite (`./scripts/test.sh Vault Zotero` runs just those). It compiles Core, and Core plus App, once as testable libraries, then builds and runs each folder in `Tests/` against the one it imports. That proves Core builds without the app. GitHub runs the build and the suite on every push.
 
 ## Further reading
 
