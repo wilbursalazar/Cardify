@@ -1,3 +1,4 @@
+@testable import KasterCore
 import Foundation
 
 // Editor responsiveness at 10,000 cards. Prints timings; fails only on clear regressions.

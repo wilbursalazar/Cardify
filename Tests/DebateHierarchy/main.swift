@@ -1,15 +1,6 @@
+@testable import KasterCore
 import Foundation
 
-// Minimal fixture types matching the production snapshot; the model and parser
-// themselves are compiled from their real source files.
-struct LibraryCard {
-    let url: URL
-    let path: String
-    let title: String
-    let cardID: String?
-    let content: String
-}
-struct LibrarySnapshot { let cards: [LibraryCard]; let unreadable: Int }
 func card(_ path: String, _ text: String) -> LibraryCard {
     LibraryCard(url: URL(fileURLWithPath: "/test/\(path).md"), path: path, title: (path as NSString).lastPathComponent, cardID: nil, content: text)
 }
@@ -37,7 +28,7 @@ let unrelated = card("Research/Unrelated", "# Another note\n")
 let orphan = card("Research/Orphan", "# Orphan\nRelated parent: [[Points/DEF]]\n")
 let missing = card("Research/Missing", "# Missing\nPrimary parent: [[Points/No longer here]]\nRelated parent: [[Points/DEF]]\n")
 let invalid = card("Research/Invalid", "Primary parent: [[Points/AFF]]\nPrimary parent: [[Points/DEF]]\n")
-let snapshot = LibrarySnapshot(cards: [project1, project2, aff, def, unused, evidence, argument, unrelated, orphan, missing, invalid], unreadable: 0)
+let snapshot = LibrarySnapshot(cards: [project1, project2, aff, def, unused, evidence, argument, unrelated, orphan, missing, invalid], outgoing: [:], incoming: [:], unreadable: 0)
 let projects = DebateHierarchy.projects(in: snapshot)
 check(projects.map(\.path) == ["Debates/Other", "Debates/Resolution"], "projects are discoverable and sorted")
 let graph = DebateHierarchy.build(snapshot: snapshot, projectPath: project1.path)
@@ -55,15 +46,15 @@ let gone = DebateHierarchy.build(snapshot: snapshot, projectPath: "Debates/Gone"
 check(gone.project == nil && gone.aff.isEmpty && gone.def.isEmpty && gone.unresolved > 0, "a missing selected resolution cannot show a different project")
 let dup = card("Other/AFF", "# Collision\n")
 let ambiguous = card("Research/Ambiguous", "# Ambiguous\nPrimary parent: [[AFF]]\n")
-let collisions = LibrarySnapshot(cards: [project1, aff, dup, ambiguous], unreadable: 0)
+let collisions = LibrarySnapshot(cards: [project1, aff, dup, ambiguous], outgoing: [:], incoming: [:], unreadable: 0)
 let collisionGraph = DebateHierarchy.build(snapshot: collisions, projectPath: project1.path)
 check(collisionGraph.aff.first?.primary.isEmpty == true && collisionGraph.unresolved > 0, "ambiguous bare names never resolve to an arbitrary file")
-let incomplete = LibrarySnapshot(cards: [project1, aff, card("Research/Bare", "# Bare\nPrimary parent: [[AFF]]\n")], unreadable: 1)
+let incomplete = LibrarySnapshot(cards: [project1, aff, card("Research/Bare", "# Bare\nPrimary parent: [[AFF]]\n")], outgoing: [:], incoming: [:], unreadable: 1)
 let incompleteGraph = DebateHierarchy.build(snapshot: incomplete, projectPath: project1.path)
 check(incompleteGraph.unreadable == 1 && incompleteGraph.aff.first?.primary.isEmpty == true, "incomplete scans cannot assume bare names are unique")
 let brokenAncestry = card("Points/Broken", "# Broken\nPrimary parent: [[No such parent]]\n")
 let malformedParent = card("Points/Malformed", "Primary parent: [[Points/AFF]]\nPrimary parent: [[Points/DEF]]\n")
-let unsafeSnapshot = LibrarySnapshot(cards: [project1, aff, def, brokenAncestry, malformedParent], unreadable: 0)
+let unsafeSnapshot = LibrarySnapshot(cards: [project1, aff, def, brokenAncestry, malformedParent], outgoing: [:], incoming: [:], unreadable: 0)
 check(!DebateHierarchy.canSetPrimary(snapshot: unsafeSnapshot, currentURL: aff.url, proposedParent: brokenAncestry), "missing ancestry cannot be assigned")
 check(!DebateHierarchy.canSetPrimary(snapshot: unsafeSnapshot, currentURL: aff.url, proposedParent: malformedParent), "malformed ancestry cannot be assigned")
 check(DebateHierarchy.projectsForCard(snapshot: unsafeSnapshot, cardPath: brokenAncestry.path).isEmpty, "missing ancestry has no inferred resolution")
@@ -73,7 +64,7 @@ check(!DebateHierarchy.canSetPrimary(snapshot: collisions, currentURL: aff.url, 
 let objection = card("Research/Objection", "# Objection\n<!-- cardify:debate=objection -->\nPrimary parent: [[Research/Evidence]]\n")
 let reply = card("Research/Reply", "# Reply\n<!-- cardify:debate=reply -->\nPrimary parent: [[Research/Objection]]\nRelated parent: [[Points/DEF]]\n")
 let followup = card("Research/Followup", "# Further evidence\n<!-- cardify:debate=evidence -->\nPrimary parent: [[Research/Reply]]\n")
-let nestedSnapshot = LibrarySnapshot(cards: snapshot.cards + [objection, reply, followup], unreadable: 0)
+let nestedSnapshot = LibrarySnapshot(cards: snapshot.cards + [objection, reply, followup], outgoing: [:], incoming: [:], unreadable: 0)
 let nested = DebateHierarchy.build(snapshot: nestedSnapshot, projectPath: project1.path)
 let first = nested.aff[0].primaryBranches.first!
 check(first.parent.path == evidence.path, "first child retains the same original card")
@@ -104,7 +95,7 @@ check(focusedDef.related.map(\.path).contains(reply.path) && !focusedDef.childre
 check(nested.focus(on: "missing-card") == nil && nested.focus(on: nil) == nil, "unknown selections do not invent a branch")
 let externalRoot = card("External/Root", "# Outside\n<!-- cardify:debate=def -->\n")
 let externalCard = card("External/Card", "# Outside child\nPrimary parent: [[External/Root]]\nRelated parent: [[Points/AFF]]\n")
-let crossGraph = DebateHierarchy.build(snapshot: LibrarySnapshot(cards: [project1, aff, externalRoot, externalCard], unreadable: 0), projectPath: project1.path)
+let crossGraph = DebateHierarchy.build(snapshot: LibrarySnapshot(cards: [project1, aff, externalRoot, externalCard], outgoing: [:], incoming: [:], unreadable: 0), projectPath: project1.path)
 let crossFocus = crossGraph.focus(on: externalCard.path)!
 check(crossFocus.relatedOnly && crossFocus.ancestors.isEmpty && crossFocus.children.isEmpty, "cross-link with home outside the map has no invented ancestry")
 
@@ -112,10 +103,10 @@ check(crossFocus.relatedOnly && crossFocus.ancestors.isEmpty && crossFocus.child
 let cycleA = card("Cycle/A", "# A\n<!-- cardify:debate=aff -->\nDebate project: [[Debates/Resolution]]\nPrimary parent: [[Cycle/B]]\n")
 let cycleB = card("Cycle/B", "# B\n<!-- cardify:debate=objection -->\nPrimary parent: [[Cycle/A]]\n")
 let selfCycle = card("Cycle/Self", "# Self\nPrimary parent: [[Cycle/Self]]\n")
-let cycleGraph = DebateHierarchy.build(snapshot: LibrarySnapshot(cards: [project1, cycleA, cycleB, selfCycle], unreadable: 0), projectPath: project1.path)
+let cycleGraph = DebateHierarchy.build(snapshot: LibrarySnapshot(cards: [project1, cycleA, cycleB, selfCycle], outgoing: [:], incoming: [:], unreadable: 0), projectPath: project1.path)
 check(cycleGraph.aff.count == 1 && cycleGraph.aff[0].primaryBranches.isEmpty, "cyclic edges do not recurse or duplicate cards")
 check(cycleGraph.unresolved >= 3, "cycle and self-references are flagged")
-let cycleSnapshot = LibrarySnapshot(cards: [project1, cycleA, cycleB, selfCycle], unreadable: 0)
+let cycleSnapshot = LibrarySnapshot(cards: [project1, cycleA, cycleB, selfCycle], outgoing: [:], incoming: [:], unreadable: 0)
 check(!DebateHierarchy.canSetPrimary(snapshot: cycleSnapshot, currentURL: nil, proposedParent: cycleA), "an existing cycle cannot become a parent")
 check(!DebateHierarchy.canSetPrimary(snapshot: cycleSnapshot, currentURL: nil, proposedParent: selfCycle), "an existing self-cycle cannot become a parent")
 check(DebateHierarchy.projectsForCard(snapshot: cycleSnapshot, cardPath: cycleB.path) == [], "cyclic ancestry cannot select a project")
@@ -134,7 +125,7 @@ try "# Child".write(to: childURL, atomically: true, encoding: .utf8)
 try fm.createSymbolicLink(at: aliasVault, withDestinationURL: realVault)
 let parentCard = LibraryCard(url: parentURL, path: "Parent", title: "Parent", cardID: nil, content: "# Parent\n")
 let childCard = LibraryCard(url: childURL, path: "Child", title: "Child", cardID: nil, content: "# Child\n")
-let aliasSnapshot = LibrarySnapshot(cards: [parentCard, childCard], unreadable: 0)
+let aliasSnapshot = LibrarySnapshot(cards: [parentCard, childCard], outgoing: [:], incoming: [:], unreadable: 0)
 check(DebateHierarchy.canSetPrimary(snapshot: aliasSnapshot, currentURL: aliasVault.appendingPathComponent("Child.md"), proposedParent: parentCard), "vault aliases resolve to the same current card")
 check(!DebateHierarchy.canSetPrimary(snapshot: aliasSnapshot, currentURL: aliasVault.appendingPathComponent("Parent.md"), proposedParent: parentCard), "a vault alias cannot bypass the self-parent check")
 
@@ -146,7 +137,7 @@ for index in 0..<depth {
     longCards.append(card(path, "# Card \(index)\nPrimary parent: [[\(previous)]]\n"))
     previous = path
 }
-var deep = DebateHierarchy.build(snapshot: LibrarySnapshot(cards: longCards, unreadable: 0), projectPath: project1.path).aff[0]
+var deep = DebateHierarchy.build(snapshot: LibrarySnapshot(cards: longCards, outgoing: [:], incoming: [:], unreadable: 0), projectPath: project1.path).aff[0]
 for index in 0..<depth {
     check(deep.primaryBranches.count == 1 && deep.primaryBranches[0].parent.path == "Deep/Card\(index)", "long chains remain in order")
     deep = deep.primaryBranches[0]

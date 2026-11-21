@@ -1,3 +1,4 @@
+@testable import KasterCore
 import Foundation
 
 let utc = TimeZone(secondsFromGMT: 0)!

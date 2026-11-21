@@ -1,3 +1,4 @@
+@testable import KasterCore
 import Foundation
 struct LibraryCard: Identifiable {
  let url: URL; let path: String; let title: String; let cardID: String?; let content: String

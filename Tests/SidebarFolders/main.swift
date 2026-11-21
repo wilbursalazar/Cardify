@@ -1,3 +1,4 @@
+@testable import KasterCore
 import Foundation
 
 let root = FileManager.default.temporaryDirectory.appendingPathComponent("cardify-folders-" + UUID().uuidString, isDirectory: true)

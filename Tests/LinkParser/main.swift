@@ -1,3 +1,4 @@
+@testable import KasterCore
 import Foundation
 func check(_ ok: @autoclosure () -> Bool, _ message: String) { if !ok() { fatalError(message) } }
 let s = "😀 [[Folder/Note#Section|A label]] and [a site](https://example.com/hello_(there)) followed by https://example.org/page.\n`[[code]] https://code.invalid`\n```md\n[[fenced]] https://no.invalid\n```\n![image](https://image.invalid/a.png)\nSource: zotero://select/library/items/ABC123\n\\[[escaped]]"

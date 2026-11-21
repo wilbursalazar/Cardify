@@ -1,3 +1,4 @@
+@testable import KasterCore
 import Foundation
 func check(_ condition: @autoclosure () -> Bool, _ message: String) {
     if !condition() { fputs("FAIL: \(message)\n", stderr); exit(1) }

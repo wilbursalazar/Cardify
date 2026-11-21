@@ -58,9 +58,14 @@ enum KasterTypesetter {
     static func packageDirectory() -> URL? {
         let fm = FileManager.default
         if let bundled = Bundle.main.resourceURL?.appendingPathComponent("typst/packages"), fm.fileExists(atPath: bundled.path) { return bundled }
-        // Development builds run from the repository checkout.
-        let source = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Resources/Typst/packages")
-        return fm.fileExists(atPath: source.path) ? source : nil
+        // Development builds and tests run from the repository checkout: look up from this file.
+        var folder = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        for _ in 0..<4 {
+            folder = folder.deletingLastPathComponent()
+            let packages = folder.appendingPathComponent("Resources/Typst/packages")
+            if fm.fileExists(atPath: packages.path) { return packages }
+        }
+        return nil
     }
 
     static func latexTools() -> (pandoc: URL, texbin: URL)? {

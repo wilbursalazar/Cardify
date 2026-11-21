@@ -1,3 +1,4 @@
+@testable import KasterApp
 import AppKit
 
 // Live editor: footnote markers become small raised numbers and link addresses hide,

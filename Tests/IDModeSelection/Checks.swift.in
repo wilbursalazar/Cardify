@@ -1,3 +1,4 @@
+@testable import KasterCore
 import Foundation
 
 extension Int { static let alertFirstButtonReturn = 1 }

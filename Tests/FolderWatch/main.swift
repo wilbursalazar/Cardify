@@ -1,3 +1,4 @@
+@testable import KasterCore
 import Foundation
 
 // The library notices Markdown files changed outside Kaster: edits, new files, deletions and new folders.

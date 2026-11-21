@@ -698,7 +698,7 @@ final class LinkCompletionState: ObservableObject {
 
 // Position is measured in the scroll view; no text or selection is changed
 // merely by showing the toolbar.
-private final class SelectionToolbarState: ObservableObject {
+final class SelectionToolbarState: ObservableObject {
     @Published private(set) var anchor: CGPoint?
     @Published private(set) var canLink = false
     @Published private(set) var canHeading = false
@@ -750,11 +750,11 @@ private final class SelectionToolbarState: ObservableObject {
 
 // A mouse click on a formatting button must not steal the text selection
 // between mouse-down and mouse-up.
-private final class SelectionToolbarNSButton: NSButton {
+final class SelectionToolbarNSButton: NSButton {
     override var acceptsFirstResponder: Bool { false }
 }
 
-private struct SelectionToolbarButton: NSViewRepresentable {
+struct SelectionToolbarButton: NSViewRepresentable {
     let title: String
     var symbol: String? = nil
     var font: NSFont = .systemFont(ofSize: 12)

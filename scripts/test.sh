@@ -1,69 +1,99 @@
 #!/bin/bash
-set -euo pipefail
+# Kaster's tests. The code is compiled once into two testable libraries:
+#   KasterCore  Sources/Core only. This also proves the core never needs screen code.
+#   KasterApp   Sources/Core + Sources/App (everything except Sources/Main.swift), for tests
+#               that drive real views, editors and windows.
+# Each Tests/<Name>/ folder is compiled against one of them (named on its first line,
+# `@testable import KasterCore` or `@testable import KasterApp`) and run.
+#
+#   scripts/test.sh                 every test
+#   scripts/test.sh Vault Zotero    only those
+set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-TEMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/cardify-tests.XXXXXX")"
-trap 'rm -rf "$TEMP_DIR"' EXIT
-SWIFT_FLAGS=(-target "$(uname -m)-apple-macos13.0" -module-cache-path "$TEMP_DIR/module-cache")
-COMMON=("$ROOT/Sources/CardLibrary.swift" "$ROOT/Sources/CuratedIndex.swift" "$ROOT/Sources/NotePicker.swift" "$ROOT/Sources/Zettelkasten.swift" "$ROOT/Sources/NoteEditing.swift" "$ROOT/Sources/BranchIDs.swift" "$ROOT/Sources/IDModes.swift")
-swiftc "${SWIFT_FLAGS[@]}" "${COMMON[@]}" "$ROOT/Tests/Library/main.swift" -o "$TEMP_DIR/library"
-"$TEMP_DIR/library"
-swiftc "${SWIFT_FLAGS[@]}" "${COMMON[@]}" "$ROOT/Tests/Timestamp/main.swift" -o "$TEMP_DIR/timestamp"
-"$TEMP_DIR/timestamp"
-swiftc "${SWIFT_FLAGS[@]}" "${COMMON[@]}" "$ROOT/Sources/InlineTemplates.swift" "$ROOT/Sources/AppearanceSettings.swift" "$ROOT/Sources/WorkflowSettings.swift" "$ROOT/Sources/ZoteroSearch.swift" "$ROOT/Sources/KasterTypesetter.swift" "$ROOT/Sources/KasterVault.swift" "$ROOT/Sources/HabitTracker.swift" "$ROOT/Sources/TodoList.swift" "$ROOT/Sources/DebateNotes.swift" "$ROOT/Sources/DebateIDs.swift" "$ROOT/Sources/PDFLinkSupport.swift" "$ROOT/Sources/LinkNavigation.swift" "$ROOT/Sources/CardLinks.swift" "$ROOT/Sources/MarkdownRendering.swift" "$ROOT/Tests/Workflow/main.swift" -o "$TEMP_DIR/workflow"
-"$TEMP_DIR/workflow"
-swiftc "${SWIFT_FLAGS[@]}" "$ROOT/Tests/CRLFEditor/main.swift" -o "$TEMP_DIR/crlf-editor"
-"$ROOT/scripts/test-crlf.sh"
-"$ROOT/scripts/test-editor-undo.sh"
-"$ROOT/scripts/test-id-mode-selection.sh"
-"$ROOT/scripts/test-adaptive-toolbar.sh"
-"$ROOT/scripts/test-workspace-layout.sh"
-"$ROOT/scripts/test-debate.sh"
-"$ROOT/scripts/test-debate-templates.sh"
-"$ROOT/scripts/test-debate-ids.sh"
-"$ROOT/scripts/test-debate-hierarchy.sh"
-"$TEMP_DIR/crlf-editor"
-swiftc "${SWIFT_FLAGS[@]}" "$ROOT/Sources/CardHistory.swift" "$ROOT/Tests/History/main.swift" -o "$TEMP_DIR/history"
-"$TEMP_DIR/history"
-swiftc "${SWIFT_FLAGS[@]}" "$ROOT/Sources/TodoList.swift" "$ROOT/Tests/TodoList/main.swift" -o "$TEMP_DIR/todo"
-"$TEMP_DIR/todo"
-swiftc "${SWIFT_FLAGS[@]}" "$ROOT/Sources/AppearanceSettings.swift" "$ROOT/Tests/Appearance/main.swift" -o "$TEMP_DIR/appearance"
-"$TEMP_DIR/appearance"
-swiftc "${SWIFT_FLAGS[@]}" "$ROOT/Sources/Outline.swift" "$ROOT/Tests/Outline/main.swift" -o "$TEMP_DIR/outline"
-"$TEMP_DIR/outline"
-"$ROOT/scripts/test-editor-structure.sh"
-"$ROOT/scripts/test-autosave.sh"
-"$ROOT/scripts/test-sidebar-actions.sh"
-"$ROOT/scripts/test-sidebar-handlers.sh"
-"$ROOT/scripts/test-sidebar-folders.sh"
-"$ROOT/scripts/test-selection-toolbar.sh"
-"$ROOT/scripts/test-selection-integration.sh"
-swiftc "${SWIFT_FLAGS[@]}" "${COMMON[@]}" "$ROOT/Sources/CardLinks.swift" "$ROOT/Sources/LinkNavigation.swift" "$ROOT/Sources/CardGraph.swift" "$ROOT/Tests/Graph/main.swift" -o "$TEMP_DIR/graph"
-"$TEMP_DIR/graph"
-swiftc "${SWIFT_FLAGS[@]}" "$ROOT/Sources/LinkNavigation.swift" "$ROOT/Sources/CardLinks.swift" "$ROOT/Tests/LinkParser/main.swift" -o "$TEMP_DIR/link-parser"
-"$TEMP_DIR/link-parser"
-swiftc "${SWIFT_FLAGS[@]}" "$ROOT/Sources/LinkNavigation.swift" "$ROOT/Tests/LinkNavigation/main.swift" -o "$TEMP_DIR/link-navigation"
-"$TEMP_DIR/link-navigation"
-swiftc "${SWIFT_FLAGS[@]}" -parse-as-library "$ROOT/Sources/CuratedIndex.swift" "$ROOT/Tests/IndexMetadata/IndexChecks.swift" -o "$TEMP_DIR/index"
-"$TEMP_DIR/index"
-python3 - "$ROOT/Sources/Cardify.swift" "$ROOT/Tests/Draft/DraftChecks.swift.in" "$TEMP_DIR/DraftChecks.swift" <<'PY'
-from pathlib import Path
-import sys
-source = Path(sys.argv[1]).read_text()
-first = source[source.index('    func confirmReplaceDraft('):source.index('    func openFile()')]
-switch_start = source.index('    func switchMode(to mode: String)')
-switch = source[switch_start:source.index('    var body: some View', switch_start)]
-navigation = source[source.index('    func navigateHistory('):source.index('    @discardableResult\n    func loadFile(')]
-second = source[source.index('    func loadFile('):source.index('    func chooseFolder()')]
-template = Path(sys.argv[2]).read_text()
-Path(sys.argv[3]).write_text(template.replace('    // DRAFT_METHODS\n', switch + first + navigation + second))
-PY
-swiftc "${SWIFT_FLAGS[@]}" -parse-as-library "$ROOT/Sources/CardHistory.swift" "$ROOT/Sources/TodoList.swift" "$ROOT/Sources/Outline.swift" "$TEMP_DIR/DraftChecks.swift" -o "$TEMP_DIR/draft"
-"$TEMP_DIR/draft"
-"$ROOT/scripts/test-typeset.sh"
-"$ROOT/scripts/test-vault.sh"
-"$ROOT/scripts/test-performance.sh"
-"$ROOT/scripts/test-zotero.sh"
-"$ROOT/scripts/test-folder-watch.sh"
-"$ROOT/scripts/test-register.sh"
-"$ROOT/scripts/test-live-style.sh"
-"$ROOT/scripts/test-footnote-edits.sh"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/kaster-tests.XXXXXX")"
+trap 'rm -rf "$WORK"' EXIT
+FLAGS=(-target "$(uname -m)-apple-macos13.0" -module-cache-path "$WORK/cache")
+
+library() {   # library <name> <optimize?> <sources...>: compile once per run, on first use
+    local name=$1 optimize=$2; shift 2
+    [ -f "$WORK/lib/$name/lib$name.a" ] && return 0
+    [ -f "$WORK/lib/$name/failed" ] && return 1
+    mkdir -p "$WORK/lib/$name"
+    local module=${name%Fast}
+    local extra=(); [ "$optimize" = yes ] && extra=(-O)
+    echo "▸ building $name"
+    swiftc "${FLAGS[@]}" ${extra[@]+"${extra[@]}"} -parse-as-library -enable-testing -module-name "$module" \
+        -emit-module -emit-module-path "$WORK/lib/$name/$module.swiftmodule" \
+        -emit-library -static -o "$WORK/lib/$name/lib$name.a" "$@" || { touch "$WORK/lib/$name/failed"; return 1; }
+}
+core() { library KasterCore no "$ROOT"/Sources/Core/*.swift; }
+app() { library KasterApp no "$ROOT"/Sources/Core/*.swift "$ROOT"/Sources/App/*.swift; }
+
+failed=()
+run() {   # run <name> [sources...]: defaults to every .swift file in Tests/<name>
+    local name=$1; shift
+    local sources=(); [ $# -gt 0 ] && sources=("$@"); [ ${#sources[@]} -eq 0 ] && sources=("$ROOT/Tests/$name"/*.swift)
+    local lib; lib=$(grep -ho -m1 '@testable import Kaster[A-Za-z]*' "${sources[@]}" | head -1 | awk '{print $3}')
+    local dir=KasterCore
+    case "$name:$lib" in
+        Performance:KasterCore) library KasterCoreFast yes "$ROOT"/Sources/Core/*.swift || { failed+=("$name"); return; }; dir=KasterCoreFast ;;
+        *:KasterApp) app || { failed+=("$name"); return; }; dir=KasterApp ;;
+        *) core || { failed+=("$name"); return; } ;;
+    esac
+    local parse=(); grep -q '@main' "${sources[@]}" && parse=(-parse-as-library)
+    local optimize=(); [ "$name" = Performance ] && optimize=(-O)
+    echo "▸ $name"
+    if swiftc "${FLAGS[@]}" ${optimize[@]+"${optimize[@]}"} ${parse[@]+"${parse[@]}"} -I "$WORK/lib/$dir" -L "$WORK/lib/$dir" -l"$dir" \
+        "${sources[@]}" -o "$WORK/$name" && (cd "$ROOT" && "$WORK/$name"); then :; else failed+=("$name"); fi
+}
+
+# Tests that still copy ContentView methods out of Cardify.swift (until those move into services).
+extracted() {   # extracted <name> <template> <python that prints the methods>
+    local name=$1 template=$2 script=$3
+    mkdir -p "$WORK/gen/$name"
+    python3 - "$ROOT/Sources/App/Cardify.swift" "$template" "$WORK/gen/$name/main.swift" <<<"$script" || { failed+=("$name"); return; }
+    run "$name" "$WORK/gen/$name/main.swift"
+}
+
+wanted() { [ $# -eq 0 ] && return 0; local n; for n in "${SELECTED[@]}"; do [ "$n" = "$1" ] && return 0; done; return 1; }
+SELECTED=(); [ $# -gt 0 ] && SELECTED=("$@")
+want() { [ ${#SELECTED[@]} -eq 0 ] || wanted "$1" "${SELECTED[@]}"; }
+
+for dir in "$ROOT"/Tests/*/; do
+    name=$(basename "$dir")
+    case $name in Autosave|SidebarHandlers|IDModeSelection|Draft) continue ;; esac
+    want "$name" && run "$name"
+done
+
+want Autosave && extracted Autosave "$ROOT/Tests/Autosave/SaveChecks.swift.in" '
+from pathlib import Path; import sys
+s = Path(sys.argv[1]).read_text()
+m = s[s.index("    func saveMarkdown(saveAs:"):s.index("    func scheduleAutosave()")]
+Path(sys.argv[3]).write_text(Path(sys.argv[2]).read_text().replace("    // SAVE_METHODS\n", m))'
+want SidebarHandlers && extracted SidebarHandlers "$ROOT/Tests/SidebarHandlers/Checks.swift.in" '
+from pathlib import Path; import sys
+s = Path(sys.argv[1]).read_text()
+a = s[s.index("    private var sidebarRoot:"):s.index("    private func revealSidebarNote(")]
+b = s[s.index("    private func duplicateSidebarNote("):s.index("\n}\n\n// WindowGroup")]
+m = (a + b).replace("    private ", "    ")
+old = "try FileManager.default.trashItem(at: mutation.snapshot.url, resultingItemURL: nil)"
+assert m.count(old) == 1
+m = m.replace(old, "try fakeTrash(mutation.snapshot.url)")
+Path(sys.argv[3]).write_text(Path(sys.argv[2]).read_text().replace("    // HANDLERS\n", m))'
+want IDModeSelection && extracted IDModeSelection "$ROOT/Tests/IDModeSelection/Checks.swift.in" '
+from pathlib import Path; import sys
+s = Path(sys.argv[1]).read_text()
+m = s[s.index("    func scanRoots("):s.index("    func insertTemplate(")]
+Path(sys.argv[3]).write_text(Path(sys.argv[2]).read_text().replace("    // METHODS\n", m))'
+want Draft && extracted Draft "$ROOT/Tests/Draft/DraftChecks.swift.in" '
+from pathlib import Path; import sys
+s = Path(sys.argv[1]).read_text()
+first = s[s.index("    func confirmReplaceDraft("):s.index("    func openFile()")]
+i = s.index("    func switchMode(to mode: String)")
+switch = s[i:s.index("    var body: some View", i)]
+nav = s[s.index("    func navigateHistory("):s.index("    @discardableResult\n    func loadFile(")]
+second = s[s.index("    func loadFile("):s.index("    func chooseFolder()")]
+Path(sys.argv[3]).write_text(Path(sys.argv[2]).read_text().replace("    // DRAFT_METHODS\n", switch + first + nav + second))'
+
+if [ ${#failed[@]} -gt 0 ]; then echo; echo "✗ Failed: ${failed[*]}"; exit 1; fi
+echo; echo "✓ All tests passed"

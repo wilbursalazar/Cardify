@@ -1,3 +1,4 @@
+@testable import KasterCore
 import Foundation
 
 func check(_ result: @autoclosure () -> Bool, _ message: String) {

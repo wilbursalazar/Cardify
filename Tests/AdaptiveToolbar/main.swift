@@ -1,11 +1,8 @@
+@testable import KasterApp
 import AppKit
 import SwiftUI
 
-// The toolbar only needs these editor actions; no user document is loaded.
-final class EditorState {
-    func wrap(_ marker: String) {}
-    func prefix(_ prefix: String) {}
-}
+// A real editor state with no text view: toolbar buttons have nothing to change.
 
 let app = NSApplication.shared
 app.setActivationPolicy(.prohibited)

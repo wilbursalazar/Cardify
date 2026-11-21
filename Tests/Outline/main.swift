@@ -1,3 +1,4 @@
+@testable import KasterApp
 import Foundation
 import SwiftUI
 

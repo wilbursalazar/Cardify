@@ -1,3 +1,4 @@
+@testable import KasterCore
 import AppKit
 _ = NSApplication.shared
 let text = "---\r\ncard_id: 1a\r\n---\r\n# Title\r\nBody\r\n"

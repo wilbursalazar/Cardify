@@ -1,3 +1,4 @@
+@testable import KasterApp
 import AppKit
 import Foundation
 import PDFKit

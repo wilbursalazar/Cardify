@@ -1,3 +1,4 @@
+@testable import KasterCore
 import Foundation
 
 // Kaster vault rules: Luhmann IDs, filenames, link rewriting, Research sources, migration.

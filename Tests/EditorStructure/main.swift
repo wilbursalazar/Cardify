@@ -1,3 +1,4 @@
+@testable import KasterApp
 import AppKit
 
 let app = NSApplication.shared

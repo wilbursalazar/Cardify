@@ -1,3 +1,6 @@
+@testable import KasterApp
+import AppKit
+import SwiftUI
 let app = NSApplication.shared
 app.setActivationPolicy(.prohibited)
 let window = NSWindow(contentRect: NSRect(x: 100, y: 100, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
