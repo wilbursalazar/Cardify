@@ -33,6 +33,16 @@ final class LibraryStore: ObservableObject {
     private var pendingFiles: Set<URL> = []
     private var pendingStructure = false
     private var flushWork: DispatchWorkItem?
+    // FSEvents calls back on this queue with a pointer to `watchTarget`, which refers to the store
+    // only weakly; stopping drains the queue, so no callback can outlive a closed window's store.
+    private let watchQueue = DispatchQueue(label: "kaster.library.watch", qos: .utility)
+    private var watchTarget: WatchTarget?
+    private final class WatchTarget {
+        weak var store: LibraryStore?
+        init(_ store: LibraryStore) { self.store = store }
+    }
+
+    deinit { stopWatching() }
 
     /// Starts (or moves) the folder watch. Kaster's own writes come back as events too; refreshing
     /// them again is harmless because a refresh only re-reads what changed.
@@ -41,24 +51,30 @@ final class LibraryStore: ObservableObject {
         stopWatching()
         watchedFolder = folder
         guard !folder.isEmpty else { return }
-        var context = FSEventStreamContext(version: 0, info: Unmanaged.passUnretained(self).toOpaque(), retain: nil, release: nil, copyDescription: nil)
+        let target = WatchTarget(self)
+        watchTarget = target
+        var context = FSEventStreamContext(version: 0, info: Unmanaged.passUnretained(target).toOpaque(), retain: nil, release: nil, copyDescription: nil)
         let callback: FSEventStreamCallback = { _, info, count, paths, flags, _ in
-            guard let info else { return }
-            let store = Unmanaged<LibraryStore>.fromOpaque(info).takeUnretainedValue()
+            guard let info, let store = Unmanaged<WatchTarget>.fromOpaque(info).takeUnretainedValue().store else { return }
             let list = Unmanaged<CFArray>.fromOpaque(paths).takeUnretainedValue() as? [String] ?? []
             let flagList = Array(UnsafeBufferPointer(start: flags, count: count))
-            DispatchQueue.main.async { store.received(paths: list, flags: flagList) }
+            DispatchQueue.main.async { [weak store] in store?.received(paths: list, flags: flagList) }
         }
         let flags = UInt32(kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagNoDefer | kFSEventStreamCreateFlagUseCFTypes)
         guard let created = FSEventStreamCreate(nil, callback, &context, [folder] as CFArray, FSEventStreamEventId(kFSEventStreamEventIdSinceNow), 0.3, flags) else { return }
         stream = created
-        FSEventStreamSetDispatchQueue(created, DispatchQueue.global(qos: .utility))
+        FSEventStreamSetDispatchQueue(created, watchQueue)
         FSEventStreamStart(created)
     }
 
     func stopWatching() {
-        if let stream { FSEventStreamStop(stream); FSEventStreamInvalidate(stream); FSEventStreamRelease(stream) }
-        stream = nil; watchedFolder = ""
+        if let stream {
+            FSEventStreamStop(stream); FSEventStreamInvalidate(stream)
+            watchQueue.sync {}   // let a callback already in progress finish before its target goes away
+            FSEventStreamRelease(stream)
+        }
+        stream = nil; watchTarget = nil; watchedFolder = ""
+        flushWork?.cancel(); flushWork = nil
     }
 
     private func received(paths: [String], flags: [FSEventStreamEventFlags]) {

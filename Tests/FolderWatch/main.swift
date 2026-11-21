@@ -27,5 +27,24 @@ precondition(until(5) { store.snapshot.cards.count == 1 }, "a deleted file disap
 try! manager.createDirectory(at: root.appendingPathComponent("Ideas"), withIntermediateDirectories: true)
 try! Data("# Three\n".utf8).write(to: root.appendingPathComponent("Ideas/Three.md"))
 precondition(until(5) { store.snapshot.cards.count == 2 && store.folderPaths.contains("Ideas") }, "a new folder and its card appear: \(store.folderPaths)")
+// Closing a window frees its library while files keep changing: the watch must end with it
+// (Kaster crashed when a later file event reached a closed window's library).
+for round in 0..<3 {
+    var closing: LibraryStore? = LibraryStore()
+    closing!.watch(folder: root.path)
+    spin(0.4)
+    weak var gone = closing
+    closing = nil
+    precondition(gone == nil, "Watching doesn't keep a closed window's library alive")
+    var filler: [[String]] = []
+    for i in 0..<30 {
+        filler.append((0..<64).map { "Title:a\(round)-\($0)-\(i) replacement" })   // reuse the freed memory
+        try! Data("# Churn \(i)\n".utf8).write(to: root.appendingPathComponent("Ideas/Churn \(round).md"))
+        spin(0.02)
+    }
+    spin(0.8)
+    precondition(!filler.isEmpty)
+}
+precondition(until(5) { store.snapshot.cards.contains { $0.path == "Ideas/Churn 2" } }, "the open window's library still follows changes")
 store.stopWatching()
-print("Folder watch: outside edits, new files, deletions and new folders passed")
+print("Folder watch: outside edits, new files, deletions, new folders and closed windows passed")
