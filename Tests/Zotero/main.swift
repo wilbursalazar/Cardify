@@ -40,7 +40,7 @@ import PDFKit
         }
         precondition(ZoteroFootnote.citation(wiki, page: nil) == "[*Wikipedia*, \u{201C}Jewish–Christian gospels.\u{201D}](zotero://select/library/items/W)", "No doubled period after a quoted title")
         precondition(ZoteroFootnote.citation(ZoteroSource(key: "W", cite: "*Wikipedia*, \u{201C}Gospels,\u{201D}"), page: " ") == "[*Wikipedia*, \u{201C}Gospels.\u{201D}](zotero://select/library/items/W)", "Removing the page restores the period")
-        // The footnote already in Wilbur's vault (an older Kaster wrote an extra period).
+        // A footnote as an older Kaster wrote it (with an extra period after a quoted title).
         let schmidt = "[^2]: [Schmidt, \u{201C}10 NIKLAS LUHMANN\u{2019}S CARD INDEX The Fabrication of Serendipity.\u{201D}](zotero://select/library/items/ZMLSK5KF)."
         let old = FootnoteSources.parse("Text.[^2]\n\n" + schmidt + "\n")
         precondition(old.count == 1 && old[0].pageEditable && old[0].page == nil && old[0].zotero?.key == "ZMLSK5KF", "\(old)")
