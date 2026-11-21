@@ -2814,7 +2814,7 @@ private struct EditorWindowRoot: View {
     }
 }
 
-@main struct CardifyApp: App {
+struct CardifyApp: App {
     var body: some Scene {
         WindowGroup { EditorWindowRoot() }
             .windowStyle(.hiddenTitleBar)

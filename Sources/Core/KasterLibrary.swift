@@ -1,6 +1,7 @@
-import SwiftUI
+import Foundation
 import AppKit
 import CoreServices
+import Combine
 
 // One read-only scan of the notes folder, shared by the sidebar, the note list,
 // and the inspector's backlinks. Scanning never writes files.

@@ -1,4 +1,4 @@
-import SwiftUI
+import Foundation
 import AppKit
 
 // Keep exact line ranges so edits preserve the note's existing line endings.
