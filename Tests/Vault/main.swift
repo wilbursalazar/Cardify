@@ -102,6 +102,13 @@ import Foundation
   let retitled = NoteEditing.setTitle("Fresh", in: "---\nuid: x\n---\n*Body*")
   precondition(retitled == "---\nuid: x\n---\n# Fresh\n\n*Body*", "A heading is added after the frontmatter: \(retitled)")
   precondition(KasterVault.rewriteLinks(in: "See [[Old]] and [[Old|my label]] and [[Old#Part]].", from: ["Old"], to: "New") == "See [[New]] and [[New|my label]] and [[New#Part]].", "Labelled links keep their label")
+  // The one-pass header reader agrees with the single-field reader.
+  for sample in ["---\nuid: a1\norder: 30\ncard_id: \"21/3a\"\nzotero-cite: \"Lim, *T*\"\n---\n# T\n", "\u{feff}---\r\nuid: b\r\n---\r\nBody", "---\nuid: x\n# unterminated", "# No header\nuid: no", "---\n  nested: 1\nkey:\n---\n"] {
+    let fields = KasterFrontmatter.fields(in: sample)
+    for key in ["uid", "order", "card_id", "zotero-cite", "nested", "key"] {
+      precondition(fields[key] == KasterFrontmatter.value(key, in: sample), "fields[\(key)] = \(String(describing: fields[key])) vs \(String(describing: KasterFrontmatter.value(key, in: sample))) in \(sample.debugDescription)")
+    }
+  }
   print("Vault: retitling, filename titles and labelled links passed")
  }
 }

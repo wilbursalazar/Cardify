@@ -848,6 +848,8 @@ struct ContentView: View {
             if let data = outlineDraft.data(using: .utf8), let saved = try? JSONDecoder().decode(OutlineDocument.self, from: data) { outline = saved }
         }
         .onChange(of: text) { _ in if cardMode == "markdown" { scheduleAutosave() } }
+        // Files changed outside Kaster: show the new text in any open card you haven't edited.
+        .onChange(of: library.externalChange?.id) { _ in if let files = library.externalChange?.files { reloadOpenCards(files) } }
         .onChange(of: fileURL) { url in
             rememberOpenFile(url)
             rememberTab(url)

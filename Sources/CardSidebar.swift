@@ -25,6 +25,7 @@ enum NoteListSort: String, CaseIterable {
 struct CardSidebar: View {
     @ObservedObject var store: LibraryStore
     @State private var listCache = DerivedCache<[LibraryCard]>()
+    @State private var favoriteCache = DerivedCache<Set<String>>()
     let currentURL: URL?
     let openURLs: [URL]
     let draftTitle: String
@@ -270,10 +271,14 @@ struct CardSidebar: View {
             Button { onRenameFolder(row.path) } label: { Label("Rename Folder…", systemImage: "pencil") }
             Button { if let url = folderURL(row.path) { NSWorkspace.shared.activateFileViewerSelecting([url]) } } label: { Label("Show in Finder", systemImage: "folder") }
             Divider()
-            let cards = store.snapshot.cards.filter { $0.path.hasPrefix(row.path + "/") }
-                .sorted { ($0.cardID ?? "~" + $0.title).localizedStandardCompare($1.cardID ?? "~" + $1.title) == .orderedAscending }
-            Button { onPrint(cards.map(\.url), "in \(row.name)") } label: { Label("Print All Cards in \(row.name) (\(cards.count))", systemImage: "printer") }
-                .disabled(cards.isEmpty)
+            // Counted from the index; the sorted list is built only when the button is used.
+            let count = store.index.count(inFolder: row.path)
+            Button {
+                let cards = store.snapshot.cards.filter { $0.path.hasPrefix(row.path + "/") }
+                    .sorted { ($0.cardID ?? "~" + $0.title).localizedStandardCompare($1.cardID ?? "~" + $1.title) == .orderedAscending }
+                onPrint(cards.map(\.url), "in \(row.name)")
+            } label: { Label("Print All Cards in \(row.name) (\(count))", systemImage: "printer") }
+                .disabled(count == 0)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Folder \(row.name)")
@@ -458,7 +463,15 @@ struct CardSidebar: View {
         return KasterMode.allCases.first { $0.folder.caseInsensitiveCompare(String(first)) == .orderedSame }
     }
 
-    private func isFavorite(_ card: LibraryCard) -> Bool { KasterPathList.decode(favorites).contains(KasterPathList.key(card.url)) }
+    // Rows draw while scrolling: compare cached path strings, never ask the file system.
+    private var favoritePaths: Set<String> {
+        favoriteCache.value(for: "\(store.generation)|\(favorites)") {
+            Set(KasterPathList.decode(favorites).compactMap { store.index.card(for: URL(fileURLWithPath: $0))?.path })
+        }
+    }
+    private var currentPath: String? { currentURL.flatMap { store.index.card(for: $0)?.path } }
+    private var openPaths: Set<String> { Set(openURLs.compactMap { store.index.card(for: $0)?.path }) }
+    private func isFavorite(_ card: LibraryCard) -> Bool { favoritePaths.contains(card.path) }
 
     private func noteRow(_ card: LibraryCard) -> some View {
         let current = isCurrent(card)
@@ -574,15 +587,9 @@ struct CardSidebar: View {
         expandedFolders.formUnion(SidebarFolders.ancestors(of: card.path))
     }
 
-    private func isCurrent(_ card: LibraryCard) -> Bool {
-        guard let currentURL else { return false }
-        return currentURL.resolvingSymlinksInPath().standardizedFileURL == card.url.resolvingSymlinksInPath().standardizedFileURL
-    }
+    private func isCurrent(_ card: LibraryCard) -> Bool { currentPath == card.path }
 
-    private func isOpen(_ card: LibraryCard) -> Bool {
-        let url = card.url.resolvingSymlinksInPath().standardizedFileURL
-        return openURLs.contains { $0.resolvingSymlinksInPath().standardizedFileURL == url }
-    }
+    private func isOpen(_ card: LibraryCard) -> Bool { openPaths.contains(card.path) }
 
     private func open(_ card: LibraryCard) {
         guard !folder.isEmpty, !isCurrent(card) else { return }
@@ -607,6 +614,7 @@ struct CardSidebar: View {
     }
 
     private func scan() {
+        store.watch(folder: folder)
         store.scan(folder: folder) { rootChanged in
             if rootChanged { expandedFolders = [] }
             revealCurrentCard()

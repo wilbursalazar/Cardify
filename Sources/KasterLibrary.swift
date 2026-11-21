@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import CoreServices
 
 // One read-only scan of the notes folder, shared by the sidebar, the note list,
 // and the inspector's backlinks. Scanning never writes files.
@@ -23,6 +24,68 @@ final class LibraryStore: ObservableObject {
     private var queueSnapshot: (root: URL, snapshot: LibrarySnapshot)?
 
     func cancel() { scanID = UUID() }
+
+    // MARK: Watching the folder
+    /// Markdown files changed outside Kaster (Finder, Obsidian…), delivered after a short pause.
+    @Published private(set) var externalChange: (id: UUID, files: [URL])?
+    private var stream: FSEventStreamRef?
+    private var watchedFolder = ""
+    private var pendingFiles: Set<URL> = []
+    private var pendingStructure = false
+    private var flushWork: DispatchWorkItem?
+
+    /// Starts (or moves) the folder watch. Kaster's own writes come back as events too; refreshing
+    /// them again is harmless because a refresh only re-reads what changed.
+    func watch(folder: String) {
+        guard folder != watchedFolder else { return }
+        stopWatching()
+        watchedFolder = folder
+        guard !folder.isEmpty else { return }
+        var context = FSEventStreamContext(version: 0, info: Unmanaged.passUnretained(self).toOpaque(), retain: nil, release: nil, copyDescription: nil)
+        let callback: FSEventStreamCallback = { _, info, count, paths, flags, _ in
+            guard let info else { return }
+            let store = Unmanaged<LibraryStore>.fromOpaque(info).takeUnretainedValue()
+            let list = Unmanaged<CFArray>.fromOpaque(paths).takeUnretainedValue() as? [String] ?? []
+            let flagList = Array(UnsafeBufferPointer(start: flags, count: count))
+            DispatchQueue.main.async { store.received(paths: list, flags: flagList) }
+        }
+        let flags = UInt32(kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagNoDefer | kFSEventStreamCreateFlagUseCFTypes)
+        guard let created = FSEventStreamCreate(nil, callback, &context, [folder] as CFArray, FSEventStreamEventId(kFSEventStreamEventIdSinceNow), 0.3, flags) else { return }
+        stream = created
+        FSEventStreamSetDispatchQueue(created, DispatchQueue.global(qos: .utility))
+        FSEventStreamStart(created)
+    }
+
+    func stopWatching() {
+        if let stream { FSEventStreamStop(stream); FSEventStreamInvalidate(stream); FSEventStreamRelease(stream) }
+        stream = nil; watchedFolder = ""
+    }
+
+    private func received(paths: [String], flags: [FSEventStreamEventFlags]) {
+        for (path, flag) in zip(paths, flags) {
+            let isDirectory = flag & UInt32(kFSEventStreamEventFlagItemIsDir) != 0
+            let hidden = path.split(separator: "/").contains { $0.hasPrefix(".") }
+            if hidden { continue }
+            if isDirectory {
+                if flag & UInt32(kFSEventStreamEventFlagItemCreated | kFSEventStreamEventFlagItemRemoved | kFSEventStreamEventFlagItemRenamed) != 0 { pendingStructure = true }
+            } else if path.lowercased().hasSuffix(".md") {
+                pendingFiles.insert(URL(fileURLWithPath: path))
+            }
+            if flag & UInt32(kFSEventStreamEventFlagMustScanSubDirs | kFSEventStreamEventFlagRootChanged) != 0 { pendingStructure = true }
+        }
+        flushWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.flushChanges() }
+        flushWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
+    }
+
+    private func flushChanges() {
+        let folder = watchedFolder, files = Array(pendingFiles), structure = pendingStructure
+        pendingFiles = []; pendingStructure = false
+        guard !folder.isEmpty else { return }
+        if structure { scan(folder: folder) } else if !files.isEmpty { refresh(files: files, folder: folder) }
+        if !files.isEmpty { externalChange = (UUID(), files) }
+    }
 
     private static func extras(for cards: [LibraryCard]) -> (modified: [String: Date], created: [String: Date], themes: [String: [String]]) {
         var modified: [String: Date] = [:], created: [String: Date] = [:], themes: [String: [String]] = [:]
@@ -87,12 +150,24 @@ final class LibraryStore: ObservableObject {
         }
         loading = true; message = ""
         queue.async {
+            // A first scan of this folder shows the saved library at once, then scans for real.
+            if rootChanged, let cached = LibraryCache.load(root: root) {
+                let index = LibraryIndex(snapshot: cached.snapshot, root: root)
+                let folders = SidebarFolders.paths(in: root)
+                DispatchQueue.main.async {
+                    guard self.scanID == id, self.snapshot.cards.isEmpty else { return }
+                    self.snapshot = cached.snapshot; self.index = index; self.generation += 1
+                    self.folderPaths = folders; self.modified = cached.modified; self.created = cached.created
+                    self.loadedFolder = root.path
+                }
+            }
             let found = LibrarySnapshot.load(folder: root)
             self.queueSnapshot = found.map { (root, $0) }
             let folders = found == nil ? [] : SidebarFolders.paths(in: root)
             let extras = Self.extras(for: found?.cards ?? [])
             let modified = extras.modified, created = extras.created, themes = extras.themes
             let index = found.map { LibraryIndex(snapshot: $0, root: root) } ?? .empty
+            if let found { LibraryCache.save(found, modified: modified, created: created, root: root) }
             DispatchQueue.main.async {
                 guard self.scanID == id else { return }
                 self.loading = false

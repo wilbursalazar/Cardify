@@ -43,6 +43,13 @@ results.append(("Incremental update of one saved card", average(5) { updated = s
 precondition(updated.cards.count == count && updated.outgoing[updated.cards[10].path]?.contains(where: { $0.hasSuffix("Card 3") }) == true, "Incremental update sees the new link")
 let fresh = LibrarySnapshot.load(folder: root)!
 precondition(Set(fresh.incoming.keys) == Set(updated.incoming.keys) && fresh.outgoing.mapValues(Set.init) == updated.outgoing.mapValues(Set.init), "Incremental update matches a full scan")
+// Saved library: written after a scan, read back at launch before the real scan finishes.
+results.append(("Save library cache", ms { LibraryCache.save(fresh, modified: [:], created: [:], root: root) }))
+var cached: LibrarySnapshot?
+results.append(("Load library cache (launch head start)", ms { cached = LibraryCache.load(root: root)?.snapshot }))
+precondition(cached?.cards.count == count && cached?.cards.map(\.path) == fresh.cards.map(\.path) && cached?.incoming.count == fresh.incoming.count, "The cache restores the same cards and links")
+precondition(LibraryCache.load(root: root.appendingPathComponent("Zettel")) == nil, "A cache never applies to another folder")
+if let file = LibraryCache.file(for: root) { try? manager.removeItem(at: file) }
 for (name, value) in results { print(String(format: "%-44@ %9.2f ms", name as NSString, value)) }
 let lookup = results.first { $0.0 == "card(for:) indexed" }!.1, inc = results.first { $0.0 == "Incremental update of one saved card" }!.1
 precondition(lookup < 1 && inc < 150, "Indexed lookups must stay under 1 ms and incremental updates under 150 ms")

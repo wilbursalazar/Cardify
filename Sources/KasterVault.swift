@@ -101,6 +101,32 @@ enum KasterFrontmatter {
         return (newline, lines, end)
     }
 
+    /// Every top-level `key: value` in the header, read once (same rules as `value`).
+    /// Only the header is split into lines, so long cards cost no more than short ones.
+    static func fields(in text: String) -> [String: String] {
+        var body = Substring(text)
+        if body.hasPrefix("\u{feff}") { body = body.dropFirst() }
+        guard body.hasPrefix("---") else { return [:] }
+        var result: [String: String] = [:]
+        // "\r\n" is one Character in Swift, so split on either form.
+        let isBreak: (Character) -> Bool = { $0 == "\n" || $0 == "\r\n" }
+        var lines = body.split(maxSplits: 200, omittingEmptySubsequences: false, whereSeparator: isBreak).dropFirst().makeIterator()
+        guard body.split(maxSplits: 1, whereSeparator: isBreak).first?.trimmingCharacters(in: .whitespaces) == "---" else { return [:] }
+        while let raw = lines.next() {
+            let line = raw
+            if line.trimmingCharacters(in: .whitespaces) == "---" || line == "..." { return result }
+            guard let colon = line.firstIndex(of: ":"), line.first.map({ !$0.isWhitespace }) == true else { continue }
+            let key = String(line[..<colon])
+            guard result[key] == nil else { continue }
+            var value = String(line[line.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
+            if value.count >= 2, (value.hasPrefix("\"") && value.hasSuffix("\"")) || (value.hasPrefix("'") && value.hasSuffix("'")) {
+                value = String(value.dropFirst().dropLast())
+            }
+            if !value.isEmpty { result[key] = value }
+        }
+        return [:]  // unterminated header: ignored, as `value` does
+    }
+
     static func value(_ key: String, in text: String) -> String? {
         guard let parts = split(text), let end = parts.end else { return nil }
         for line in parts.lines[1..<end] where line.hasPrefix(key + ":") {
@@ -495,6 +521,8 @@ struct LibraryIndex {
     private let byUID: [String: Int]
     /// Research cards citing each Zotero item ("library/key").
     private let zoteroCiting: [String: [LibraryCard]]
+    /// Cards inside each folder path, including subfolders.
+    private let folderCounts: [String: Int]
     /// Luhmann-numbered cards in sequence order (Promote → Branch From…).
     let zettels: [LibraryCard]
 
@@ -505,14 +533,17 @@ struct LibraryIndex {
         incoming = snapshot.incoming; outgoing = snapshot.outgoing
         var byKey: [String: Int] = [:], byPath: [String: Int] = [:], orders: [String: Double] = [:]
         var modes: [String: KasterMode] = [:], ids: Set<String> = [], byMode: [KasterMode: [LibraryCard]] = [:], byUID: [String: Int] = [:]
-        var zoteroCiting: [String: [LibraryCard]] = [:]
+        var zoteroCiting: [String: [LibraryCard]] = [:], folderCounts: [String: Int] = [:]
         for (index, card) in snapshot.cards.enumerated() {
             byKey[card.url.standardizedFileURL.path] = byKey[card.url.standardizedFileURL.path] ?? index
             byPath[card.path] = byPath[card.path] ?? index
-            if let order = KasterFrontmatter.order(in: card.content) { orders[card.path] = order }
-            if let uid = KasterFrontmatter.value("uid", in: card.content) { byUID[uid] = byUID[uid] ?? index }
-            if let key = KasterFrontmatter.value("zotero", in: card.content) {
-                zoteroCiting[(KasterFrontmatter.value("zotero-library", in: card.content) ?? "personal") + "/" + key, default: []].append(card)
+            var folder = (card.path as NSString).deletingLastPathComponent
+            while !folder.isEmpty { folderCounts[folder, default: 0] += 1; folder = (folder as NSString).deletingLastPathComponent }
+            let header = KasterFrontmatter.fields(in: card.content)
+            if let order = header["order"].flatMap(Double.init) { orders[card.path] = order }
+            if let uid = header["uid"] { byUID[uid] = byUID[uid] ?? index }
+            if let key = header["zotero"] {
+                zoteroCiting[(header["zotero-library"] ?? "personal") + "/" + key, default: []].append(card)
             }
             // The card's relative path already names its type folder; avoid resolving paths per card.
             let first = card.path.split(separator: "/", maxSplits: 1).first.map(String.init) ?? ""
@@ -526,7 +557,7 @@ struct LibraryIndex {
             else if metadataID == nil, let id = BranchIDs.luhmannFilenameID(for: card.url) { ids.insert(id) }
             if let id = BranchIDs.debateFilenameID(for: card.url), id.caseInsensitiveCompare(metadataID ?? "") != .orderedSame { ids.insert(id) }
         }
-        self.byKey = byKey; self.byPath = byPath; self.orders = orders; self.modes = modes; self.ids = ids; self.byUID = byUID; self.zoteroCiting = zoteroCiting
+        self.byKey = byKey; self.byPath = byPath; self.orders = orders; self.modes = modes; self.ids = ids; self.byUID = byUID; self.zoteroCiting = zoteroCiting; self.folderCounts = folderCounts
         zettels = snapshot.cards.filter { $0.cardID.map(LuhmannIDs.isLuhmann) ?? false }
             .sorted { ($0.cardID ?? "").localizedStandardCompare($1.cardID ?? "") == .orderedAscending }
         self.byMode = byMode.mapValues { $0.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending } }
@@ -539,6 +570,7 @@ struct LibraryIndex {
         return nil
     }
     func card(path: String) -> LibraryCard? { byPath[path].map { cards[$0] } }
+    func count(inFolder path: String) -> Int { folderCounts[path] ?? 0 }
     func card(uid: String) -> LibraryCard? { byUID[uid].map { cards[$0] } }
     func cards(citingZotero key: String, library: String = "personal") -> [LibraryCard] { zoteroCiting[library + "/" + key] ?? [] }
 

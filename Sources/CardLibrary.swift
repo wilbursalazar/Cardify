@@ -269,9 +269,16 @@ extension LibrarySnapshot {
     func updating(_ files: [URL], root: URL) -> LibrarySnapshot {
         let rootPath = root.standardizedFileURL.path
         let prefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
+        // Deleted files can't be resolved, and /private/var vs /var spellings differ; try both.
+        func variants(_ path: String) -> [String] {
+            path.hasPrefix("/private/") ? [path, String(path.dropFirst("/private".count))] : [path, "/private" + path]
+        }
+        let prefixes = variants(prefix)
         func relativePath(_ url: URL) -> String? {
-            for candidate in [url.standardizedFileURL.path, url.resolvingSymlinksInPath().standardizedFileURL.path] where candidate.hasPrefix(prefix) {
-                return String(candidate.dropFirst(prefix.count).dropLast(url.pathExtension.count + 1))
+            for candidate in [url.path, url.standardizedFileURL.path, url.resolvingSymlinksInPath().standardizedFileURL.path].flatMap(variants) {
+                if let base = prefixes.first(where: { candidate.hasPrefix($0) }) {
+                    return String(candidate.dropFirst(base.count).dropLast(url.pathExtension.count + 1))
+                }
             }
             return nil
         }
@@ -314,5 +321,48 @@ extension LibrarySnapshot {
         for (path, targets) in partial.outgoing { outgoing[path] = targets }
         for (target, sources) in partial.incoming { incoming[target, default: []].append(contentsOf: sources) }
         return LibrarySnapshot(cards: newCards, outgoing: outgoing, incoming: incoming, unreadable: unreadable)
+    }
+}
+
+
+/// The last library scan, saved so a large vault lists its cards the moment Kaster opens.
+/// It is only a head start: a full scan always follows and replaces it.
+enum LibraryCache {
+    private struct Entry: Codable { let file: String; let title: String; let cardID: String?; let content: String; let modified: Date?; let created: Date? }
+    private struct Stored: Codable { let version: Int; let root: String; let entries: [Entry] }
+    private static let version = 1
+
+    static func file(for root: URL) -> URL? {
+        guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return nil }
+        let name = Data(root.path.utf8).base64EncodedString().replacingOccurrences(of: "/", with: "_").prefix(80)
+        let bundle = Bundle.main.bundleIdentifier ?? "kaster"
+        return caches.appendingPathComponent(bundle).appendingPathComponent("library-\(name).plist")
+    }
+
+    static func save(_ snapshot: LibrarySnapshot, modified: [String: Date], created: [String: Date], root: URL) {
+        guard let file = file(for: root) else { return }
+        let rootPath = root.standardizedFileURL.path
+        let entries = snapshot.cards.map { card -> Entry in
+            let name = card.path + "." + card.url.pathExtension
+            return Entry(file: name, title: card.title, cardID: card.cardID, content: card.content, modified: modified[card.path], created: created[card.path])
+        }
+        let encoder = PropertyListEncoder(); encoder.outputFormat = .binary
+        guard let data = try? encoder.encode(Stored(version: version, root: rootPath, entries: entries)) else { return }
+        try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? data.write(to: file, options: .atomic)
+    }
+
+    static func load(root: URL) -> (snapshot: LibrarySnapshot, modified: [String: Date], created: [String: Date])? {
+        guard let file = file(for: root), let data = try? Data(contentsOf: file),
+              let stored = try? PropertyListDecoder().decode(Stored.self, from: data),
+              stored.version == version, stored.root == root.standardizedFileURL.path else { return nil }
+        var modified: [String: Date] = [:], created: [String: Date] = [:]
+        let cards = stored.entries.map { entry -> LibraryCard in
+            let path = (entry.file as NSString).deletingPathExtension
+            modified[path] = entry.modified; created[path] = entry.created
+            return LibraryCard(url: root.appendingPathComponent(entry.file), path: path, title: entry.title, cardID: entry.cardID, content: entry.content)
+        }
+        let links = LibraryLinks.build(cards: cards)
+        return (LibrarySnapshot(cards: cards, outgoing: links.outgoing, incoming: links.incoming, unreadable: 0), modified, created)
     }
 }
